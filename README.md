@@ -12,6 +12,18 @@ the ESI data-layer and bar-contract specifications, the cost model, the signal
 translation table, the zKillboard assessment, the phased build order with
 validation gates, the risk register, and the explicit non-goals.
 
+## Documentation
+
+- [`plan.md`](plan.md) — the authoritative planning document (start here).
+- [`docs/DATA_CONTRACTS.md`](docs/DATA_CONTRACTS.md) — every schema the system
+  writes, in one place.
+- [`docs/ESI_CLIENT_RUNBOOK.md`](docs/ESI_CLIENT_RUNBOOK.md) — limits, the
+  telemetry ledger, and what to do when something trips.
+- [`docs/FIRST_SESSION_CHECKLIST.md`](docs/FIRST_SESSION_CHECKLIST.md) — clone
+  to first digest.
+- [`docs/decisions/`](docs/README.md#decision-records) — why each locked choice
+  was made.
+
 ## Running it
 
 Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.12.

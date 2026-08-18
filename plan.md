@@ -793,5 +793,6 @@ edits freely; this is the starting roster:
 | Decision | Value |
 |---|---|
 | Control set | `CLAUDE.md` (agent operating rules), `plan.md` (this file — roadmap + contracts), `CHANGELOG.md` (implemented inventory), `CURRENT_CHECKPOINT.md` (single active item + verification stamp). No AGENTS.md copy — one file, one truth |
+| Reference docs | `docs/` (added 2026-08-18) holds schemas, runbooks, and numbered decision records expanding §11's rationale. It is **subordinate**: where `docs/` and this table disagree, this table wins and the doc is stale. It is not a fifth control file — no roadmap, no status, no handoff notes there |
 | Status vocabulary | `IMPLEMENTED → GREEN → LIVE_VALIDATED → PROMOTED`, as defined in the source repo; only the operator promotes |
 | Session rule | One phase active at a time; a session that finishes a phase stops at its gate and hands the gate checklist to the operator |

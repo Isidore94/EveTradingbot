@@ -77,7 +77,15 @@ All timestamps tz-aware UTC.
 
 ## Where to read more
 
-- `plan.md` §0 — verified ESI facts and the six open named checks.
+- `plan.md` §0 — verified ESI facts, the six open named checks, and the Phase 0
+  live measurements.
 - `plan.md` §11 — every locked default (cadences, tiers, floors, watchlist,
   Discord contract, anchor calendar, governance).
-- `VENDORED.md` — provenance of code vendored from TradingBotV3 (once created).
+- `docs/` — reference material, **subordinate to the control set**. Where a file
+  there and `plan.md` §11 disagree, §11 wins and the file is stale. It holds
+  `DATA_CONTRACTS.md` (every schema in one place), `ESI_CLIENT_RUNBOOK.md`
+  (limits, the telemetry ledger, symptom→action), `FIRST_SESSION_CHECKLIST.md`,
+  and `decisions/` — numbered records expanding the *why* behind §11. Adding a
+  record never changes a decision; amending §11 does, and the record follows.
+- `VENDORED.md` — provenance of code vendored from TradingBotV3 (once created;
+  nothing is vendored before Phase 2).

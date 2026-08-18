@@ -144,6 +144,14 @@ get the account banned.
 
 - Do **not** start Phase 1 until the gate above is signed off in `CHANGELOG.md`
   as `LIVE_VALIDATED`.
+- `docs/` landed 2026-08-18 (no behaviour change, gate unaffected): fifteen
+  decision records under `docs/decisions/`, plus `DATA_CONTRACTS.md`,
+  `ESI_CLIENT_RUNBOOK.md`, and `FIRST_SESSION_CHECKLIST.md`. It is subordinate
+  to the control set — `plan.md` §11 still binds, and `docs/` must never grow a
+  roadmap, a status board, or handoff notes.
+- `AGENTS.md` was **not** created: §11 D8 forbids it. If a non-Claude agent
+  needs an entry point, the open option is a three-line pointer file (never a
+  copy of `CLAUDE.md`) and it is an operator decision.
 - `plan.md` §0 now carries a "Phase 0 live measurements" block: check #3 is
   answered on the data side (6 structures in The Forge, all buy-side, zero
   structure sell orders; Jita 4-4 holds 86.4% of Forge sell orders) and check

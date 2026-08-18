@@ -1,7 +1,9 @@
 # EVE Market Screener — port review, architecture decision, and phased plan
 
-Status: **PLANNING COMPLETE — Phase 0 (§8) is authorized. Implementation
-decisions are locked in §11; `CLAUDE.md` governs working sessions.**
+Status: **Phase 0 (§8) is IMPLEMENTED and GREEN as of 2026-08-18 and is holding
+at its live validation gate; Phase 1 is not authorized until that gate passes.
+Implementation decisions are locked in §11; `CLAUDE.md` governs working
+sessions.**
 Prepared 2026-08-18 against `Isidore94/TradingBotV3` branches `phase05-r8-weekend-prep`
 (primary, 208 commits ahead of `main`) and `phase05-r2-focus-gating-strength-board`
 (relative-strength work), following the source repo's mandatory reading order
@@ -108,10 +110,16 @@ Named checks still open (do these in Phase 0/1, do not assume):
    Check: fetch all pages twice inside one `Expires` window; diff by `order_id`.
    Mitigation regardless: one sweep per window, reconcile by `order_id`, and
    treat cross-page duplicates/gaps as data-quality counters, not errors.
+   **Partially answered in Phase 0** (see the measurement block below): the
+   reconciler is wired and a single 413-page sweep showed zero duplicate
+   `order_id`s. The two-sweeps-in-one-window diff is still owed; that is what
+   would actually settle the question, and it belongs to Phase 1.
 3. **Do public Upwell-structure orders appear in the region orders endpoint?**
    Check: scan a Forge sweep for `location_id` > 10¹² (structure IDs are 13-digit)
    and compare top-of-book against the in-game regional view. This decides how big
-   the structure blind spot actually is (§9).
+   the structure blind spot actually is (§9). **Measured in Phase 0** (below): they
+   do appear, but only on the buy side, and the sell side showed none at all. The
+   in-game half of the comparison is part of the Phase 0 gate.
 4. **Does CCP filter outlier trades out of history `highest`/`lowest`?** Check:
    find a known scam-trade day for a liquid type and inspect the bar. Drives the
    winsorization decision in §6 (ATR row).
@@ -119,6 +127,48 @@ Named checks still open (do these in Phase 0/1, do not assume):
    model): verify the current advanced-broker-fee surcharge in-client.
 6. **Sales tax / broker fee base rates** (7.5% / 3% assumed): verify in-client;
    CCP has changed these before.
+
+### Phase 0 live measurements (recorded 2026-08-18)
+
+Everything here came out of the Phase 0 build's own runs against live ESI. The
+raw evidence is the sweep ledger in `state.db` plus the recorded fixtures under
+`tests/fixtures/`.
+
+- **`X-Compatibility-Date` must name a day that has already passed on CCP's
+  UTC-11 clock.** The D2 pin of `2026-08-18` was rejected on every route with
+  `HTTP 400 {"error":"Compatibility date (2026-08-18) is in the future. Current
+  date (UTC-11) is 2026-08-17."}`. D2's pin is corrected to `2026-08-17` and
+  `selftest` now fails any pin that is not safely in the past. The *decision*
+  (pinned, never floated) is unchanged; only the value moved, because the
+  locked value could not be sent.
+- **Token arithmetic confirmed exactly as planned.** One full Forge order-book
+  sweep = **413 pages × 2 = 826 tokens**, headers `X-Ratelimit-Limit:
+  12000/15m`, `X-Ratelimit-Group: market-order`. 412,380 orders, 38 s wall clock
+  at concurrency 4.
+- **Page reconciliation (check #2, partial).** All 412,380 `order_id`s in that
+  sweep were distinct: zero cross-page duplicates.
+- **Structure blind spot (check #3).** 356 distinct `location_id`s in the sweep,
+  of which **6 are Upwell structures — all buy-side**. Structures held 24.3% of
+  buy orders by count but only 5.2% of buy ISK, and **0.000% of sell orders**.
+  Jita 4-4 (`60003760`) alone held **86.4% of all Forge sell orders**. The v1
+  sell-side blind spot in The Forge is, on this sweep, nil.
+- **PLEX does not trade on the Forge regional market.** Type 44992 has no
+  resting Forge orders at all, and its Forge history ends **2025-07-07** (7 bars
+  in the 13.5-month window). D4's roster carries a name this region cannot
+  price; the operator decides whether to drop it or to add the dedicated PLEX
+  region, which would be a §3.2 cadence change, not a config tweak.
+- **Top-of-book is exactly as untrustworthy as §9 R2 predicts.** 185 of the
+  16,699 Forge types with both sides quoted have a **crossed** region-wide book
+  (best bid above best ask) — 1.1%. Zydrine is the worked example: best ask
+  1,000 ISK against a 0.25B depth-walk of 1,198 ISK, with 95% of the bid volume
+  sitting in a single order. The depth walk priced the bait away without special
+  handling. Screens rank on the walk; `spread` is displayed but flagged.
+- **History contract holds.** 412 daily rows for type 34, `Expires` at 11:05 UTC,
+  field set exactly `date/average/highest/lowest/volume/order_count`. The
+  completed-bar rule (§4) was verified against it: at 02:20 UTC on 2026-08-18 the
+  newest published bar was dated 2026-08-16, which is what the rule returns.
+- **SDE.** Build 3470007 (released 2026-08-17), 52,863 types loaded. All 50 D4
+  watchlist names resolved.
 
 ---
 
@@ -538,7 +588,8 @@ Discipline carried from `plan.md` §7: each phase ends `IMPLEMENTED → GREEN`
 and scoring changes after Phase 2 require fixture regeneration first. One phase
 active at a time; `CURRENT_CHECKPOINT.md` in this repo names it.
 
-**Phase 0 — First light (one evening, falsifiable).**
+**Phase 0 — First light (one evening, falsifiable). — IMPLEMENTED → GREEN
+2026-08-18; live gate owed.**
 Scaffold repo (pyproject, pinned deps, data dir, config). Minimal ESI client
 (UA, ETag store, Expires-respecting scheduler, telemetry ledger). Hand-curated
 ~50-type Forge watchlist (hulls, ammo, minerals the operator already knows).
@@ -551,6 +602,10 @@ volumes within the cache window); tax/fee arithmetic reproduced against one
 real fill the operator makes; telemetry shows every request honored expiry and
 budget headers. **Falsified if** any spot-check disagrees beyond cache-window
 tolerance or the fee math misses the real fill by > 0.1%.
+Two operator decisions ride along with this gate, both raised by the Phase 0
+measurements in §0: whether **PLEX** stays on the D4 roster given that The Forge
+does not price it, and whether the corrected `X-Compatibility-Date` pin stands.
+Neither blocks the spot-checks.
 
 **Phase 1 — Universe census (weekend).**
 `/markets/10000002/types` + full one-time history crawl (§3.2). Measure: type
@@ -683,7 +738,7 @@ mirrors the source repo's decision-record discipline, ADR-style, in one table.)
 | Data dir default | `./data/` (lake + `state.db` + JSONL streams, per §3.5) |
 | Secrets | Discord webhook URL lives in `config.toml` only. No secret ever committed; `selftest` fails if the example file and real config key sets diverge |
 | User-Agent | `EveTradingbot/{version} (aaron.siano@gmail.com; +https://github.com/Isidore94/EveTradingbot)` — operator contact per CCP best practices. The version string tracks `pyproject.toml` |
-| X-Compatibility-Date | Pinned `2026-08-18`; bumped deliberately, never floated |
+| X-Compatibility-Date | Pinned `2026-08-17`; bumped deliberately, never floated. **Corrected 2026-08-18 (Phase 0):** the original `2026-08-18` pin was rejected by ESI on every route — CCP evaluates the header against a UTC-11 clock, so a date must have passed everywhere before it can be sent. The pin must always name a fully-past day; `selftest` enforces it |
 
 ### D3 — Cadence and cost defaults (config keys, with locked defaults)
 

@@ -1,0 +1,99 @@
+# EveTradingbot configuration — committed mirror of config.toml (plan.md §11 D2).
+#
+# Copy to config.toml (gitignored) and fill in the operator-specific values.
+# `python -m evescreener selftest` fails if the two files' key sets diverge, so
+# every key added here must also be added there, and vice versa.
+#
+# The only environment override in v1 is EVESCREENER_DATA_DIR (D2).
+
+[esi]
+# Public ESI root. No authenticated routes are used, ever (plan.md §10.8).
+base_url = "https://esi.evetech.net"
+# Descriptive User-Agent with operator contact (§3.1, D2). Never a library
+# default — CCP has publicly named default agents. {version} interpolates
+# the version in pyproject.toml.
+user_agent = "EveTradingbot/{version} (aaron.siano@gmail.com; +https://github.com/Isidore94/EveTradingbot)"
+# Pinned compatibility date (D2). Bumped deliberately, never floated.
+# ESI rejects a date that is in the future on its own UTC-11 clock, so this
+# must always name a day that has fully passed everywhere.
+compatibility_date = "2026-08-17"
+# Per-request timeout, seconds.
+timeout_seconds = 30.0
+# Bounded retries on 5xx and transport errors only; 4xx is never retried (§3.3).
+max_retries = 3
+# Exponential backoff base, seconds: 2 / 4 / 8 plus jitter (§3.3).
+retry_backoff_seconds = 2.0
+# Jitter added to every scheduled refresh and retry, seconds (§3.1).
+jitter_seconds = 5.0
+# Concurrent in-flight requests during a paged orders sweep. Kept small: one
+# operator, one IP, no fan-out (R4).
+orders_concurrency = 4
+
+[budget]
+# Observed token regime for the `market-order` group (§0, §3.2).
+orders_tokens_per_window = 12000
+# Self-imposed hard stop at 50% of budget so a bug can never spend to the
+# cap (§3.2, D3). Orders fetches stop dead when the rolling window estimate
+# reaches this.
+orders_token_hard_stop = 6000
+# History is outside the token regime: CCP states 300 req/min/IP; we take 50%.
+history_requests_per_minute = 150
+# HTTP 420 (legacy error limit, all routes): full stop for this long (§3.2).
+error_limit_stop_seconds = 60
+
+[market]
+# The Forge. v1 is Forge-only; secondary hubs are Phase 6 (§3.2).
+region_id = 10000002
+# Notional tiers for the depth walk, ISK (§3.4, §5, D3).
+notional_tiers_isk = [250000000.0, 1000000000.0, 2500000000.0]
+# A book sweep older than this renders depth cost as UNKNOWN rather than
+# silently pricing off a stale snapshot (§5).
+book_staleness_minutes = 60
+
+[schedule]
+# All times UTC — EVE time is UTC and the digest displays UTC only (D1).
+# Daily digest build (D3).
+digest_utc = "16:00"
+# Daily history refresh, after the 11:05 UTC expiry and downtime (D3, §3.2).
+history_job_utc = "11:20"
+# HOT book window: sweep every cache window inside it, hourly outside (D3).
+book_hot_start_utc = "15:00"
+book_hot_end_utc = "17:00"
+book_cold_interval_minutes = 60
+
+[costs]
+# Skills are config, not constants (§5). Defaults: Accounting V,
+# Broker Relations V.
+accounting_level = 5
+broker_relations_level = 5
+# Sales tax base, percent, paid on every sell: 7.5 * (1 - 0.11 * Accounting)
+# => 3.375% at V. Verify in-client (plan.md §0 check #6).
+sales_tax_base_pct = 7.5
+# Effective broker fee, percent, paid on posting/modifying an order only —
+# never on taker fills. D3 locks 1.0% at Broker Relations V plus standings;
+# checks #5 (relist surcharge) and #6 (base rate) may correct this.
+broker_fee_effective_pct = 1.0
+
+[liquidity]
+# Pre-census floor (D3, §3.6). Phase 1's census re-derives both numbers.
+min_median_isk_value_30d = 100000000.0
+min_median_order_count_30d = 30
+
+[discord]
+# Webhook, not a bot, in v1 (D6). Secret: lives here and is never committed.
+# Empty string means unconfigured — the digest is rendered and archived, and
+# the delivery result is reported as `unconfigured` rather than failing.
+webhook_url = ""
+# Discord's per-message content cap. The digest splits into numbered
+# messages rather than truncating silently (D6).
+max_content_chars = 2000
+
+[sde]
+# Official reworked static data (§0, §3.6). The build manifest names the
+# current build number; the jsonl bundle is derived from it.
+manifest_url = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl"
+bundle_url_template = "https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-{build}-jsonl.zip"
+
+[storage]
+# Lake + state.db + JSONL streams (§3.5). EVESCREENER_DATA_DIR overrides this.
+data_dir = "./data"

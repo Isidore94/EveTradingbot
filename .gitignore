@@ -1,0 +1,13 @@
+# Operator configuration and secrets (D2: config.example.toml is the committed mirror)
+config.toml
+
+# Default data dir (D2/§3.5): Parquet lake, state.db, JSONL streams
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

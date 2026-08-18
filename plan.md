@@ -1,6 +1,7 @@
 # EVE Market Screener — port review, architecture decision, and phased plan
 
-Status: **PLANNING — no implementation authorized by this document alone.**
+Status: **PLANNING COMPLETE — Phase 0 (§8) is authorized. Implementation
+decisions are locked in §11; `CLAUDE.md` governs working sessions.**
 Prepared 2026-08-18 against `Isidore94/TradingBotV3` branches `phase05-r8-weekend-prep`
 (primary, 208 commits ahead of `main`) and `phase05-r2-focus-gating-strength-board`
 (relative-strength work), following the source repo's mandatory reading order
@@ -648,3 +649,94 @@ are permanent, not deferred:
 8. **No authenticated ESI in v1.** Public endpoints only; the structure-market
    question (R3) is answered by exclusion and measurement, not by SSO scope
    creep. Revisiting this is a plan-level decision, not a convenience patch.
+
+---
+
+## 11. Locked implementation decisions
+
+Decided 2026-08-18, before any code exists — the only moment these are free.
+The implementing agent follows these without re-litigating; changing one is a
+plan-level edit with a stated reason, not a session-level convenience. (This
+mirrors the source repo's decision-record discipline, ADR-style, in one table.)
+
+### D1 — Runtime, tooling, layout
+
+| Decision | Value |
+|---|---|
+| Language / version | Python ≥ 3.12 |
+| Package manager | **uv** (`pyproject.toml` + `uv.lock` committed; no requirements.txt layering — there is no GUI tier to layer) |
+| Package name / layout | `src/evescreener/` package; vendored files under `src/evescreener/vendored/` with `VENDORED.md` at repo root |
+| Runtime deps | `httpx[http2]`, `pandas`, `pyarrow`, `numpy` — and nothing else in v1. No ORM, no pydantic; config is stdlib `tomllib` into frozen dataclasses |
+| Dev deps | `pytest`, `ruff` (lint **and** format) |
+| Lint policy | ruff defaults + `I` (isort); no per-file exemptions — this repo never grows a lint-exempt monolith |
+| Entry point | `python -m evescreener <cmd>`; subcommands: `daemon`, `ingest-history`, `sweep-books`, `census`, `digest`, `selftest` |
+| Process model | One asyncio scheduler process (`daemon`) owning all cadences (§3.2). Individual subcommands run the same jobs once, for manual/backfill use |
+| Host | The always-on mini-PC, in its own directory and venv, fully isolated from TradingBotV3. Registered via Windows Task Scheduler at logon; the code stays OS-agnostic (no Windows-only APIs) |
+| Timezone rule | All internal timestamps tz-aware UTC. EVE time *is* UTC; the digest displays UTC only |
+
+### D2 — Configuration
+
+| Decision | Value |
+|---|---|
+| Config file | `config.toml` at repo root, **gitignored**; `config.example.toml` committed with every key present and commented |
+| Env override | `EVESCREENER_DATA_DIR` overrides the data dir; nothing else needs an env var in v1 |
+| Data dir default | `./data/` (lake + `state.db` + JSONL streams, per §3.5) |
+| Secrets | Discord webhook URL lives in `config.toml` only. No secret ever committed; `selftest` fails if the example file and real config key sets diverge |
+| User-Agent | `EveTradingbot/{version} (aaron.siano@gmail.com; +https://github.com/Isidore94/EveTradingbot)` — operator contact per CCP best practices. The version string tracks `pyproject.toml` |
+| X-Compatibility-Date | Pinned `2026-08-18`; bumped deliberately, never floated |
+
+### D3 — Cadence and cost defaults (config keys, with locked defaults)
+
+| Decision | Value |
+|---|---|
+| Digest build time | daily **16:00 UTC** (also on demand via `digest`) |
+| Forge book HOT window | **15:00–17:00 UTC**: sweep every cache window (~5 min). Outside it: hourly. (§3.2's dial, resolved) |
+| History job | daily **11:20 UTC** (§3.2) |
+| Notional tiers | 0.25B / 1.0B / 2.5B ISK (§3.4, §5) |
+| Liquidity floor (pre-census) | median 30d `isk_value` ≥ 100M ISK **and** median `order_count` ≥ 30; Phase 1's census re-derives and this row is updated with the measured values |
+| Skills | Accounting V (tax 3.375%), Broker Relations V (fee 1.0%) as config defaults (§5); checks #5/#6 may correct the constants |
+| Budget self-caps | orders: 6,000 tokens/window hard stop; history: 150 req/min (§3.2) |
+
+### D4 — Phase 0 seed watchlist (50 names)
+
+Resolved to type_ids against the SDE at ingest; **an unresolvable name is a
+loud error, never a silent skip** (names drift across patches). The operator
+edits freely; this is the starting roster:
+
+- **Minerals (8):** Tritanium, Pyerite, Mexallon, Isogen, Nocxium, Zydrine, Megacyte, Morphite
+- **Fuel (6):** Nitrogen Fuel Block, Oxygen Fuel Block, Helium Fuel Block, Hydrogen Fuel Block, Nitrogen Isotopes, Helium Isotopes
+- **Account-tier (3):** PLEX, Large Skill Injector, Skill Extractor
+- **Consumables/charges (6):** Nanite Repair Paste, Antimatter Charge M, Antimatter Charge L, Scourge Light Missile, Scourge Heavy Missile, Inferno Heavy Missile
+- **Drones (3):** Hobgoblin II, Hammerhead II, Ogre II
+- **T2 module staples (12):** Damage Control II, Large Shield Extender II, Ballistic Control System II, Gyrostabilizer II, Heat Sink II, Magnetic Field Stabilizer II, Drone Damage Amplifier II, 10MN Afterburner II, 50MN Microwarpdrive II, Warp Disruptor II, Warp Scrambler II, Stasis Webifier II
+- **Hulls (12):** Caracal, Vexor, Drake, Ferox, Hurricane, Myrmidon, Gila, Ishtar, Praxis, Dominix, Raven, Megathron
+
+### D5 — Testing and fixtures
+
+| Decision | Value |
+|---|---|
+| Test policy | Offline by default; live calls only under `@pytest.mark.network`, run intentionally. CI-equivalent gate = `pytest -q` green + `ruff check` clean before every commit |
+| Fixtures | Golden fixtures under `tests/fixtures/`: recorded ESI responses (JSON) and frozen expected frames. From Phase 2, detector/scoring changes regenerate fixtures **first** (source-repo rule, kept) |
+| Fixture provenance | Every fixture carries `acquired_at`, source URL, and the `X-Compatibility-Date` it was recorded under |
+
+### D6 — Delivery
+
+| Decision | Value |
+|---|---|
+| Discord mechanism | **Webhook** (not a bot) in v1. One channel. The ported `push_notify` contract keeps `unconfigured/delivered/rejected/ambiguous` + new `rate_limited` (429 + `retry_after`) |
+| Digest length | Content ≤ 2,000 chars per message; the digest splits into numbered messages rather than truncating silently (the source repo's "say when a line was dropped" contract) |
+| Urgency | No @here/@everyone in v1 — nothing in a D1 screener is urgent. Revisit only if a price-alert feature is ever added, as its own decision |
+
+### D7 — Anchors
+
+| Decision | Value |
+|---|---|
+| Anchor calendar | `config/anchors.jsonl` (committed — it is data, not secret): `{date, label, scope}` where scope is `global` or a `market_group_id` subtree. **Operator seeds it during Phase 2's gate** with the patch/expansion dates he considers live; the Phase 2 RSS watcher appends candidates for his confirmation, never auto-anchors |
+
+### D8 — Governance
+
+| Decision | Value |
+|---|---|
+| Control set | `CLAUDE.md` (agent operating rules), `plan.md` (this file — roadmap + contracts), `CHANGELOG.md` (implemented inventory), `CURRENT_CHECKPOINT.md` (single active item + verification stamp). No AGENTS.md copy — one file, one truth |
+| Status vocabulary | `IMPLEMENTED → GREEN → LIVE_VALIDATED → PROMOTED`, as defined in the source repo; only the operator promotes |
+| Session rule | One phase active at a time; a session that finishes a phase stops at its gate and hands the gate checklist to the operator |

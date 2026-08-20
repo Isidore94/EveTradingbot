@@ -51,18 +51,26 @@ evidence.
 
 - [ ] **Bands and levels spot-checked** against Adam4EVE or the in-game chart
       for 10 types across 3 market groups.
-- [ ] **Seed the anchor calendar.** `config/anchors.jsonl` currently ships
-      every date as `confirmed: false` on purpose — they are placeholders, and
-      the signal layer ignores unconfirmed anchors. Replace them with the patch
-      dates you consider live and flip `confirmed` to `true`. **Until this is
-      done the system anchors on a synthetic 90-day grid**, which works but is
-      not the patch-anchored read the design is built around.
+- [ ] **Confirm the anchor calendar.** `config/anchors.jsonl` now carries seven
+      **real** dates pulled from the official patch-notes feed (Revenant,
+      Legion, Catalyst, Cradle of War and three version patches). They ship as
+      `confirmed: false` because which of them counts as a live anchor for
+      *your* items is your judgement, not the feed's — a version patch that
+      rebalances one hull is not the same event as an expansion. Flip the ones
+      you want to `true`. **Until then the system anchors on a synthetic
+      90-day grid**, which works but is not the patch-anchored read the design
+      is built around. `python -m evescreener anchors` refreshes candidates
+      (it can never confirm one); `--list` shows the calendar.
 - [ ] **Resolve §0 check #1** (is ESI `average` volume-weighted or a plain
       mean?) by comparing ~20 types' `average` against Fuzzwork's same-day
       `weightedAverage`. The bar contract tolerates either answer; the answer
       belongs in `plan.md` §4.
-- [ ] **Resolve §0 check #4** (does CCP filter outlier prints out of
-      `highest`/`lowest`?). TR winsorization mitigates it either way.
+- [x] **§0 check #4 is ANSWERED** — CCP does *not* filter outlier prints.
+      Measured over 1,854,651 real bars: `high/close` reaches 1,940,777× and
+      `close/low` reaches 12.8 billion×. Winsorization clamps 7.9% of bars and
+      touches 79% of tracked types; without it **20.5% of types would carry a
+      risk unit more than twice too large** (worst case 2,433×). Nothing is
+      owed here — it is recorded in `plan.md` §17.
 
 ### D. Ranking and delivery (was Phase 3's gate)
 
@@ -109,8 +117,10 @@ evidence.
 
 - One phase at a time resumes after this gate. The single-push override was
   scoped to this build only (plan.md §17 D-1).
-- `plan.md` §0 checks #1, #5 and #6 remain **OPEN**; #2, #3 and #4 are
-  instrumented or mitigated but not resolved. §17 records the status.
+- `plan.md` §0 checks **#1, #5 and #6 remain OPEN** — all three need the
+  operator (a Fuzzwork cross-check for #1, one real fill for #5 and #6).
+  **#3 and #4 are ANSWERED** by measurement and #2 is partially answered; §17
+  records all of it.
 - The unconfirmed anchor calendar is the single largest gap between what the
-  system does today and what it was designed to do. It is a data-entry task,
-  not a code task.
+  system does today and what it was designed to do. It is now a *confirmation*
+  task — the real dates are already in the file — not a data-entry task.

@@ -10,8 +10,6 @@ ledger with the same refusals as the CLI.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -22,88 +20,11 @@ pytest.importorskip("PySide6.QtWidgets")
 pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.gui
 
-from evescreener.gui.data import DeskData  # noqa: E402
-from evescreener.gui.widgets import SortableTable  # noqa: E402
-
-NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
-
-
-def lake(type_ids, *, bars=200, seed=3):
-    rng = np.random.default_rng(seed)
-    stamps = pd.date_range("2026-01-01 11:00", periods=bars, freq="D", tz="UTC")
-    rows = []
-    for offset, type_id in enumerate(type_ids):
-        close = 100.0 * (offset + 1) * np.exp(np.cumsum(rng.normal(0.0, 0.02, bars)))
-        for position, stamp in enumerate(stamps):
-            rows.append(
-                {
-                    "type_id": type_id,
-                    "region_id": 10000002,
-                    "datetime": stamp,
-                    "high": close[position] * 1.02,
-                    "low": close[position] * 0.98,
-                    "close": close[position],
-                    "volume": 50_000.0,
-                    "order_count": 40,
-                    "isk_value": close[position] * 50_000.0,
-                    "fetched_at": "2026-08-20T00:00:00+00:00",
-                }
-            )
-    return pd.DataFrame(rows)
-
-
-def book(*, sweep="2026-08-20T11:58:00+00:00", type_ids=(600,)):
-    rows = []
-    for type_id in type_ids:
-        for side, best, fill in (("sell", 105.0, 106.0), ("buy", 95.0, 94.0)):
-            row = {
-                "type_id": type_id,
-                "region_id": 10000002,
-                "side": side,
-                "sweep_ts": sweep,
-                "expires_ts": None,
-                "best_price": best,
-                "total_volume": 1e9,
-                "order_count": 20,
-                "p5_price": best,
-                "top_order_volume_share": 0.05,
-                "station_volume_share": 1.0,
-                "partial_sweep": False,
-            }
-            for index in range(3):
-                row[f"depth_fill_price_{index}"] = fill if index == 0 else None
-                row[f"depth_fill_qty_{index}"] = 10_000_000.0 if index == 0 else None
-            rows.append(row)
-    return pd.DataFrame(rows)
-
-
-@pytest.fixture
-def desk(config, db):
-    """A DeskData built by hand — no disk crawl, no network, no ESI client."""
-    db.replace_market_groups([(4, None, "Ships"), (100, 4, "Cruisers")])
-    db.replace_types([(600 + n, f"Thing {n}", 100, 1.0, 1.0, 1) for n in range(6)])
-    frame = lake(range(600, 606))
-    db.conn.execute(
-        "INSERT INTO universe(type_id, region_id, first_seen, last_seen, tier, tracked,"
-        " median_unit_volume, source) VALUES(600, 10000002, 'x', 'y', 'THIN', 1, 400, 't')"
-    )
-    for type_id in range(601, 606):
-        db.conn.execute(
-            "INSERT INTO universe(type_id, region_id, first_seen, last_seen, tier, tracked,"
-            " median_unit_volume, source) VALUES(?, 10000002, 'x', 'y', 'OK', 1, 50000, 't')",
-            (type_id,),
-        )
-    return DeskData(
-        config=config,
-        db=db,
-        region_id=10000002,
-        loaded_at=NOW,
-        bars=frame,
-        all_bars=frame,
-        book=book(type_ids=range(600, 606)),
-        tiers={600: "THIN", **{n: "OK" for n in range(601, 606)}},
-    )
-
+from conftest import DESK_NOW as NOW  # noqa: E402
+from conftest import desk_book as book  # noqa: E402
+from conftest import desk_lake as lake  # noqa: E402,F401
+from evescreener.gui.data import DeskData  # noqa: E402,F401
+from evescreener.gui.widgets import SortableTable  # noqa: E402,F401
 
 # -- every page opens -------------------------------------------------------
 
@@ -335,7 +256,6 @@ def test_the_chart_draws_no_synthesized_open(qtbot, desk):
 
 def test_candles_colour_against_the_previous_average_not_an_open():
     """Up/down compares two averages, both of which are measured numbers."""
-    import numpy as np
 
     from evescreener.gui.chart import DOWN_COLOUR, FLAT_COLOUR, UP_COLOUR, bar_colours
 
@@ -410,7 +330,6 @@ def test_the_chart_opens_on_the_whole_series(qtbot, desk):
 
 def test_an_index_is_drawn_as_a_line_because_it_has_no_range(qtbot, desk):
     """`composite.py` builds high == low == close; candles there are dashes."""
-    import numpy as np
 
     from evescreener.gui.chart import ChartSeries
 

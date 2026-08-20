@@ -121,6 +121,17 @@ class SpreadsPage(DeskPage):
             self.paint(self._result)
 
     # -- compute -----------------------------------------------------------
+    def job_input(self) -> tuple:
+        """The hub selection, read on the GUI thread (§21 R7).
+
+        `compute()` used to call `QComboBox.currentData()` on a worker thread.
+        Qt widgets are not thread-safe and the selection can change mid-read,
+        so the regions are frozen into a tuple here and handed to the job.
+        """
+        if not hasattr(self, "hub"):
+            return ()
+        return tuple(int(region) for region in (self.hub.currentData() or ()))
+
     def compute(self, data):
         """Off-thread. Builds its own name/volume/average maps, per region.
 
@@ -128,7 +139,10 @@ class SpreadsPage(DeskPage):
         average would be a quiet lie, and a hub the census has never run on
         gets an empty map and reports NO_AVG, which is the true answer.
         """
-        regions = [int(region) for region in (self.hub.currentData() or ())]
+        # The hub selection, frozen on the GUI thread by `job_input()` before
+        # this job was dispatched. Reading the combo box here would be a
+        # cross-thread widget access (§21 R7).
+        regions = [int(region) for region in (self._running_input or ())]
         volumes: dict[int, dict[int, float]] = {}
         averages: dict[int, dict[int, float]] = {}
         names: dict[int, str] = {}

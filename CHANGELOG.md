@@ -5,6 +5,31 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The threading contract, held structurally (§21 R7)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R7. `uv run pytest -q` ->
+**702 passed, 7 deselected**, ruff check + format clean.
+
+Three defects of the same shape: a rule that held by convention.
+
+- **Widget reads happened off the GUI thread.** `SpreadsPage.compute()` called
+  `QComboBox.currentData()` on a worker; Qt widgets are not thread-safe and the
+  value can change mid-read. `DeskPage.job_input()` captures widget state into
+  an immutable tuple on the GUI thread before dispatch, and a test walks the
+  AST of every `compute()` under `gui/` to fail on any widget access.
+- **An input change during a job was declined, then painted stale.** Running
+  input and queued input are tracked separately now: a change during a job is
+  remembered, a result whose input has been superseded is discarded rather than
+  painted, and a follow-up computation is guaranteed.
+- **A worker could emit into a deleted page.** `PageJob.cancel()` makes a job
+  emit nothing, checked before the work starts and again before the emit;
+  `DeskPage.shutdown()` cancels and disconnects; `DeskWindow.closeEvent` shuts
+  every page down before the widgets go.
+
+The `desk` fixture and its helpers moved from `test_gui.py` into
+`conftest.py`, so two test modules cannot drift on what a `DeskData` is; the
+book helper now carries R1's executable-identity columns.
+
 ## 2026-08-20 — Freshness must change the number that is ranked (§21 R6)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R6. `uv run pytest -q` ->

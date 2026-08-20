@@ -155,6 +155,18 @@ class DeskWindow(QMainWindow):
             self.show_page("CHARTS")
         host.show_type(int(type_id))
 
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """Stop every page's worker before the widgets go away (§21 R7).
+
+        A running job holds a reference to its page's signal object. Closing
+        the window mid-compute used to deliver `finished` into a destroyed
+        QObject — `RuntimeError: Signal source has been deleted`.
+        """
+        self.timer.stop()
+        for page in self.pages.values():
+            page.shutdown()
+        super().closeEvent(event)
+
     # -- refresh -----------------------------------------------------------
     def tick(self) -> None:
         """The timer's job: notice whether anything on disk actually moved.

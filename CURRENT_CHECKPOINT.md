@@ -55,8 +55,8 @@ adjacent.
 | **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
 | **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
 | **R6** | Learning freshness and eligible-sample handling | **IMPLEMENTED + GREEN** |
-| **R7** | Desk threading, invalidation and worker lifecycle | **NEXT** |
-| R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
+| **R7** | Desk threading, invalidation and worker lifecycle | **IMPLEMENTED + GREEN** |
+| **R8** | GUI network isolation, chart parity, regional data, stale docs | **NEXT** |
 
 ### R1 owed live gate
 

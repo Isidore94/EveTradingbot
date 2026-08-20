@@ -53,7 +53,7 @@ class PageJob(QRunnable):
     opportunity" and a stamped stale result reads as what it is.
     """
 
-    def __init__(self, compute, data, token) -> None:
+    def __init__(self, compute, data, token, job_input=None) -> None:
         super().__init__()
         # NOT auto-delete. Qt would free the runnable as soon as `run` returns,
         # and `signals` is an attribute of it — a queued emit could then be
@@ -63,11 +63,29 @@ class PageJob(QRunnable):
         self._compute = compute
         self._data = data
         self._token = token
+        #: Immutable snapshot of every widget-derived value this job needs,
+        #: captured on the GUI thread before dispatch (§21 R7).
+        self.job_input = job_input
+        self.cancelled = False
         self.signals = DeskWorkSignals()
 
+    def cancel(self) -> None:
+        """Abandon this job. A cancelled job emits nothing, ever.
+
+        The window closing mid-compute used to deliver `finished` into a
+        destroyed page — `RuntimeError: Signal source has been deleted`.
+        Cancellation is checked both before the work starts and again before
+        the emit, because the page can go away during the computation itself.
+        """
+        self.cancelled = True
+
     def run(self) -> None:  # pragma: no cover - exercised through the pages
+        if self.cancelled:
+            return
         try:
             result = self._compute(self._data)
         except Exception as exc:  # noqa: BLE001 - delivered to the page, never swallowed
             result = exc
+        if self.cancelled:
+            return
         self.signals.finished.emit(self._token, result)

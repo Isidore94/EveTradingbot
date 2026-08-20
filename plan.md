@@ -1606,7 +1606,7 @@ it is adjacent.**
 | **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
 | **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
 | **R6** | Learning freshness and eligible-sample handling | **IMPLEMENTED + GREEN** |
-| R7 | Desk threading, invalidation and worker lifecycle | not started |
+| **R7** | Desk threading, invalidation and worker lifecycle | **IMPLEMENTED + GREEN** |
 | R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
 
 The consolidated live-validation checklist in `CURRENT_CHECKPOINT.md` is
@@ -1865,3 +1865,44 @@ ranked on their lower bound, and a test asserts the module still never writes
 closed trade, so every LEARNING row is still UNVALIDATED and every number on it
 UNKNOWN — correctly. The ranking change cannot be observed until real closed
 trades exist.
+
+### §21 R7 — The threading contract, held structurally — **IMPLEMENTED + GREEN**
+
+Three defects of the same shape: a rule that held by convention.
+
+**1. Widget reads happened off the GUI thread.** `SpreadsPage.compute()`
+called `QComboBox.currentData()` on a worker. Qt widgets are not thread-safe
+and the value can change mid-read. `DeskPage.job_input()` now captures every
+widget-derived value into an **immutable tuple on the GUI thread**, immediately
+before dispatch, and `compute()` reads it back through `self._running_input`.
+A test walks the AST of every `compute()` under `gui/` and fails on any widget
+access — a rule this easy to forget has to be structural, not remembered.
+
+**2. An input change during a job was declined, then painted stale.**
+`ensure_current()` returned early while a job was in flight, so the newer input
+never got its own computation and the older result was painted over it. The
+running input and the queued input are now tracked separately: a change during
+a job is **remembered**, a result whose input has been superseded is
+**discarded** rather than painted, and a follow-up computation is guaranteed.
+
+**3. A worker could emit into a deleted page.** Closing the window mid-compute
+delivered `finished` to a destroyed `QObject` — the
+`RuntimeError: Signal source has been deleted` seen during teardown.
+`PageJob.cancel()` makes a job emit nothing, checked both before the work
+starts and again before the emit, because the page can go away during the
+computation itself. `DeskPage.shutdown()` cancels and disconnects, and
+`DeskWindow.closeEvent` shuts every page down before the widgets go.
+
+**SQLite is unchanged and still correct**: `thread_local_db()` opens a
+connection in the worker and closes it there, and a test asserts every
+`compute()` that uses it does so inside a `with` block.
+
+**Test-fixture consolidation.** The `desk` fixture and its lake/book helpers
+moved from `test_gui.py` into `conftest.py`, so two test modules cannot drift
+apart on what a `DeskData` looks like. The book helper now carries R1's
+executable-identity columns.
+
+**Owed live gate (§21 R7).** Open the desk against the real lake, switch the
+SPREADS hub while a computation is running, and confirm the list that appears
+matches the hub finally selected. Then close the window mid-compute and confirm
+no `RuntimeError` reaches the console.

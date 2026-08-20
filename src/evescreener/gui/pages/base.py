@@ -70,6 +70,12 @@ class DeskPage(QWidget):
         self._result_at = None
         self._error: Exception | None = None
         self._job = None
+        #: The widget state the running job was dispatched with, and the state
+        #: that arrived while it ran. Comparing them is what stops a result
+        #: computed from superseded input being painted (§21 R7).
+        self._running_input = None
+        self._queued_input = None
+        self._shutdown = False
         if self.heavy:
             self.work_stamp = QLabel("")
             self.work_stamp.setWordWrap(True)
@@ -85,8 +91,40 @@ class DeskPage(QWidget):
         raise NotImplementedError
 
     def compute(self, data):  # pragma: no cover - overridden by heavy pages
-        """Pure, off-thread. No Qt object may be touched in here."""
+        """Pure, off-thread. **No Qt object may be touched in here.**
+
+        Widgets are not thread-safe and their value can change mid-read, so
+        anything a computation needs from one is captured by `job_input()` on
+        the GUI thread first. A test walks the AST of every `compute()` in this
+        package and fails on any widget access, because a rule this easy to
+        forget has to be held structurally (§21 R7).
+        """
         raise NotImplementedError
+
+    def job_input(self) -> tuple:
+        """Immutable snapshot of every widget-derived value `compute` needs.
+
+        Called on the GUI thread, immediately before dispatch. A tuple, because
+        the job must not be able to observe a later edit through a shared
+        mutable object. Pages with no widget inputs inherit the empty default.
+        """
+        return ()
+
+    def shutdown(self) -> None:
+        """Stop accepting results. Called when the window closes (§21 R7)."""
+        self._shutdown = True
+        self._running_token = None
+        self._queued_input = None
+        job = self._job
+        if job is not None:
+            job.cancel()
+            try:
+                job.signals.finished.disconnect()
+            except (RuntimeError, TypeError):
+                # Already disconnected, or the signal object has gone. Either
+                # way there is nothing left that could reach this page.
+                pass
+        self._job = None
 
     def paint(self, result) -> None:  # pragma: no cover - overridden by heavy pages
         """GUI thread. Render whatever `compute` returned."""
@@ -112,21 +150,36 @@ class DeskPage(QWidget):
         Returns True when background work was started, so a caller (and a
         test) can tell "already current" apart from "now computing".
         """
+        if self._shutdown:
+            return False
         key = getattr(self.data, "input_key", None)
-        current = key is not None and key == self._computed_key and self._error is None
+        captured = self.job_input()
+        current = (
+            key is not None
+            and key == self._computed_key
+            and captured == self._running_input
+            and self._error is None
+        )
         if current and not force:
             return False
         if not self.heavy:
             self._computed_key = key
+            self._running_input = captured
             self.repopulate()
             return False
         if self._running_token is not None and not force:
+            # A job is already in flight. Remember what changed rather than
+            # declining it: the old code dropped the newer input and then
+            # painted the older result over it (§21 R7).
+            self._queued_input = captured
             return False
         self._token += 1
         self._running_token = self._token
         self._pending_key = key
+        self._running_input = captured
+        self._queued_input = None
         self._show_working()
-        job = PageJob(self.compute, self.data, self._token)
+        job = PageJob(self.compute, self.data, self._token, job_input=captured)
         job.signals.finished.connect(self._work_finished)
         # Held so the runnable (and the signal object living on it) outlives
         # the worker thread that emits from it.
@@ -137,8 +190,17 @@ class DeskPage(QWidget):
     # -- worker results ----------------------------------------------------
 
     def _work_finished(self, token, result) -> None:
+        if self._shutdown:
+            return  # the page is going away; nothing may paint into it
         if token != self._running_token:
             return  # a newer job overtook this one; this answer is the stale one
+        if self._running_input != self.job_input():
+            # The operator moved a control while this ran. The answer is about
+            # a question nobody is asking any more.
+            self._running_token = None
+            self._queued_input = None
+            self.ensure_current(force=True)
+            return
         self._running_token = None
         self._computed_key = self._pending_key
         if isinstance(result, Exception):
@@ -158,6 +220,10 @@ class DeskPage(QWidget):
         self._result_at = self._stamp_time()
         self._hide_stamp()
         self.paint(result)
+        if self._queued_input is not None and self._queued_input != self._running_input:
+            # Something changed while this job ran; it is owed its own answer.
+            self._queued_input = None
+            self.ensure_current(force=True)
 
     # -- the stamp ---------------------------------------------------------
 

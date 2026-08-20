@@ -7,7 +7,12 @@ import pandas as pd
 import pytest
 
 from evescreener.bars import frame_from_history
-from evescreener.census import derive_floor, score_floor_grid
+from evescreener.census import (
+    FLOOR_GRID_ISK,
+    FLOOR_GRID_ORDERS,
+    derive_floor,
+    score_floor_grid,
+)
 from evescreener.sde import cohort_scope, market_group_members, resolve_watchlist
 from evescreener.store.lake import BarLake
 from evescreener.universe import (
@@ -86,10 +91,12 @@ def test_median_resists_a_single_wash_trade_day(paths):
 def test_floor_grid_is_scored_across_the_whole_grid(seeded_lake):
     table = liquidity_table(seeded_lake, 10000002, lookback_days=30)
     grid = score_floor_grid(table)
-    assert len(grid) == 7 * 5
+    assert len(grid) == len(FLOOR_GRID_ISK) * len(FLOOR_GRID_ORDERS)
     loosest = grid[0]
     assert loosest["types"] >= grid[-1]["types"]
-    assert 0.0 <= loosest["share_of_turnover"] <= 1.0
+    assert loosest["share_of_turnover"] == pytest.approx(1.0), (
+        "the grid must contain a no-floor corner or the derive rule cannot resolve"
+    )
 
 
 def test_derived_floor_follows_the_stated_rule():

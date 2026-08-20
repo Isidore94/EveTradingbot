@@ -24,7 +24,12 @@ import pandas as pd
 
 from .atr import atr_last
 
-__all__ = ["RelativeStrength", "cross_sectional_percentile", "real_relative_strength"]
+__all__ = [
+    "RelativeStrength",
+    "cross_sectional_percentile",
+    "real_relative_strength",
+    "rrs_series",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +96,54 @@ def real_relative_strength(
     if not np.isfinite(rrs):
         return RelativeStrength(None, None, scope, members, "non-finite result")
     return RelativeStrength(float(rrs), float(power_index), scope, members)
+
+
+def rrs_series(
+    symbol_frame: pd.DataFrame,
+    reference_frame: pd.DataFrame,
+    *,
+    length: int = 20,
+    winsor_k: float = 8.0,
+    winsor_window: int = 60,
+) -> pd.Series:
+    """RRS at every bar, vectorized, aligned to `symbol_frame`.
+
+    Same algebra as `real_relative_strength`, including the upstream detail
+    that the ATR excludes the bar being measured (`bars[:-1]` upstream becomes
+    `.shift(1)` here). Bars where either ATR is unknown are NaN — UNKNOWN, not
+    zero.
+    """
+    from .atr import atr_series
+
+    if symbol_frame.empty or reference_frame is None or reference_frame.empty:
+        return pd.Series(dtype="float64", index=symbol_frame.index)
+    symbol = symbol_frame.set_index(pd.to_datetime(symbol_frame["datetime"], utc=True))
+    reference = reference_frame.set_index(pd.to_datetime(reference_frame["datetime"], utc=True))
+
+    symbol_atr = atr_series(
+        symbol_frame, length=length, winsor_k=winsor_k, winsor_window=winsor_window
+    )
+    symbol_atr.index = symbol.index
+    symbol_atr = symbol_atr.shift(1)
+    reference_atr = atr_series(
+        reference_frame, length=length, winsor_k=winsor_k, winsor_window=winsor_window
+    )
+    reference_atr.index = reference.index
+    reference_atr = reference_atr.shift(1)
+
+    symbol_close = pd.to_numeric(symbol["close"], errors="coerce")
+    reference_close = pd.to_numeric(reference["close"], errors="coerce")
+    symbol_move = symbol_close - symbol_close.shift(length)
+    reference_move = reference_close - reference_close.shift(length)
+
+    aligned_reference_move = reference_move.reindex(symbol.index)
+    aligned_reference_atr = reference_atr.reindex(symbol.index)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        power_index = aligned_reference_move / aligned_reference_atr
+        values = (symbol_move - power_index * symbol_atr) / symbol_atr
+    values = values.where(np.isfinite(values))
+    values.index = symbol_frame.index
+    return values
 
 
 def cross_sectional_percentile(values: dict[int, float | None]) -> dict[int, float | None]:

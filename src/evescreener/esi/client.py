@@ -42,6 +42,18 @@ class FeedCircuitOpen(EsiError):
     """The feed's breaker is open; the caller waits for the cooldown."""
 
 
+class EsiNotFound(EsiError):
+    """A 404 for one resource.
+
+    Measured 2026-08-20: `/markets/{region}/types` lists type_ids that
+    `/markets/{region}/history` rejects with 404 (the plan's §3.2 expectation
+    that 404s "should not occur in the steady state" is wrong — 16,789 of
+    19,152 Forge-active types 404 on history). That is a fact about one type,
+    not a fault in the feed, so it must never trip the per-feed breaker: doing
+    so turns a routine catalogue gap into a total ingest outage.
+    """
+
+
 @dataclass(slots=True)
 class EsiResponse:
     """One ESI answer, or an honest statement that we did not ask.
@@ -126,7 +138,10 @@ class EsiClient:
             window_minutes=config.budget.orders_window_minutes,
         )
         self.history_limiter = HistoryRateLimiter(config.budget.history_requests_per_minute)
-        self.error_limit = ErrorLimitGuard(config.budget.error_limit_stop_seconds)
+        self.error_limit = ErrorLimitGuard(
+            config.budget.error_limit_stop_seconds,
+            pause_remaining=config.budget.error_limit_pause_remaining,
+        )
         self.skipped_count = 0
         self.request_count = 0
 
@@ -277,6 +292,13 @@ class EsiClient:
                     break
                 await self._backoff(attempt)
                 continue
+
+            if status == 404:
+                # Per-resource fact, not a feed failure. The breaker is left
+                # alone; the error-limit guard above already yields when the
+                # 4xx budget runs low.
+                self._breaker_success(feed)
+                raise EsiNotFound(f"{url} -> HTTP 404: {response.text[:200]}")
 
             if 400 <= status < 500:
                 # Never retried: a 4xx is a bug in our request, surfaced.

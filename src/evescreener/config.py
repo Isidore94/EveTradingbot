@@ -56,6 +56,7 @@ class BudgetConfig:
     orders_token_self_cap: int
     history_requests_per_minute: int
     error_limit_stop_seconds: int
+    error_limit_pause_remaining: int
 
 
 @dataclass(frozen=True, slots=True)

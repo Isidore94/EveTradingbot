@@ -133,6 +133,18 @@ CREATE TABLE IF NOT EXISTS destruction (
 );
 CREATE INDEX IF NOT EXISTS idx_destruction_day ON destruction(day);
 
+-- Types listed by /markets/{region}/types that /markets/{region}/history
+-- rejects with 404 (measured 2026-08-20: 16,789 of 19,152 in The Forge).
+-- Remembered so a daily crawl does not spend its 4xx error budget rediscovering
+-- the same catalogue gap every morning.
+CREATE TABLE IF NOT EXISTS history_missing (
+    type_id INTEGER NOT NULL,
+    region_id INTEGER NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_checked TEXT NOT NULL,
+    PRIMARY KEY (type_id, region_id)
+);
+
 CREATE TABLE IF NOT EXISTS killmail_ingest (
     source TEXT PRIMARY KEY,
     ingested_at TEXT NOT NULL,
@@ -253,6 +265,28 @@ class Database:
             " opened_at=excluded.opened_at, last_error=excluded.last_error",
             (feed, failures, iso(opened_at), last_error),
         )
+
+    # -- history gaps ------------------------------------------------------
+    def mark_history_missing(self, type_ids, region_id: int) -> int:
+        stamp = iso(utcnow())
+        rows = [(int(value), int(region_id), stamp, stamp) for value in type_ids]
+        if not rows:
+            return 0
+        self.conn.executemany(
+            "INSERT INTO history_missing(type_id, region_id, first_seen, last_checked)"
+            " VALUES(?,?,?,?) ON CONFLICT(type_id, region_id) DO UPDATE SET"
+            " last_checked=excluded.last_checked",
+            rows,
+        )
+        return len(rows)
+
+    def history_missing(self, region_id: int) -> set[int]:
+        return {
+            int(row["type_id"])
+            for row in self.conn.execute(
+                "SELECT type_id FROM history_missing WHERE region_id=?", (region_id,)
+            )
+        }
 
     # -- SDE ---------------------------------------------------------------
     def replace_types(self, rows: Iterable[tuple]) -> int:

@@ -34,8 +34,12 @@ from .universe import (
 
 # Candidate floors the census scores, so the chosen floor is a measurement and
 # not a preference. ISK turnover x order_count, spanning three decades each.
-FLOOR_GRID_ISK = (10e6, 50e6, 100e6, 250e6, 500e6, 1e9, 5e9)
-FLOOR_GRID_ORDERS = (5, 10, 30, 50, 100)
+# The grid was extended on 2026-08-20 after the first live census: its original
+# loosest corner (10M ISK / 5 orders) captured only 88.2% of median daily
+# turnover, so the frozen rule below could not resolve at all. The RULE is
+# unchanged; only the candidates it chooses among were widened downward.
+FLOOR_GRID_ISK = (0.0, 1e6, 10e6, 50e6, 100e6, 250e6, 500e6, 1e9, 5e9)
+FLOOR_GRID_ORDERS = (0, 1, 5, 10, 30, 50, 100)
 
 # Percentiles reported for every distribution. p50 and p90 are what the floor
 # discussion actually turns on; the tails are there to show the shape.
@@ -219,13 +223,32 @@ async def run_census(
         notes.append(f"census capped at {cap} of {len(ids)} active types by config")
         ids = ids[:cap]
 
+    known_missing = db.history_missing(region)
+    if known_missing:
+        notes.append(
+            f"{len(known_missing)} types are recorded as having no history in this "
+            "region and were skipped (they are listed by /markets/types but 404 on "
+            "/markets/history — a catalogue gap, measured, not an error)"
+        )
     ingest = HistoryIngestResult()
     if crawl:
         # A large write batch matters at census scale: every flush rewrites the
         # whole year partition, so 20k types must not become 100 rewrites.
         ingest = await ingest_history(
-            client, lake, ids, region_id=region, batch_size=2500, progress=progress
+            client,
+            lake,
+            ids,
+            region_id=region,
+            batch_size=2500,
+            skip_type_ids=known_missing,
+            progress=progress,
         )
+        if ingest.missing_type_ids:
+            db.mark_history_missing(ingest.missing_type_ids, region)
+            notes.append(
+                f"{len(ingest.missing_type_ids)} further types 404'd on history and "
+                "were recorded so tomorrow's crawl skips them"
+            )
     else:
         notes.append("history crawl skipped by request; measurements use the existing lake")
 
@@ -289,6 +312,7 @@ def render_census(result: CensusResult) -> str:
         f"fetched {result.ingest.get('fetched', 0)}, "
         f"skipped-fresh {result.ingest.get('skipped_fresh', 0)}, "
         f"304 {result.ingest.get('not_modified', 0)}, "
+        f"no-history-404 {result.ingest.get('no_history', 0)}, "
         f"failed {result.ingest.get('failed', 0)}",
         f"- rows written: {result.ingest.get('rows_written', 0)}",
         "",

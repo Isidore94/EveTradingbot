@@ -161,7 +161,9 @@ class ErrorLimitGuard:
     """The legacy 100-errors/minute limit that applies to every route."""
 
     stop_seconds: int = 60
+    pause_remaining: int = 25
     remain: int | None = None
+    reset_seconds: int | None = None
     blocked_until: datetime | None = None
 
     def observe(self, headers, status: int, now: datetime | None = None) -> None:
@@ -172,8 +174,19 @@ class ErrorLimitGuard:
                 self.remain = int(raw)
             except (TypeError, ValueError):
                 self.remain = None
+        raw_reset = headers.get("x-esi-error-limit-reset")
+        if raw_reset is not None:
+            try:
+                self.reset_seconds = int(raw_reset)
+            except (TypeError, ValueError):
+                self.reset_seconds = None
         if status == 420:
             self.blocked_until = now + timedelta(seconds=self.stop_seconds)
+            return
+        # Ride the budget down, never to the 420: a full-catalog crawl meets
+        # thousands of legitimate 404s and must yield before the limit bites.
+        if self.remain is not None and self.remain <= self.pause_remaining:
+            self.blocked_until = now + timedelta(seconds=(self.reset_seconds or 60) + 1)
 
     def block_seconds(self, now: datetime | None = None) -> float:
         now = now or utcnow()

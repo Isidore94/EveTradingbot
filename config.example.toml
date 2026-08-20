@@ -41,6 +41,10 @@ orders_token_self_cap = 6000
 history_requests_per_minute = 150
 # Legacy error limit: 100 non-2xx/3xx per minute -> HTTP 420 on all routes.
 error_limit_stop_seconds = 60
+# Pause when the observed error-limit budget falls this low, rather than
+# riding it to the 420. A full-catalog crawl meets thousands of 404s
+# (measured 2026-08-20: /markets/types lists ids /markets/history rejects).
+error_limit_pause_remaining = 25
 
 [cadence]
 # All times UTC. EVE time IS UTC and the digest displays UTC only.

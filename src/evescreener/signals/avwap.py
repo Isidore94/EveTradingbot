@@ -35,6 +35,7 @@ __all__ = [
     "anchored_vwap_bands",
     "anchored_vwap_history",
     "band_position",
+    "segmented_band_series",
     "classify_band",
 ]
 
@@ -158,6 +159,69 @@ def anchored_vwap_bands(
         bars=int(close.size),
         anchor_index=anchor_index,
         truncated=truncated,
+    )
+
+
+def segmented_band_series(frame: pd.DataFrame, anchor_indices: list[int]) -> pd.DataFrame:
+    """Running AVWAP and sigma where each bar reads from its own live anchor.
+
+    **Anchors are events, not sliding windows.** Each anchor opens a segment;
+    every bar inside it uses the running AVWAP accumulated since that anchor,
+    exactly as `anchored_vwap_history` does — so this is the same frozen
+    formula applied piecewise, not a second formula.
+
+    A rolling-window sigma would be a *different* statistic (the running
+    deviation is path-dependent on where the accumulation started), and there
+    is no anchor event in EVE that corresponds to "90 bars ago, sliding". When
+    no confirmed patch anchor is available the caller supplies a grid of
+    synthetic anchor dates, which is still a set of events.
+
+    Returns a frame aligned to `frame` with `vwap`, `sigma`, `dip_sigma` and
+    `anchor_index`; bars before the first anchor are NaN.
+    """
+    columns = ["vwap", "sigma", "dip_sigma", "anchor_index"]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    anchors = sorted({int(value) for value in anchor_indices if 0 <= int(value) < len(frame)})
+    if not anchors:
+        anchors = [0]
+    close = pd.to_numeric(frame["close"], errors="coerce").to_numpy(dtype="float64")
+    volume = pd.to_numeric(frame["volume"], errors="coerce").to_numpy(dtype="float64")
+    size = len(frame)
+    vwap_out = np.full(size, np.nan)
+    sigma_out = np.full(size, np.nan)
+    anchor_out = np.full(size, -1, dtype="int64")
+
+    bounds = [*anchors, size]
+    for position, start in enumerate(anchors):
+        stop = bounds[position + 1]
+        segment_close = close[start:stop]
+        segment_volume = volume[start:stop]
+        valid = np.isfinite(segment_close) & np.isfinite(segment_volume) & (segment_volume > 0)
+        if not valid.any():
+            continue
+        cum_volume = np.cumsum(np.where(valid, segment_volume, 0.0))
+        cum_value = np.cumsum(np.where(valid, segment_close * segment_volume, 0.0))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            running = np.where(cum_volume > 0, cum_value / cum_volume, np.nan)
+        deviation = np.where(valid, segment_close - running, 0.0)
+        cum_sd = np.cumsum(np.where(valid, deviation * deviation * segment_volume, 0.0))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            sigma = np.sqrt(np.where(cum_volume > 0, cum_sd / cum_volume, np.nan))
+        vwap_out[start:stop] = running
+        sigma_out[start:stop] = sigma
+        anchor_out[start:stop] = start
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        dip = np.where(sigma_out > 0, (close - vwap_out) / sigma_out, np.nan)
+    return pd.DataFrame(
+        {
+            "vwap": vwap_out,
+            "sigma": sigma_out,
+            "dip_sigma": dip,
+            "anchor_index": anchor_out,
+        },
+        index=frame.index,
     )
 
 

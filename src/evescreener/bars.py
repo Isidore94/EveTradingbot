@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .esi.client import HISTORY_FEED, EsiClient
+from .esi.client import HISTORY_FEED, EsiClient, EsiNotFound
 from .store.lake import BAR_LAKE_COLUMNS, EVE_DAILY_BAR_COLUMNS, BarLake
 from .timeutil import bar_datetime, iso, utcnow
 
@@ -128,10 +128,12 @@ class HistoryIngestResult:
     fetched: int = 0
     skipped_fresh: int = 0
     not_modified: int = 0
+    no_history: int = 0
     failed: int = 0
     rows_written: int = 0
     quality: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    missing_type_ids: list[int] = field(default_factory=list)
 
     def merge_quality(self, flags: dict[str, int]) -> None:
         for key, value in flags.items():
@@ -143,10 +145,12 @@ class HistoryIngestResult:
             "fetched": self.fetched,
             "skipped_fresh": self.skipped_fresh,
             "not_modified": self.not_modified,
+            "no_history": self.no_history,
             "failed": self.failed,
             "rows_written": self.rows_written,
             "quality": dict(self.quality),
             "errors": self.errors[:20],
+            "missing_type_ids": len(self.missing_type_ids),
         }
 
 
@@ -157,6 +161,7 @@ async def ingest_history(
     *,
     region_id: int | None = None,
     batch_size: int = 200,
+    skip_type_ids: set[int] | None = None,
     progress=None,
 ) -> HistoryIngestResult:
     """Refresh daily bars for `type_ids` and diff-append them to the lake.
@@ -168,7 +173,8 @@ async def ingest_history(
     region = region_id if region_id is not None else client.config.esi.home_region_id
     result = HistoryIngestResult()
     pending: list[pd.DataFrame] = []
-    ids = [int(value) for value in type_ids]
+    skip = skip_type_ids or set()
+    ids = [int(value) for value in type_ids if int(value) not in skip]
     result.requested = len(ids)
 
     for index, type_id in enumerate(ids, start=1):
@@ -178,6 +184,13 @@ async def ingest_history(
                 f"/markets/{region}/history",
                 params={"type_id": type_id},
             )
+        except EsiNotFound:
+            # The region's /types list includes ids /history rejects. That is a
+            # catalogue gap, recorded so tomorrow's crawl skips it — not a
+            # failure, and not something to keep paying 4xx error budget for.
+            result.no_history += 1
+            result.missing_type_ids.append(type_id)
+            continue
         except Exception as exc:  # noqa: BLE001 - recorded, never silently dropped
             result.failed += 1
             result.errors.append(f"type {type_id}: {type(exc).__name__}: {exc}")

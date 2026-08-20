@@ -95,12 +95,15 @@ schedules anything under `C:\Users\Aaron\TradingBotV3` or `C:\TradingBotData`.
 | `census` | **RUNNING** at the 150 req/min self-cap, ~2h10m expected. Notably it is already past **2,363** history requests — the exact point where the pre-D-12 circuit breaker latched open — with `history_missing` still empty, so the D-12 fix holds against live ESI rather than only against fixtures. |
 | `anchors` | Run. 8 posts in the feed, 1 new candidate. **See the duplicate below.** |
 | `sweep-books`, `ingest-history`, `digest --dry-run` | **NOT RUN** — deliberately sequenced after the census so two processes never hold independent self-cap state against one IP. |
+| `backtest` | **NOT RUN on this machine, and it must be.** `data/` is gitignored, so the previous build's `reports/backtest-*.json` did not come with the clone, and `verdict_banner` returns an **empty string** when no stored verdict exists. Until `backtest` runs here, MARKET and SCANNER show **no NOT-PLAUSIBLE banner at all** — the system's own headline finding is invisible on the desk. Run it after `ingest-history`; it reads the lake and costs no ESI traffic. |
 | Killmail backfill | **SKIPPED** by operator decision (1.3 GB, and §14's lead-lag already returned negative). |
 | The desk | Constructed offscreen against the **real** data directory: all eight pages built, `window.refresh()` fed them one local read, all eight selected without error. `book_age_minutes` is `None` and the book renders **STALE**, which is correct with no sweep yet. This is a smoke test of the Qt stack on this machine, **not** checklist I — that is still the operator's to walk. |
 | Desktop shortcut | `EVE Screener Desk.lnk` → `.venv\Scripts\pythonw.exe launch_gui.py`, working dir the repo. |
 | Daemon task | Registered as **`\EveScreener daemon`**, currently **Disabled**. Logon trigger for this operator, `PT2M` delay, action `uv.exe run python -m evescreener daemon` in the repo directory, `MultipleInstancesPolicy=IgnoreNew`, no execution time limit. **Enable it once the bootstrap finishes** — while the census runs, a logon would start a second independent ESI consumer against one IP. Distinct from all three TradingBotV3 tasks in name, executable and working directory. |
 
-### One defect found, not fixed — the anchor watcher can double-count an event
+### Two defects found during deployment
+
+#### 1. The §11 D4 seed watchlist never reaches a fresh install
 
 `config/anchors.jsonl` now holds *Patch Notes - Version 24.01* **twice**, on
 2026-08-19 and 2026-08-20, with the **same** `source` URL. `patchnotes.py`
@@ -118,6 +121,30 @@ rows were confirmed, the signal layer would anchor twice on one patch.
 same anchor event" is a plan-level question about a signal-layer input, not a
 janitorial fix. The obvious answer is to add `source` to the dedup key and
 prefer the newest date for a given URL.
+
+`universe.seed_watchlist` exists, reads `config.universe.watchlist`, and
+resolves each of the 50 D4 names against the SDE — and **nothing in `src/`
+calls it.** The only callers are in `tests/test_universe_census.py`. So on any
+fresh install `watch list` is empty, and with it:
+
+* §18.2's "every watchlist name renders in **every** digest" renders nothing;
+* the desk's FOCUS page starts empty;
+* gate I's "check which of my watchlist hulls landed in the THIN tier" has
+  nothing to check.
+
+The roster has been **seeded operationally**, not by a code change: the 50
+names were added through the documented `watch add` path, one call each, all
+50 resolving against the SDE with zero unresolved. They are therefore
+operator-owned entries, reachable by `watch remove` like any other, and
+`config.toml` is unchanged.
+
+**Wiring the seeder into a production path is left as a decision**, because it
+has an invariant edge: if the universe refresh re-seeds, a name the operator
+deliberately `watch remove`d would come back, which is the never-auto-removed
+rule failing in the other direction. A one-shot seed on an empty watchlist is
+probably the right shape, but that is a call to make deliberately.
+
+#### 2. The anchor watcher can double-count one event
 
 ## The consolidated live-validation checklist
 

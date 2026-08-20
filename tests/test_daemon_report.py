@@ -346,3 +346,35 @@ def test_a_ledger_with_only_refusals_HAS_started(config, paths):
     paper_section = report.sections[-1]
     assert paper_section.unknown_reason is None
     assert any("refused rather than priced: **4**" in line for line in paper_section.body)
+
+
+def test_the_census_section_carries_the_friction_ceiling(config, paths):
+    """The friction distribution scopes every later idea, so it belongs up front."""
+    report = build_viability_report(
+        config,
+        census={
+            "generated_at": "x",
+            "active_types": 19152,
+            "types_with_bars": 7264,
+            "total_bars": 1854651,
+            "turnover_percentiles": {"p50": 1.0, "p90": 2.0, "p99": 3.0},
+            "derived_floor": {},
+            "haircut_percentiles": {
+                "tier_isk": 250000000.0,
+                "types_measured": 6672,
+                "min": 0.0,
+                "p1": 2.1733,
+                "p5": 5.3438,
+                "p50": 33.6106,
+                "types_below": {"1.0": 27, "5.0": 285},
+            },
+            "depth_coverage": {"250000000": 0.7708, "2500000000": 0.3957},
+        },
+        reports_dir=paths.reports,
+    )
+    text = render_viability(report)
+    assert "Round-trip taker friction" in text
+    assert "ceiling on every later idea" in text
+    assert "friction < 1.0%: **27** types" in text
+    assert "Depth coverage" in text
+    assert "0.25B: 77.1%" in text

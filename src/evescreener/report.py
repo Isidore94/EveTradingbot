@@ -127,6 +127,41 @@ def _census_section(payload: dict | None) -> Section:
         )
     else:
         body.append(f"**Floor UNRESOLVED**: {derived.get('reason', 'no reason recorded')}")
+    haircut = payload.get("haircut_percentiles") or {}
+    if haircut:
+        body.extend(
+            [
+                "",
+                "**Round-trip taker friction** at "
+                f"{haircut.get('tier_isk', 0) / 1e9:.2f}B across "
+                f"{haircut.get('types_measured', 0):,} fillable types — half the spread "
+                "in, half out, *before* the 3.375% sales tax:",
+                f"- min {haircut.get('min', 0):.3f}% · p1 {haircut.get('p1', 0):.2f}% "
+                f"· p5 {haircut.get('p5', 0):.2f}% · p50 {haircut.get('p50', 0):.2f}%",
+            ]
+        )
+        below = haircut.get("types_below") or {}
+        if below:
+            body.append("")
+            body.append(
+                "**This is the ceiling on every later idea.** Any strategy's gross edge "
+                "must clear its own friction plus the tax, so the count of types tight "
+                "enough to permit an edge at all is:"
+            )
+            for threshold, count in below.items():
+                body.append(f"- friction < {threshold}%: **{count:,}** types")
+    depth = payload.get("depth_coverage") or {}
+    if depth:
+        body.extend(
+            [
+                "",
+                "**Depth coverage** — the share of sell books that can absorb the notional at all:",
+                "- "
+                + " · ".join(
+                    f"{float(tier) / 1e9:.2f}B: {share:.1%}" for tier, share in depth.items()
+                ),
+            ]
+        )
     ingest = payload.get("ingest") or {}
     if ingest:
         body.extend(

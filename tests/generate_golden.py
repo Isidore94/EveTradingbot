@@ -89,7 +89,26 @@ def reference_avwap_bands(frame: pd.DataFrame, anchor_idx: int):
     )
 
 
+def synthetic_instances(seed: int = 20260820, count: int = 400) -> pd.DataFrame:
+    """A deterministic instance set for freezing the backtest's metrics."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2025-09-01", periods=count, freq="D", tz="UTC")
+    entry = 1_000_000 * np.exp(rng.normal(0, 0.3, count))
+    forward = rng.normal(0.01, 0.08, count)
+    return pd.DataFrame(
+        {
+            "type_id": rng.integers(30, 60, count),
+            "cohort": "synthetic",
+            "datetime": dates,
+            "horizon_days": 10,
+            "entry_close": entry,
+            "exit_close": entry * (1.0 + forward),
+        }
+    )
+
+
 def main() -> None:
+    from evescreener.backtest import _stats, price_instances, verdict
     from evescreener.signals.atr import atr_series, true_range, winsorized_true_range
     from evescreener.signals.avwap import anchored_vwap_bands
     from evescreener.signals.levels import build_level_store
@@ -113,6 +132,23 @@ def main() -> None:
     clean_tr, clamped = winsorized_true_range(frame, k=8.0, window=60)
     levels = build_level_store(frame, atr20=float(atr.iloc[-1]), round_steps=[1_000_000.0])
 
+    instances = synthetic_instances()
+    haircuts = {
+        int(type_id): {250e6: {"entry": 0.015, "exit": 0.02, "round_trip": 0.035}}
+        for type_id in instances["type_id"].unique()
+    }
+    backtest_cells = {}
+    for multiple in (1.0, 2.0, 3.0):
+        priced, excluded = price_instances(
+            instances, haircuts, tier=250e6, multiple=multiple, sales_tax_pct=3.375
+        )
+        stats = _stats(priced, horizon=10, tier=250e6, multiple=multiple, wilson_z=1.96)
+        backtest_cells[f"{multiple:.0f}x"] = {
+            **stats.as_dict(),
+            "excluded_haircut_unknown": excluded,
+            "verdict": verdict(stats)["verdict"],
+        }
+
     payload = {
         "_provenance": {
             "generator": "tests/generate_golden.py",
@@ -125,6 +161,7 @@ def main() -> None:
         "true_range_max_raw": float(raw_tr.max()),
         "true_range_max_winsorized": float(clean_tr.max()),
         "true_range_clamped_bars": int(clamped.sum()),
+        "backtest": backtest_cells,
         "levels": {
             "count": len(levels["levels"]),
             "prices": [round(float(level["price"]), 4) for level in levels["levels"][:12]],

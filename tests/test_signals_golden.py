@@ -187,3 +187,60 @@ def test_round_levels_use_close_not_a_scam_high(frame):
     # forty spurious levels above the traded range.
     levels = round_number_levels(frame, [1_000_000.0])
     assert max(level["price"] for level in levels) <= frame["close"].max()
+
+
+# -- backtest metrics -------------------------------------------------------
+
+
+def test_backtest_metrics_match_the_golden_fixture():
+    """Every backtest metric is frozen, not just the signal layer's.
+
+    A scoring change must regenerate this fixture FIRST and have the diff
+    reviewed, exactly like a detector change (plan.md §8).
+    """
+    from evescreener.backtest import _stats, price_instances, verdict
+    from generate_golden import synthetic_instances
+
+    instances = synthetic_instances()
+    haircuts = {
+        int(type_id): {250e6: {"entry": 0.015, "exit": 0.02, "round_trip": 0.035}}
+        for type_id in instances["type_id"].unique()
+    }
+    for multiple in (1.0, 2.0, 3.0):
+        expected = GOLDEN["backtest"][f"{multiple:.0f}x"]
+        priced, excluded = price_instances(
+            instances, haircuts, tier=250e6, multiple=multiple, sales_tax_pct=3.375
+        )
+        stats = _stats(priced, horizon=10, tier=250e6, multiple=multiple, wilson_z=1.96)
+        assert excluded == expected["excluded_haircut_unknown"]
+        assert stats.samples == expected["samples"]
+        for field in (
+            "win_rate",
+            "wilson_lb",
+            "breakeven_win_rate",
+            "expectancy_pct",
+            "median_pct",
+            "max_drawdown_pct",
+            "gross_expectancy_pct",
+            "gross_win_rate",
+            "round_trip_haircut_pct",
+            "first_half_wilson_lb",
+            "second_half_wilson_lb",
+        ):
+            assert getattr(stats, field) == pytest.approx(expected[field], rel=1e-12), field
+        assert verdict(stats)["verdict"] == expected["verdict"]
+
+
+def test_a_bigger_haircut_monotonically_worsens_every_metric():
+    cells = [GOLDEN["backtest"][f"{multiple}x"] for multiple in (1, 2, 3)]
+    assert [cell["expectancy_pct"] for cell in cells] == sorted(
+        (cell["expectancy_pct"] for cell in cells), reverse=True
+    )
+    assert [cell["wilson_lb"] for cell in cells] == sorted(
+        (cell["wilson_lb"] for cell in cells), reverse=True
+    )
+    assert [cell["breakeven_win_rate"] for cell in cells] == sorted(
+        cell["breakeven_win_rate"] for cell in cells
+    )
+    # The gross figure is haircut-independent by construction.
+    assert len({cell["gross_expectancy_pct"] for cell in cells}) == 1

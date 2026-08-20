@@ -112,6 +112,7 @@ def main() -> None:
     from evescreener.signals.atr import atr_series, true_range, winsorized_true_range
     from evescreener.signals.avwap import anchored_vwap_bands
     from evescreener.signals.levels import build_level_store
+    from evescreener.signals.moving import cloud_state, cross_within, ema, sma
 
     FIXTURES.mkdir(parents=True, exist_ok=True)
     frame = synthetic_frame()
@@ -149,6 +150,33 @@ def main() -> None:
             "verdict": verdict(stats)["verdict"],
         }
 
+    moving = {
+        "sma20_tail": [None if pd.isna(v) else float(v) for v in sma(frame, 20).tail(5)],
+        "sma50_tail": [None if pd.isna(v) else float(v) for v in sma(frame, 50).tail(5)],
+        "ema9_tail": [None if pd.isna(v) else float(v) for v in ema(frame, 9).tail(5)],
+        "ema21_tail": [None if pd.isna(v) else float(v) for v in ema(frame, 21).tail(5)],
+        "ema21_first_value_index": int(ema(frame, 21).notna().idxmax()),
+        "cloud_9_21": cloud_state(frame, 9, 21).as_dict(),
+        "cross_9_21_up_within_10": cross_within(
+            frame,
+            fast_kind="ema",
+            fast_length=9,
+            slow_kind="ema",
+            slow_length=21,
+            bars=10,
+            direction="up",
+        ),
+        "cross_9_21_down_within_10": cross_within(
+            frame,
+            fast_kind="ema",
+            fast_length=9,
+            slow_kind="ema",
+            slow_length=21,
+            bars=10,
+            direction="down",
+        ),
+    }
+
     payload = {
         "_provenance": {
             "generator": "tests/generate_golden.py",
@@ -162,6 +190,7 @@ def main() -> None:
         "true_range_max_winsorized": float(clean_tr.max()),
         "true_range_clamped_bars": int(clamped.sum()),
         "backtest": backtest_cells,
+        "moving": moving,
         "levels": {
             "count": len(levels["levels"]),
             "prices": [round(float(level["price"]), 4) for level in levels["levels"][:12]],

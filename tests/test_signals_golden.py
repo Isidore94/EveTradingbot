@@ -12,6 +12,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -244,3 +245,138 @@ def test_a_bigger_haircut_monotonically_worsens_every_metric():
     )
     # The gross figure is haircut-independent by construction.
     assert len({cell["gross_expectancy_pct"] for cell in cells}) == 1
+
+
+# -- moving averages and the EMA cloud --------------------------------------
+
+
+def test_moving_averages_match_the_golden_fixture(frame):
+    from evescreener.signals.moving import cloud_state, cross_within, ema, sma
+
+    expected = GOLDEN["moving"]
+    for name, series in (
+        ("sma20_tail", sma(frame, 20)),
+        ("sma50_tail", sma(frame, 50)),
+        ("ema9_tail", ema(frame, 9)),
+        ("ema21_tail", ema(frame, 21)),
+    ):
+        actual = [None if pd.isna(value) else float(value) for value in series.tail(5)]
+        assert actual == pytest.approx(expected[name], rel=1e-12), name
+    assert cloud_state(frame, 9, 21).as_dict() == pytest.approx(expected["cloud_9_21"])
+    assert (
+        cross_within(
+            frame,
+            fast_kind="ema",
+            fast_length=9,
+            slow_kind="ema",
+            slow_length=21,
+            bars=10,
+            direction="up",
+        )
+        is expected["cross_9_21_up_within_10"]
+    )
+
+
+def test_an_ema_is_seeded_on_the_sma_not_on_bar_one(frame):
+    """pandas' ewm gives a value at bar 1 that is just the first close.
+
+    "Price above the rising 21 EMA" must not fire on bar 2 against a line that
+    is not an EMA yet.
+    """
+    from evescreener.signals.moving import ema, sma
+
+    series = ema(frame, 21)
+    assert series.iloc[:20].isna().all(), "no EMA(21) value may exist before 21 bars"
+    assert float(series.iloc[20]) == pytest.approx(float(sma(frame, 21).iloc[20]))
+    assert series.notna().idxmax() == GOLDEN["moving"]["ema21_first_value_index"]
+
+
+def test_warm_up_is_unknown_not_zero(frame):
+    from evescreener.signals.moving import cross_within, sma
+
+    short = frame.head(5)
+    assert sma(short, 50).isna().all()
+    assert (
+        cross_within(
+            short,
+            fast_kind="ema",
+            fast_length=9,
+            slow_kind="ema",
+            slow_length=21,
+            bars=5,
+            direction="up",
+        )
+        is None
+    ), "a cross cannot be observed where a line does not yet exist"
+
+
+def test_cloud_state_reads_position_and_slope_independently():
+    from evescreener.signals.moving import cloud_state
+
+    rising = pd.DataFrame(
+        {
+            "datetime": pd.date_range("2026-01-01 11:00", periods=80, freq="D", tz="UTC"),
+            "close": np.linspace(100.0, 200.0, 80),
+        }
+    )
+    state = cloud_state(rising, 9, 21)
+    assert state.position == "above"
+    assert state.slope == "rising"
+
+    falling = rising.copy()
+    falling["close"] = falling["close"].to_numpy()[::-1]
+    state = cloud_state(falling, 9, 21)
+    assert state.position == "below"
+    assert state.slope == "falling"
+
+
+def test_an_unmeasurable_cloud_is_unknown():
+    from evescreener.signals.moving import cloud_state
+
+    state = cloud_state(pd.DataFrame(), 9, 21)
+    assert not state.known
+    assert state.as_dict()["position"] is None
+
+
+def test_a_cross_is_detected_only_inside_its_window():
+    from evescreener.signals.moving import cross_within
+
+    values = np.concatenate([np.linspace(100, 80, 40), np.linspace(80, 140, 40)])
+    frame = pd.DataFrame(
+        {
+            "datetime": pd.date_range("2026-01-01 11:00", periods=80, freq="D", tz="UTC"),
+            "close": values,
+        }
+    )
+    assert cross_within(
+        frame,
+        fast_kind="ema",
+        fast_length=9,
+        slow_kind="ema",
+        slow_length=21,
+        bars=40,
+        direction="up",
+    )
+    assert not cross_within(
+        frame,
+        fast_kind="ema",
+        fast_length=9,
+        slow_kind="ema",
+        slow_length=21,
+        bars=2,
+        direction="up",
+    )
+
+
+def test_an_unknown_average_kind_is_a_loud_error():
+    from evescreener.signals.moving import cross_within
+
+    with pytest.raises(ValueError, match="unknown moving-average kind"):
+        cross_within(
+            synthetic_frame(),
+            fast_kind="wma",
+            fast_length=9,
+            slow_kind="ema",
+            slow_length=21,
+            bars=5,
+        )

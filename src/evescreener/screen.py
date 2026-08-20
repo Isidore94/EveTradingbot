@@ -254,6 +254,13 @@ def run_screen(
         expected_move = (
             (bands.vwap / reference - 1.0) * 100.0 if bands.known and reference > 0 else None
         )
+        net_edge = _net_edge_pct(
+            vwap=bands.vwap if bands.known else None,
+            close=reference,
+            ask_walk=ask_prices[tiers[0]],
+            bid_walk=bid_prices[tiers[0]],
+            costs=costs,
+        )
         priced = costs.price_round_trip(
             notional_isk=tiers[0],
             ask_walk_price=ask_prices[tiers[0]],
@@ -296,7 +303,7 @@ def run_screen(
             # UNKNOWN cost is never shown as an opportunity, but the count is
             # reported so an outage does not look like an absence of setups.
             continue
-        if expected_move is None or expected_move <= smallest.breakeven_move_pct:
+        if net_edge is None or net_edge <= config.screen.min_net_edge_pct:
             result.below_breakeven += 1
             continue
 
@@ -339,7 +346,7 @@ def run_screen(
                     }
                     for tier in breakevens
                 ],
-                net_edge_pct=(expected_move - smallest.breakeven_move_pct),
+                net_edge_pct=net_edge,
                 expected_move_pct=expected_move,
                 entry_price=priced.entry_price,
                 exit_price=priced.exit_price_taker,
@@ -366,6 +373,42 @@ def run_screen(
     candidates.sort(key=lambda item: -(item.net_edge_pct or 0.0))
     result.candidates = [item.as_dict() for item in candidates[: config.screen.max_candidates]]
     return result
+
+
+def _net_edge_pct(
+    *,
+    vwap: float | None,
+    close: float | None,
+    ask_walk: float | None,
+    bid_walk: float | None,
+    costs: CostModel,
+) -> float | None:
+    """Net edge of the actual round trip, at the actual size.
+
+    The naive version — `expected_move_pct − breakeven_move_pct` — is wrong,
+    and wrong in the dangerous direction. Those two percentages are measured
+    against *different* reference points (the close and the bid), so
+    subtracting them systematically flatters a wide book: exactly the
+    "gorgeous margin that is really an illiquidity premium" failure §9 R5
+    warns about. On a real Forge candidate with a 44% spread the naive form
+    reported +16% where the honest form reports +8.6%.
+
+    The honest form prices the entry and the exit multiplicatively:
+
+        target_bid  = vwap x (bid_walk / close)   # the bid when value is reached
+        net_edge    = sell_proceeds(target_bid) / ask_walk − 1
+
+    **Stated assumption:** the book keeps its *proportional* shape as price
+    reverts, so the spread scales with the level. That is the defensible choice
+    for ISK prices spanning twelve orders of magnitude; it is an assumption, not
+    a measurement, and a wide book is penalised by it rather than rewarded.
+    """
+    if not vwap or not close or not ask_walk or not bid_walk:
+        return None
+    if close <= 0 or ask_walk <= 0 or bid_walk <= 0:
+        return None
+    target_bid = vwap * (bid_walk / close)
+    return (costs.sell_proceeds(target_bid, maker=False) / ask_walk - 1.0) * 100.0
 
 
 def _gate_counts(evaluated: pd.DataFrame) -> dict:

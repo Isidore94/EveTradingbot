@@ -308,3 +308,69 @@ def test_a_partial_send_reports_how_many_landed(repo_root, paths):
     assert result.kind == REJECTED
     assert result.messages == 1
     assert "1/" in result.detail
+
+
+# -- the net-edge metric ----------------------------------------------------
+
+
+def test_net_edge_prices_the_actual_round_trip_not_a_difference_of_percentages():
+    """The naive `expected_move - breakeven` form flatters wide books.
+
+    Both percentages are measured against different reference points (the close
+    and the bid), so subtracting them understates the cost of a wide spread —
+    the exact failure mode plan.md §9 R5 warns about. This is a real Forge
+    candidate from a live sweep: a 44% spread that the naive form scored at
+    +16%.
+    """
+    from evescreener.costs import CostModel
+    from evescreener.screen import _net_edge_pct
+
+    costs = CostModel.from_config(__import__("evescreener.config", fromlist=["x"]).example_config())
+    wide = _net_edge_pct(
+        vwap=1_496_450.47,
+        close=742_600.0,
+        ask_walk=979_080.95,
+        bid_walk=546_153.16,
+        costs=costs,
+    )
+    naive = (1_496_450.47 / 742_600.0 - 1) * 100 - (
+        979_080.95 / ((1 - 0.03375) * 546_153.16) - 1
+    ) * 100
+    assert wide == pytest.approx(8.62, abs=0.05)
+    assert naive == pytest.approx(15.98, abs=0.05)
+    assert wide < naive, "the honest form must penalise the spread, not hide it"
+
+
+def test_a_tight_book_keeps_its_edge():
+    from evescreener.costs import CostModel
+    from evescreener.screen import _net_edge_pct
+
+    costs = CostModel.from_config(__import__("evescreener.config", fromlist=["x"]).example_config())
+    tight = _net_edge_pct(
+        vwap=1_496_450.47,
+        close=742_600.0,
+        ask_walk=745_000.0,
+        bid_walk=740_000.0,
+        costs=costs,
+    )
+    assert tight > 90.0
+
+
+def test_net_edge_is_unknown_without_both_walks():
+    from evescreener.costs import CostModel
+    from evescreener.screen import _net_edge_pct
+
+    costs = CostModel.from_config(__import__("evescreener.config", fromlist=["x"]).example_config())
+    assert _net_edge_pct(vwap=100, close=50, ask_walk=None, bid_walk=50, costs=costs) is None
+    assert _net_edge_pct(vwap=100, close=50, ask_walk=60, bid_walk=None, costs=costs) is None
+    assert _net_edge_pct(vwap=None, close=50, ask_walk=60, bid_walk=50, costs=costs) is None
+
+
+def test_tax_is_inside_the_net_edge():
+    from evescreener.costs import CostModel
+    from evescreener.screen import _net_edge_pct
+
+    costs = CostModel.from_config(__import__("evescreener.config", fromlist=["x"]).example_config())
+    # A perfectly flat book already at value: the only thing left is the tax.
+    flat = _net_edge_pct(vwap=100.0, close=100.0, ask_walk=100.0, bid_walk=100.0, costs=costs)
+    assert flat == pytest.approx(-3.375, abs=1e-6)

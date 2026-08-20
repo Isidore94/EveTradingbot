@@ -36,6 +36,9 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Offline by default (plan.md §11 D5). Live calls run only when asked for:
+#   uv run pytest -m network -q
+addopts = "-m 'not network'"
 markers = [
     "network: test performs live network calls (run intentionally, never in the default gate)",
 ]

@@ -288,8 +288,9 @@ def _build_screen(config: Config, db, region: int):
     from .screen import run_screen
 
     bars, composite = _composite_and_bars(config, db, region)
+    lake_types = sorted(bars["type_id"].unique().tolist()) if not bars.empty else []
     destruction = destruction_z(
-        destruction_frame(db),
+        destruction_frame(db, type_ids=lake_types),
         recent_days=config.killmails.destruction_recent_days,
         baseline_days=config.killmails.destruction_baseline_days,
     )
@@ -400,8 +401,9 @@ def _cmd_killmails(config: Config, args) -> int:
             print(json.dumps(poll_r2z2(config, db).as_dict(), indent=2))
         if args.study:
             bars, _ = _composite_and_bars(config, db, region)
+            lake_types = sorted(bars["type_id"].unique().tolist()) if not bars.empty else []
             scores = destruction_z(
-                destruction_frame(db),
+                destruction_frame(db, type_ids=lake_types),
                 recent_days=config.killmails.destruction_recent_days,
                 baseline_days=config.killmails.destruction_baseline_days,
             )

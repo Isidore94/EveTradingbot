@@ -112,18 +112,21 @@ def reduce_killmails(
 
 
 def _persist(db: Database, counts: dict[tuple[int, int, str], list[int]]) -> tuple[int, int]:
-    hull_rows = module_rows = 0
+    """Batch-write the reduction. A day is ~41k rows; per-row execute is too slow."""
+    rows = [
+        (type_id, region_id, day, hulls, modules)
+        for (type_id, region_id, day), (hulls, modules) in counts.items()
+    ]
+    if not rows:
+        return 0, 0
     with db.transaction() as conn:
-        for (type_id, region_id, day), (hulls, modules) in counts.items():
-            conn.execute(
-                "INSERT INTO destruction(type_id, region_id, day, hull_losses, module_losses)"
-                " VALUES(?,?,?,?,?) ON CONFLICT(type_id, region_id, day) DO UPDATE SET"
-                " hull_losses=excluded.hull_losses, module_losses=excluded.module_losses",
-                (type_id, region_id, day, hulls, modules),
-            )
-            hull_rows += 1 if hulls else 0
-            module_rows += 1 if modules else 0
-    return hull_rows, module_rows
+        conn.executemany(
+            "INSERT INTO destruction(type_id, region_id, day, hull_losses, module_losses)"
+            " VALUES(?,?,?,?,?) ON CONFLICT(type_id, region_id, day) DO UPDATE SET"
+            " hull_losses=excluded.hull_losses, module_losses=excluded.module_losses",
+            rows,
+        )
+    return sum(1 for row in rows if row[3]), sum(1 for row in rows if row[4])
 
 
 def read_archive(payload: bytes) -> list[dict]:
@@ -272,16 +275,35 @@ def poll_r2z2(
     return result
 
 
-def destruction_frame(db: Database, region_ids: list[int] | None = None) -> pd.DataFrame:
-    query = "SELECT type_id, region_id, day, hull_losses, module_losses FROM destruction"
-    params: tuple = ()
+def destruction_frame(
+    db: Database,
+    *,
+    region_ids: list[int] | None = None,
+    type_ids: list[int] | None = None,
+) -> pd.DataFrame:
+    """Losses per `(type_id, day)`, aggregated across regions in SQL.
+
+    Regions are pooled by default because replacement demand lands at the trade
+    hub, not at the wreck. Filtering by `type_ids` matters at scale: a year of
+    archives is ~15M rows, and only the types in the bar lake can ever join.
+    """
+    clauses: list[str] = []
+    params: list[int] = []
     if region_ids:
-        marks = ",".join("?" * len(region_ids))
-        query += f" WHERE region_id IN ({marks})"
-        params = tuple(int(value) for value in region_ids)
+        clauses.append(f"region_id IN ({','.join('?' * len(region_ids))})")
+        params.extend(int(value) for value in region_ids)
+    if type_ids:
+        clauses.append(f"type_id IN ({','.join('?' * len(type_ids))})")
+        params.extend(int(value) for value in type_ids)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    query = (
+        "SELECT type_id, day, SUM(hull_losses) AS hull_losses,"
+        " SUM(module_losses) AS module_losses FROM destruction"
+        f"{where} GROUP BY type_id, day"
+    )
     frame = pd.DataFrame(
         [dict(row) for row in db.conn.execute(query, params)],
-        columns=["type_id", "region_id", "day", "hull_losses", "module_losses"],
+        columns=["type_id", "day", "hull_losses", "module_losses"],
     )
     if frame.empty:
         return frame
@@ -304,6 +326,8 @@ def destruction_z(
         .groupby(["type_id", "day"], as_index=False)["destroyed"]
         .sum()
     )
+    # Regions are already pooled by `destruction_frame`; this groupby only
+    # collapses a caller-supplied frame that still carries them.
     pivot = daily.pivot(index="day", columns="type_id", values="destroyed")
     calendar = pd.date_range(pivot.index.min(), pivot.index.max(), freq="D", tz="UTC")
     pivot = pivot.reindex(calendar).fillna(0.0)

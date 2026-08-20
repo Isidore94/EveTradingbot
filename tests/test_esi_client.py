@@ -294,3 +294,74 @@ def test_every_request_lands_in_the_telemetry_ledger(config, db):
     assert rows[0]["feed"] == ORDERS_FEED
     assert rows[1]["from_cache"] == 1
     assert rows[1]["note"] == "not-expired"
+
+
+def test_expiry_is_stored_even_when_the_response_carries_no_etag(config, db):
+    """The expiry is what the bannable rule keys off; an absent ETag must not
+    silently license early polling."""
+    client, recorder = make_client(
+        config,
+        db,
+        lambda request: httpx.Response(
+            200, json=[{"type_id": 34}], headers={"expires": http_date(NOW + timedelta(minutes=5))}
+        ),
+    )
+
+    async def scenario():
+        first = await client.get(ORDERS_FEED, "/markets/10000002/orders")
+        second = await client.get(ORDERS_FEED, "/markets/10000002/orders")
+        return first, second
+
+    first, second = _run(scenario())
+    assert first.ok
+    assert second.skipped, "no ETag must not mean no expiry tracking"
+    assert len(recorder.requests) == 1
+    assert "if-none-match" not in recorder.requests[0].headers
+
+
+def test_a_short_wait_never_becomes_an_early_fetch(config, db):
+    """The page-wait path sleeps, then RE-CHECKS. A no-op sleep must not fetch."""
+    clock = {"now": NOW}
+    client, recorder = make_client(
+        config, db, lambda request: ok_response(request), now=lambda: clock["now"]
+    )
+
+    async def scenario():
+        # Seed an expiry 60s out, then ask with a wait cap that would cover it —
+        # but with a sleep that does not advance the clock.
+        await client.get(ORDERS_FEED, "/markets/10000002/orders")
+        return await client.get(ORDERS_FEED, "/markets/10000002/orders", wait_cap_seconds=600)
+
+    result = _run(scenario())
+    assert result.skipped, "a sleep that did not reach the expiry must not fetch"
+    assert len(recorder.requests) == 1
+    rows = db.ledger_since(NOW - timedelta(hours=1))
+    assert rows[-1]["note"] == "not-expired-after-wait"
+
+
+def test_the_wait_path_does_fetch_once_the_expiry_actually_passes(config, db):
+    clock = {"now": NOW}
+    sleeps: list[float] = []
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] = clock["now"] + timedelta(seconds=seconds)
+
+    recorder = Recorder(
+        lambda request: ok_response(request, expires=clock["now"] + timedelta(minutes=5))
+    )
+    http_client = httpx.AsyncClient(
+        base_url=config.esi.base_url,
+        headers=config.headers,
+        transport=httpx.MockTransport(recorder),
+    )
+    client = EsiClient(config, db, client=http_client, sleep=sleep, now=lambda: clock["now"])
+
+    async def scenario():
+        await client.get(ORDERS_FEED, "/markets/10000002/orders")
+        return await client.get(ORDERS_FEED, "/markets/10000002/orders", wait_cap_seconds=600)
+
+    result = _run(scenario())
+    assert result.ok and not result.skipped
+    assert len(recorder.requests) == 2
+    assert sleeps and sleeps[0] > 0

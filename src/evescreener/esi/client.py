@@ -212,6 +212,14 @@ class EsiClient:
             wait = (expires - self._now()).total_seconds() + self.config.esi.expiry_jitter_seconds
             if wait_cap_seconds > 0 and wait <= wait_cap_seconds:
                 await self._sleep(max(0.0, wait))
+                # Belt and braces on the one bannable rule: a sleep that did
+                # not actually reach the expiry must not become an early fetch.
+                if (still := self.not_expired(url)) is not None:
+                    self.skipped_count += 1
+                    self._record(
+                        feed, url, None, 0.0, {}, from_cache=True, note="not-expired-after-wait"
+                    )
+                    return EsiResponse(url=url, status=304, expires=still, skipped=True)
             else:
                 self.skipped_count += 1
                 self._record(feed, url, None, 0.0, {}, from_cache=True, note="not-expired")

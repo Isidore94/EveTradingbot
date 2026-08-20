@@ -239,15 +239,20 @@ class Database:
         last_modified: str | None,
         body_sha: str | None = None,
     ) -> None:
-        if not etag:
-            return
+        """Record the response's ETag *and its expiry*.
+
+        A row is written even when the response carried no ETag: the expiry is
+        what the never-fetch-before-expiry rule keys off, and dropping it for
+        want of an ETag would silently license early polling — the one failure
+        mode that gets an account banned.
+        """
         self.conn.execute(
             "INSERT INTO etags(url, etag, expires_at, last_modified, fetched_at, body_sha) "
             "VALUES(?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET "
             "etag=excluded.etag, expires_at=excluded.expires_at, "
             "last_modified=excluded.last_modified, fetched_at=excluded.fetched_at, "
             "body_sha=COALESCE(excluded.body_sha, etags.body_sha)",
-            (url, etag, iso(expires_at), last_modified, iso(utcnow()), body_sha),
+            (url, etag or "", iso(expires_at), last_modified, iso(utcnow()), body_sha),
         )
 
     def touch_etag_expiry(self, url: str, expires_at: datetime | None) -> None:

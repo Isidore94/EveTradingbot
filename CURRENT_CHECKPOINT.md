@@ -9,6 +9,18 @@ verification stamp. `plan.md` owns the roadmap; `CHANGELOG.md` owns history.
 **IMPLEMENTED + GREEN**. Nothing is `LIVE_VALIDATED`, and nothing may be
 promoted to real ISK until the checklist below is worked through.
 
+**The system already has an answer to the question it was built for, and it is
+a negative one.** The setup class is NOT PLAUSIBLE at every horizon tested, on
+friction rather than direction; the destruction lead-lag effect does not
+survive its own pass rule; and of 315 tracked types only two have books tight
+enough for the measured edge to survive costs. The one measurably positive
+finding is cross-region: 14 of 151,123 hub pairs clear real freight and tax at
+0.25B, best +14.44%. All of it is in `plan.md` §17 and
+`data/reports/viability-*.md`.
+
+That answer is *provisional on the cost model being right*, which is exactly
+what gate E measures. Do that one first.
+
 Every item on it is an **operator action**. The build cannot self-certify: the
 whole point of the ladder is that a machine's confidence in itself is not
 evidence.
@@ -112,12 +124,29 @@ evidence.
 
 ### H. The experiment itself (plan.md §12)
 
-- [ ] **Run the paper experiment to 20 closed trades** for the first read, and
-      to 40 for the verdict. Below 20 the tracker reports `TOO_EARLY` and
-      offers no read — take none.
+**Read this section against what the backtest already found.** The setup class
+was tested and came back NOT PLAUSIBLE at every horizon — on friction, not
+direction. Running the paper experiment on the general setup would mostly
+reproduce that, expensively and slowly. So the sequencing that actually earns
+something:
+
+- [ ] **First, use the paper platform to validate the cost model, not the
+      setup.** That is gate E: ten real fills recorded against predicted
+      effective prices. It works regardless of whether any setup pays, and it
+      is what makes every other number in the system trustworthy. If the cost
+      model is wrong, the backtest's verdict is wrong too — in either
+      direction.
+- [ ] **Only then decide whether to test a setup at all**, and if so, scope it
+      to the two tracked types whose round-trip friction is under the ~0.78%
+      the measured gross edge can absorb (*100MN Afterburner II*, *Mexallon*).
+      That is a **new study needing its own pre-stated rule** (plan.md §13
+      discipline), not a re-run of the old one with the losers removed.
+- [ ] **If you do run it: 20 closed trades for the first read, 40 for the
+      verdict.** Below 20 the tracker reports `TOO_EARLY` and offers no read —
+      take none.
 - [ ] **Accept that `FALSIFIED` is a real possible outcome.** The rule was
       frozen before the first trade precisely so that a negative answer cannot
-      be argued away afterwards.
+      be argued away afterwards. Given the backtest, it is the likely one.
 
 ## Notes for the next session
 

@@ -35,7 +35,28 @@ from .signals.setup import SetupParams, anchor_grid, evaluate_setups
 from .store.db import Database
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
 
-__all__ = ["Candidate", "ScreenResult", "run_screen"]
+__all__ = ["Candidate", "ScreenResult", "run_screen", "setup_params"]
+
+
+def setup_params(config: Config) -> SetupParams:
+    """The frozen setup parameters (plan.md §13.2), built from config ONCE.
+
+    The screen, the backtest and the operator surfaces (`brief`, `board`) must
+    all evaluate the same setup; a second construction site would eventually
+    disagree with this one.
+    """
+    return SetupParams(
+        entry_band_sigma=config.backtest.entry_band_sigma,
+        min_rrs=config.backtest.min_rrs,
+        participation_floor=config.backtest.participation_floor,
+        min_bars=config.backtest.min_bars,
+        anchor_lookback_days=config.backtest.anchor_lookback_days,
+        rrs_length=config.signals.rrs_length,
+        atr_length=config.signals.atr_length,
+        participation_window=config.screen.participation_window,
+        atr_winsor_k=config.signals.atr_winsor_k,
+        atr_winsor_window=config.signals.atr_winsor_window,
+    )
 
 
 @dataclass(slots=True)
@@ -197,18 +218,7 @@ def run_screen(
     groups = dict(tuple(bars.groupby("type_id", sort=True)))
     ids = type_ids if type_ids is not None else sorted(groups)
     result.universe = len(ids)
-    params = SetupParams(
-        entry_band_sigma=config.backtest.entry_band_sigma,
-        min_rrs=config.backtest.min_rrs,
-        participation_floor=config.backtest.participation_floor,
-        min_bars=config.backtest.min_bars,
-        anchor_lookback_days=config.backtest.anchor_lookback_days,
-        rrs_length=config.signals.rrs_length,
-        atr_length=config.signals.atr_length,
-        participation_window=config.screen.participation_window,
-        atr_winsor_k=config.signals.atr_winsor_k,
-        atr_winsor_window=config.signals.atr_winsor_window,
-    )
+    params = setup_params(config)
     destruction_latest: dict[int, float] = {}
     if destruction is not None and not destruction.empty:
         newest = destruction.sort_values("day").groupby("type_id").tail(1)

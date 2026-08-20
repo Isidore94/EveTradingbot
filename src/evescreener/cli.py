@@ -99,6 +99,31 @@ def build_parser() -> argparse.ArgumentParser:
     paper_fill.add_argument("--price", type=float, required=True)
     paper_fill.add_argument("--units", type=float, required=True)
 
+    watch = sub.add_parser("watch", help="the operator watchlist: add, remove, list")
+    watch_sub = watch.add_subparsers(dest="watch_command", required=True)
+    watch_add = watch_sub.add_parser("add", help="add one name (resolved against the SDE, loudly)")
+    watch_add.add_argument("--name", required=True, help="exact type name")
+    watch_add.add_argument("--type-id", type=int, help="skip name resolution and pin the id")
+    watch_add.add_argument("--note", help="why this name is on the list")
+    watch_remove = watch_sub.add_parser(
+        "remove", help="remove one name — operator action, the only removal path"
+    )
+    watch_remove.add_argument("--name", required=True)
+    watch_sub.add_parser("list", help="every entry, unresolved names included")
+
+    brief = sub.add_parser("brief", help="one type, fully read — the chart, in text")
+    brief.add_argument("--type-id", type=int, help="type id (or use --name)")
+    brief.add_argument("--name", help="type name, resolved against the SDE")
+
+    board = sub.add_parser("board", help="the D1 observation board across the tracked universe")
+    board.add_argument("--top", type=int, default=20, help="rows to show (default: 20)")
+    board.add_argument(
+        "--sort",
+        choices=("value", "strength", "change"),
+        default="value",
+        help="value = deepest below anchored value; strength = RRS; change = day move",
+    )
+
     anchors = sub.add_parser(
         "anchors", help="patch-notes watcher: append anchor CANDIDATES for confirmation"
     )
@@ -136,12 +161,17 @@ def _latest_book(config: Config, region: int):
 
 
 def _composite_and_bars(config: Config, db, region: int):
-    """Load the lake, build the benchmark, and return both."""
+    """Load the lake, build the benchmark. Returns (tracked bars, composite, ALL bars).
+
+    The third element carries the unfiltered lake: watchlist names live outside
+    the tracked universe by design, and their bars must not vanish with the floor.
+    """
     from .signals.composite import build_composite
     from .store.lake import BarLake
     from .universe import tracked_type_ids
 
-    bars = BarLake(config.paths).read(region)
+    all_bars = BarLake(config.paths).read(region)
+    bars = all_bars
     tracked = tracked_type_ids(db, region)
     if tracked and not bars.empty:
         bars = bars[bars["type_id"].isin(tracked)]
@@ -151,7 +181,7 @@ def _composite_and_bars(config: Config, db, region: int):
         single_cap=config.signals.composite_single_weight_cap,
         rebalance_days=config.signals.composite_rebalance_days,
     )
-    return bars, composite
+    return bars, composite, all_bars
 
 
 def _anchor_dates(config: Config) -> list[str]:
@@ -296,29 +326,45 @@ def _cmd_sweep_books(config: Config, args) -> int:
     return asyncio.run(run())
 
 
-def _build_screen(config: Config, db, region: int):
+def _build_screen(config: Config, db, region: int, *, with_watchlist: bool = False):
+    """The ranked screen, plus (optionally) the always-shown watchlist rows."""
+    from .brief import watchlist_summary
     from .killmails import destruction_frame, destruction_z
     from .paper import PaperLedger
     from .screen import run_screen
 
-    bars, composite = _composite_and_bars(config, db, region)
+    bars, composite, all_bars = _composite_and_bars(config, db, region)
     lake_types = sorted(bars["type_id"].unique().tolist()) if not bars.empty else []
     destruction = destruction_z(
         destruction_frame(db, type_ids=lake_types),
         recent_days=config.killmails.destruction_recent_days,
         baseline_days=config.killmails.destruction_baseline_days,
     )
-    return run_screen(
+    book = _latest_book(config, region)
+    anchor_dates = _anchor_dates(config)
+    screen = run_screen(
         config,
         db,
         bars,
         composite,
-        _latest_book(config, region),
+        book,
         destruction=destruction,
-        anchor_dates=_anchor_dates(config),
+        anchor_dates=anchor_dates,
         region_id=region,
         paper_records=PaperLedger(config.paths.ensure().paper_ledger, config).records(),
     )
+    if not with_watchlist:
+        return screen
+    watch_rows = watchlist_summary(
+        config,
+        db,
+        all_bars,
+        getattr(composite, "frame", None),
+        book,
+        anchor_dates=anchor_dates,
+        region_id=region,
+    )
+    return screen, watch_rows
 
 
 def _cmd_digest(config: Config, args) -> int:
@@ -328,7 +374,7 @@ def _cmd_digest(config: Config, args) -> int:
 
     region = _region(config, args)
     with _open_db(config) as db:
-        screen = _build_screen(config, db, region)
+        screen, watch_rows = _build_screen(config, db, region, with_watchlist=True)
         paper = PaperLedger(config.paths.ensure().paper_ledger, config).report()
         reports = config.paths.reports
         backtest = _load(_latest(reports, "backtest")) or {}
@@ -341,6 +387,7 @@ def _cmd_digest(config: Config, args) -> int:
             cross_region=_ScanView(cross) if cross else None,
             backtest_verdict=backtest.get("verdicts"),
             lead_lag_outcome=lead_lag.get("outcome"),
+            watchlist=watch_rows,
         )
     if args.dry_run:
         print(content)
@@ -368,7 +415,7 @@ def _cmd_backtest(config: Config, args) -> int:
         print(f"  ... {index}/{total} types scanned, {found} instances", flush=True)
 
     with _open_db(config) as db:
-        bars, composite = _composite_and_bars(config, db, region)
+        bars, composite, _all_bars = _composite_and_bars(config, db, region)
         if args.max_types and not bars.empty:
             keep = sorted(bars["type_id"].unique())[: args.max_types]
             bars = bars[bars["type_id"].isin(keep)]
@@ -415,7 +462,7 @@ def _cmd_killmails(config: Config, args) -> int:
         if args.poll:
             print(json.dumps(poll_r2z2(config, db).as_dict(), indent=2))
         if args.study:
-            bars, _ = _composite_and_bars(config, db, region)
+            bars, _, _all_bars = _composite_and_bars(config, db, region)
             lake_types = sorted(bars["type_id"].unique().tolist()) if not bars.empty else []
             scores = destruction_z(
                 destruction_frame(db, type_ids=lake_types),
@@ -542,6 +589,116 @@ def _cmd_paper(config: Config, args) -> int:
     return 0
 
 
+def _resolve_type_id(db, args) -> int | None:
+    """`--type-id` wins; `--name` resolves loudly or not at all (never a guess)."""
+    if getattr(args, "type_id", None) is not None:
+        return int(args.type_id)
+    if not getattr(args, "name", None):
+        print("give --type-id or --name", file=sys.stderr)
+        return None
+    row = db.type_by_name(args.name)
+    if row is None:
+        print(
+            f"no type named {args.name!r} in the SDE — run `sde` first, or check the spelling",
+            file=sys.stderr,
+        )
+        return None
+    return int(row["type_id"])
+
+
+def _cmd_watch(config: Config, args) -> int:
+    from .universe import add_watch, remove_watch, watchlist_entries
+
+    with _open_db(config) as db:
+        if args.watch_command == "add":
+            type_id = _resolve_type_id(db, args)
+            if type_id is None:
+                return 2
+            record = add_watch(db, name=args.name, type_id=type_id, note=args.note)
+            print(json.dumps(record, indent=2))
+            return 0
+        if args.watch_command == "remove":
+            if remove_watch(db, args.name):
+                print(f"removed {args.name!r} — an operator action, recorded by its absence")
+                return 0
+            print(f"{args.name!r} is not on the watchlist; nothing removed", file=sys.stderr)
+            return 1
+        entries = watchlist_entries(db)
+        if not entries:
+            print("watchlist is empty — add names with `watch add --name ...`")
+            return 0
+        for row in entries:
+            resolved = row["type_id"] if row["type_id"] is not None else "UNRESOLVED"
+            note = f" · {row['note']}" if row["note"] else ""
+            print(f"{row['name']}  (type {resolved}, added {row['added_at'][:10]}){note}")
+        return 0
+
+
+def _cmd_brief(config: Config, args) -> int:
+    from .brief import build_brief, render_brief
+    from .killmails import destruction_frame, destruction_z
+
+    region = _region(config, args)
+    with _open_db(config) as db:
+        type_id = _resolve_type_id(db, args)
+        if type_id is None:
+            return 2
+        _bars, composite, all_bars = _composite_and_bars(config, db, region)
+        frame = all_bars[all_bars["type_id"] == type_id] if not all_bars.empty else all_bars
+        scores = destruction_z(
+            destruction_frame(db, type_ids=[type_id]),
+            recent_days=config.killmails.destruction_recent_days,
+            baseline_days=config.killmails.destruction_baseline_days,
+        )
+        latest_z = None
+        if scores is not None and not scores.empty:
+            latest_z = float(scores.sort_values("day").iloc[-1]["destruction_z"])
+        brief = build_brief(
+            config,
+            db,
+            frame,
+            getattr(composite, "frame", None),
+            _latest_book(config, region),
+            type_id,
+            region_id=region,
+            anchor_dates=_anchor_dates(config),
+            destruction_z=latest_z,
+        )
+    print(render_brief(brief))
+    return 0
+
+
+def _cmd_board(config: Config, args) -> int:
+    from .brief import build_board, render_board
+    from .universe import watchlist_type_ids
+
+    region = _region(config, args)
+    with _open_db(config) as db:
+        bars, composite, all_bars = _composite_and_bars(config, db, region)
+        watch_ids = set(watchlist_type_ids(db))
+        # The board covers the tracked universe PLUS the watchlist: an
+        # operator's name renders even below the liquidity floor (§11 D4).
+        if watch_ids and not all_bars.empty:
+            scope = set(bars["type_id"].unique().tolist()) | watch_ids
+            frame = all_bars[all_bars["type_id"].isin(sorted(scope))]
+        else:
+            frame = bars
+        board = build_board(
+            config,
+            db,
+            frame,
+            getattr(composite, "frame", None),
+            _latest_book(config, region),
+            watch_ids=watch_ids,
+            anchor_dates=_anchor_dates(config),
+            region_id=region,
+            top=args.top,
+            sort=args.sort,
+        )
+    print(render_board(board))
+    return 0
+
+
 def _cmd_anchors(config: Config, args) -> int:
     from .patchnotes import FeedError, fetch_patch_notes, sync_anchor_candidates
     from .signals.anchors import load_anchors
@@ -634,10 +791,12 @@ def _cmd_daemon(config: Config, args) -> int:
                 ).as_dict()
 
             def digest():
-                screen = _build_screen(config, db, region)
+                screen, watch_rows = _build_screen(config, db, region, with_watchlist=True)
                 paper = PaperLedger(config.paths.paper_ledger, config)
                 paper.mark(book=book_lake.latest(region))
-                content = build_digest(config, screen, paper_report=paper.report())
+                content = build_digest(
+                    config, screen, paper_report=paper.report(), watchlist=watch_rows
+                )
                 return post_digest(config, content, archive_path=config.paths.digests).as_dict()
 
             def killmails():
@@ -691,6 +850,9 @@ HANDLERS = {
     "killmails": _cmd_killmails,
     "cross-region": _cmd_cross_region,
     "paper": _cmd_paper,
+    "watch": _cmd_watch,
+    "brief": _cmd_brief,
+    "board": _cmd_board,
     "anchors": _cmd_anchors,
     "report": _cmd_report,
     "daemon": _cmd_daemon,

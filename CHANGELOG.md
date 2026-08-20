@@ -5,6 +5,36 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Operator workflow port: watch, brief, board (second directive)
+
+**Status: IMPLEMENTED + GREEN.** The desk surfaces the operator lives in on
+TradingBotV3, ported to the CLI/digest world per the new `plan.md` §18 and its
+§17 D-13 deviation row. **358 offline tests green** (21 new), ruff clean,
+selftest 7/7. LOC: 18,296 (11,575 product, 1,435 vendored, 5,286 tests).
+
+- `brief.py` — the new module. `build_brief`/`render_brief`: one type fully
+  read (bands + σ zone, tri-state gates, RRS, participation, ATR/risk unit,
+  nearby levels, priced tiers with breakeven AND round-trip friction, book
+  freshness, flags) — the per-symbol desk chart, in text.
+  `build_board`/`render_board`: the D1 strength-board analogue over the
+  tracked universe plus watchlist, sortable by value/strength/change, blanks
+  at the bottom, honest footer counts. `watchlist_summary`: the compact rows
+  the digest carries. All three are **observation surfaces** (§18.1): types
+  that cannot clear costs are shown with their friction printed, never hidden
+  and never presented as opportunity; the screen's honest-zero panel is
+  untouched.
+- `watch add|remove|list` CLI over the existing watchlist table
+  (`universe.add_watch/remove_watch/watchlist_entries`): add resolves against
+  the SDE loudly; remove is the only removal path and only the operator
+  reaches it; re-adding updates, never duplicates.
+- Digest: a **Watchlist** section renders every name every day — unresolved
+  and bar-less names say so and say what to run. Wired into `digest` and the
+  daemon's digest job.
+- `screen.setup_params()` extracted so screen, backtest and the new surfaces
+  evaluate the ONE setup definition; `_composite_and_bars` now also returns
+  the unfiltered lake so watchlist names below the liquidity floor keep their
+  bars.
+
 ## 2026-08-20 — v1 built in one push (operator directive 2026-08-20)
 
 **Status: IMPLEMENTED + GREEN. Nothing is LIVE_VALIDATED yet** — the

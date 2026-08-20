@@ -126,6 +126,7 @@ def build_digest(
     cross_region=None,
     backtest_verdict: dict | None = None,
     lead_lag_outcome: dict | None = None,
+    watchlist: list[dict] | None = None,
 ) -> str:
     """Assemble the digest body. UTC only; the operator's clock is EVE's clock."""
     lines = [
@@ -190,6 +191,43 @@ def build_digest(
             f"_{screen.below_breakeven} setup(s) rejected below breakeven; "
             f"{screen.unknown_cost} could not be priced._"
         )
+
+    if watchlist is not None:
+        # Local import: the digest stays stdlib-only unless a watchlist renders.
+        from .brief import format_isk
+
+        lines.append("")
+        lines.append("**Watchlist** — always shown, cleared costs or not; your list is your list")
+        if not watchlist:
+            lines.append("_empty — add names with `python -m evescreener watch add --name ...`_")
+        for row in watchlist:
+            if row.get("unresolved"):
+                lines.append(
+                    f"· {row['name']} — UNRESOLVED against the SDE (run `sde`, check the spelling)"
+                )
+                continue
+            if not row.get("bars"):
+                lines.append(
+                    f"· {row['name']} — no bars in the lake yet "
+                    "(run `ingest-history --scope watchlist`)"
+                )
+                continue
+            dip = f"{row['dip_sigma']:+.2f}σ" if row.get("dip_sigma") is not None else "σ UNKNOWN"
+            rrs = f"{row['rrs']:+.2f}" if row.get("rrs") is not None else "UNKNOWN"
+            friction = (
+                f"{row['friction_pct']:.2f}%" if row.get("friction_pct") is not None else "UNKNOWN"
+            )
+            change = (
+                f"{row['day_change_pct']:+.2f}%"
+                if row.get("day_change_pct") is not None
+                else "UNKNOWN"
+            )
+            lines.append(
+                f"· {row['name']} — {format_isk(row.get('close'))} ({change}) · "
+                f"{dip} {row.get('band_zone', 'UNKNOWN')} · RRS {rrs} · "
+                f"friction {friction} · book {row.get('freshness', 'UNKNOWN')}"
+                + (" · **SETUP**" if row.get("is_setup") else "")
+            )
 
     if cross_region is not None:
         lines.append("")

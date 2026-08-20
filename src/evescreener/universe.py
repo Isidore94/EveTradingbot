@@ -240,3 +240,30 @@ def watchlist_type_ids(db: Database) -> list[int]:
             "SELECT type_id FROM watchlist WHERE type_id IS NOT NULL ORDER BY type_id"
         )
     ]
+
+
+def add_watch(db: Database, *, name: str, type_id: int, note: str | None = None) -> dict:
+    """Add one operator-entered name. Re-adding updates the note, never duplicates."""
+    now = iso(utcnow())
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO watchlist(name, type_id, added_at, resolved_at, note)"
+            " VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET"
+            " type_id=excluded.type_id, resolved_at=excluded.resolved_at,"
+            " note=COALESCE(excluded.note, watchlist.note)",
+            (name, int(type_id), now, now, note),
+        )
+    row = db.conn.execute("SELECT * FROM watchlist WHERE name=?", (name,)).fetchone()
+    return dict(row)
+
+
+def remove_watch(db: Database, name: str) -> bool:
+    """Remove one name. This is the ONLY removal path and only the operator
+    reaches it — nothing automatic may call this (§11 D4)."""
+    cursor = db.conn.execute("DELETE FROM watchlist WHERE name=? COLLATE NOCASE", (name,))
+    return cursor.rowcount > 0
+
+
+def watchlist_entries(db: Database) -> list:
+    """Every entry, unresolved names included — they render loudly, not silently."""
+    return list(db.conn.execute("SELECT * FROM watchlist ORDER BY name"))

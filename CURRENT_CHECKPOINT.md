@@ -36,6 +36,11 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
+- **Later the same day — operator workflow port (plan.md §18, §17 D-13):**
+  `watch`/`brief`/`board` and the digest watchlist section landed;
+  `uv run pytest -q` → **358 passed, 7 deselected**, ruff check + format
+  clean, selftest 7/7. LOC now 18,296 (11,575 product / 1,435 vendored /
+  5,286 tests). The baseline below is the v1 build it extends.
 - `uv run pytest -q` → **337 passed, 7 deselected** (network).
 - `uv run pytest -m network -q` → **7 passed in 139 s** against real endpoints:
   real history against the frozen bar contract, a second call skipped as
@@ -118,6 +123,12 @@ evidence.
 - [ ] **Set the Discord webhook** in `config.toml`. Until then delivery
       reports `unconfigured` and the digest is archived but not posted, which
       is correct behaviour, not a failure.
+- [ ] **Read the new desk surfaces once against the in-game market** (plan.md
+      §18): `board --top 20` beside the in-game browser — do the movers and
+      dips look like the market you see? — and `brief --name <a type you
+      know>` — are the bands, levels and friction numbers believable? These
+      are the ported TradingBotV3 chart/strength-board reads; §2.7's "does the
+      board resemble your scan" judgement is yours to make, not the build's.
 
 ### E. Cost netting (was Phase 4's gate)
 

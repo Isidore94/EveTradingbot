@@ -45,6 +45,19 @@ uv run python -m evescreener paper report          # §12.4 verdict tracker
 uv run python -m evescreener report                # §16 viability report
 ```
 
+And the daily desk workflow (plan.md §18 — the TradingBotV3 surfaces, in text):
+
+```bash
+uv run python -m evescreener watch add --name "Ishtar" --note "doctrine hull"
+uv run python -m evescreener watch list
+uv run python -m evescreener brief --name "Ishtar"     # the chart, in text
+uv run python -m evescreener board --sort value        # the D1 strength board
+```
+
+The board and the brief are observation, not opportunity: they show friction
+beside every row and never hide a type for failing to clear costs. Watchlist
+names render in every digest, and only `watch remove` — you — removes one.
+
 ```bash
 uv run python -m evescreener daemon    # every cadence in one process
 ```

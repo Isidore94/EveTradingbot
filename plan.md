@@ -1130,6 +1130,7 @@ this document's prior text is recorded here with its reason.
 | D-10 | **§3.2's claim that 4xx "should not occur in the steady state" is withdrawn** — but by less than an earlier draft of this table claimed. | **Corrected 2026-08-20 after the full crawl.** A first, aborted run reported 16,789 "failures" and that number was written here as if it were the 404 rate. It was not: it was the circuit-breaker cascade described in D-12, i.e. the symptom of a bug in this repo, mistaken for a property of ESI. The completed crawl measures **241 real 404s out of 17,325 history requests (1.3%)**. 4xx does occur in the steady state and must not trip a breaker, so the fix stands; the magnitude claim did not, and is retracted. |
 | D-12 | **A per-item 404 no longer trips the per-feed circuit breaker.** | The breaker treated each 404 as a feed failure and latched open permanently, turning a 1.3% catalogue gap into a total ingest outage after 2,363 of 19,152 types — and producing the false 16,789 figure above. Protection against the legacy 100-errors/minute limit moved to the error-limit guard, which yields at 25 remaining. Measured across the completed crawl: zero 429, zero 420. |
 | D-11 | **The census floor grid gained looser corners** (a no-floor row, 1M ISK, 0 and 1 order_count). | Measured 2026-08-20: the original grid's loosest corner (10M ISK / 5 orders) captured only 88.2% of median daily turnover, so §8 Phase 1's derive rule could not resolve at its 95% target. The **rule is unchanged**; only its candidate set widened downward. |
+| D-13 | **Operator workflow surfaces added**: `watch`, `brief`, `board` subcommands and the digest's watchlist section (§18). | Second operator directive 2026-08-20: "I want my TradingBotV3 moved to EVE with relevant changes" — the analytical core alone is not the daily product; the desk workflow is. Additive only, observation-only by the §18.1 rule. LOC after: **18,296** (11,575 product, 1,435 vendored, 5,286 tests) — the D-9 exception grows by 1,162 and §1's budget still stands for future work. |
 
 ### §0 named checks — status after this build
 
@@ -1141,3 +1142,42 @@ this document's prior text is recorded here with its reason.
 | #4 outlier prints in `highest`/`lowest` | **ANSWERED 2026-08-20: CCP does not filter them, and the effect is severe.** Measured over 1,854,651 real Forge bars: `high/close` reaches **1,940,777×** and `close/low` reaches **12.8 billion×**; 0.24% of bars carry a high more than 10× the day's average and 1.78% carry a low below a tenth of it. The low side is worse than the high side (6.7% of bars have `close/low > 2` versus 3.1% for `high/close > 2`), which fits EVE: fat-fingering a sale at 0.01 ISK is a common mistake, buying at a million times fair is not. Consequence, measured on the 347 tracked types: winsorization clamps **7.9% of bars** and touches **79% of types**, and **without it 20.5% of types would carry a risk unit more than twice too large**, p99 143× too large, worst case 2,433× too large. Position sizing off raw `highest`/`lowest` would be wrong by orders of magnitude for a fifth of the universe. The §6 winsorization decision was made on suspicion and is now measured. |
 | #5 relist/modify fee formula | **OPEN.** Modelled as `relist_surcharge_multiple` in config, defaulting to 1.0× the broker fee. Only the maker-exit branch depends on it, and that branch is advisory. |
 | #6 sales tax / broker base rates | **OPEN.** 7.5% / 3% are config defaults, not constants; the operator's one-real-fill reconciliation is the gate that closes this. |
+
+---
+
+## 18. Operator workflow port — the desk surfaces (operator directive 2026-08-20, second)
+
+The operator's follow-up directive: *"I want my TradingBotV3 moved to EVE with
+relevant changes for the game vs real life."* The analytical core (§2's port
+surface) landed in the v1 build; what was still missing was the **daily
+workflow the operator actually lives in** on the source system — the Focus
+lists, the per-symbol chart, and the strength board. This section adds their
+text-mode ports and records the rule that keeps them inside this repo's
+invariants.
+
+### 18.1 The rule: observation is not opportunity
+
+The honest-zero invariant (§5) governs the digest's candidate panel, and it
+alone. The surfaces below deliberately show types that do **not** clear costs
+— with their measured friction printed beside them — because the operator is
+learning the EVE market and must see what the screen rejects and why. Nothing
+below ranks on net edge, calls itself a pick, or nets a cost away. UNKNOWN
+renders as a blank that sorts to the bottom, never as a zero, never as a
+silently-priced number.
+
+### 18.2 The surfaces (`src/evescreener/brief.py`)
+
+| Surface | Source-repo ancestor | What it is |
+|---|---|---|
+| `watch add / remove / list` | Focus lists + candidate registry | Operator-owned names in `state.db`'s watchlist table. `add` resolves against the SDE loudly (never a guess); `remove` is the **only** removal path and only the operator reaches it — §11 D4's never-auto-removed invariant, now with a CLI. The §11 D4 seed list remains the config-seeded starting roster. |
+| `brief --name X` | the per-symbol desk chart | One type fully read: anchored VWAP + σ zone, the four tri-state gates (PASS/FAIL/UNKNOWN), RRS vs the Forge Composite, participation, ATR and risk unit, nearby levels with conviction, destruction annotation, and the priced tiers — breakeven **and round-trip friction** per notional — with book freshness and flags. It ends by saying what it is not. |
+| `board [--sort value\|strength\|change]` | the strength board | The tracked universe **plus watchlist names, floor or no floor**, as one cross-section: close, day move, dip σ, RRS, participation, friction at the smallest tier, setup marker, watchlist marker. Blanks sort to the bottom whichever way the board is sorted; the footer counts what was measured, what was UNKNOWN, and how many setups exist today. |
+| Digest watchlist section | the Focus feed | Every watchlist name renders in **every** digest — cleared costs or not, resolved or not, bars or no bars — one compact line each. An unresolvable or bar-less name says so and says what to run; it never disappears. |
+
+### 18.3 Deliberately NOT ported
+
+The Qt desk (42k LOC — §2's lesson, learned once), M5/bounce anything, session
+VWAP, auto-adoption and pick staging (nothing here adopts anything: every
+watchlist entry is operator-typed), alert sounds, phone price alerts, and the
+review-learning loop. The board and the brief are pull surfaces the operator
+runs when looking; the only push channel remains the daily webhook (§11 D6).

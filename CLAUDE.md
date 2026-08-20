@@ -81,9 +81,12 @@ All timestamps tz-aware UTC.
 `plan.md` §17 carries a measured-facts table from the 2026-08-20 build. Read it
 before trusting any estimate in §0–§11. The ones that changed a decision:
 
-- `/markets/{region}/types` lists **19,152** Forge types; **16,789 of them 404
-  on `/markets/{region}/history`**. §3.2's "4xx should not occur" is withdrawn;
-  gaps are recorded in `history_missing` and a 404 never trips a breaker.
+- Of **19,152** Forge-active types, **14,013 have daily bars**, **4,978 return
+  an *empty* history array** (a book with no trades in 13.5 months) and **241
+  genuinely 404** (1.3%). §3.2's "4xx should not occur" is withdrawn; gaps are
+  recorded in `history_missing` and a 404 never trips a breaker. *(An earlier
+  draft of this file claimed 16,789 404s. That was a circuit-breaker cascade
+  mistaken for data — see §17 D-10.)*
 - **Structure exposure is on the EXIT, not the entry.** Across all five hubs,
   0.0% of visible ask volume is in player structures and 8.8–98.3% of bid
   volume is. §9 R3 assumed the opposite direction.

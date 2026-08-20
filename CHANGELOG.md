@@ -139,9 +139,9 @@ be stated; the product surface alone is 10.5k.
 ### Bugs found by running the real thing
 
 - `/markets/{region}/types` lists type_ids that `/markets/{region}/history`
-  404s on — **16,789 of 19,152 in The Forge**. `plan.md` §3.2 predicted 404s
-  "should not occur in the steady state"; that is measurably wrong. A 404 is now
-  a per-resource fact recorded in `history_missing`.
+  404s on. `plan.md` §3.2 predicted 404s "should not occur in the steady
+  state"; that is wrong, though by **far less than I first recorded**. See the
+  correction below.
 - The per-feed circuit breaker treated those 404s as feed failures and latched
   open permanently, turning a catalogue gap into a total ingest outage after
   2,363 of 19,152 types. 4xx no longer trips the breaker.
@@ -174,13 +174,24 @@ be stated; the product surface alone is 10.5k.
 - The viability report rendered an untouched paper ledger as "0 closed, 0 ISK"
   — an absence of evidence presented as a measurement. It reads UNKNOWN now.
 
+### A number I got wrong and corrected
+
+An earlier commit recorded "16,789 of 19,152 types 404 on history" and put it in
+`plan.md`, `CHANGELOG.md` and `CLAUDE.md` as a measured fact. **It was not one.**
+That figure was the circuit-breaker cascade — a bug in this repo, whose symptom
+I mistook for a property of ESI. The completed crawl measures **241 real 404s
+out of 17,325 history requests (1.3%)**. The fixes prompted by the wrong number
+(a 404 must not trip a breaker; gaps belong in `history_missing`) were correct
+and stand; the magnitude claim is retracted in `plan.md` §17 D-10.
+
 ### What the measurements said
 
 The point of the build. All recorded in `plan.md` §17.
 
-- **The universe is not what it looks like.** 19,152 Forge-active types, but
-  16,789 of them have no history at all, and the median spread across the
-  16,706 two-sided books is **98.8%**. Only ~932 types (5.6%) trade inside a 5%
+- **The universe is not what it looks like.** Of 19,152 Forge-active types,
+  **14,013 have daily bars**, **4,978 return an empty history array** (an order
+  book with no trades in 13.5 months) and only **241 genuinely 404**. The
+  median spread across the 16,706 two-sided books is **98.8%**. Only ~932 types (5.6%) trade inside a 5%
   spread — anywhere near the 3.375% tax floor.
 - **Depth is the binding constraint.** 77.1% / 55.8% / 39.6% of sell books can
   absorb 0.25B / 1.0B / 2.5B ISK. A quarter of sell books have one order

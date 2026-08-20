@@ -332,6 +332,53 @@ def test_the_chart_opens_zoomed_in_enough_to_read(qtbot, desk):
     assert panel.canvas.visible == 0
 
 
+def test_an_index_is_drawn_as_a_line_because_it_has_no_range(qtbot, desk):
+    """`composite.py` builds high == low == close; candles there are dashes."""
+    import numpy as np
+
+    from evescreener.gui.chart import ChartSeries
+
+    level = np.array([100.0, 101.0, 99.0, 102.0], dtype="float64")
+    index = ChartSeries(type_id=0, type_name="FORGE", close=level, high=level, low=level)
+    assert index.known
+    assert not index.ranged, "an index level is one number a day, not a range"
+
+    real = ChartSeries(
+        type_id=34,
+        type_name="Tritanium",
+        close=level,
+        high=level + 1.0,
+        low=level - 1.0,
+    )
+    assert real.ranged
+
+    # A series that is flat for a while but not always still gets its candles.
+    mixed = ChartSeries(
+        type_id=34,
+        type_name="Tritanium",
+        close=level,
+        high=np.array([100.0, 101.0, 99.0, 104.0]),
+        low=level,
+    )
+    assert mixed.ranged
+
+
+def test_the_market_page_charts_its_indices_without_candles(qtbot, desk, config):
+    """The regression: FORGE rendered as a field of floating notches."""
+    from evescreener.gui.app import DeskWindow
+
+    window = DeskWindow(config, data=desk)
+    qtbot.addWidget(window)
+    window.timer.stop()
+    market = window.pages["MARKET"]
+    for canvas in (market.forge_canvas, market.breadth_canvas):
+        series = canvas.series
+        if series is not None and series.known:
+            assert not series.ranged
+        canvas.resize(700, 500)
+        canvas.grab()
+
+
 def test_the_chart_draws_the_levels_that_were_already_computed(qtbot, desk):
     from evescreener.gui.chart import build_series
 

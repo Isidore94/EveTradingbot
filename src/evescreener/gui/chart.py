@@ -59,6 +59,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -165,6 +166,18 @@ class ChartSeries:
     @property
     def known(self) -> bool:
         return self.close is not None and len(self.close) > 1
+
+    @property
+    def ranged(self) -> bool:
+        """True when these bars carry an intraday range worth a body.
+
+        A composite index does not. `signals/composite.py` builds it with
+        `high == low == close` by construction — an index level is one number
+        per day and has no intraday range to report — so a candle drawn from
+        one is a row of zero-height dashes with a notch floating in the middle
+        of each. Such a series is a *level* series and is drawn as a line.
+        """
+        return self.high is not None and self.low is not None and bool(np.any(self.high > self.low))
 
     def tail(self, count: int) -> ChartSeries:
         """The last `count` bars, with every parallel array sliced together.
@@ -301,6 +314,7 @@ class ChartCanvas(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(360)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.series: ChartSeries | None = None
         self.visible = DEFAULT_VISIBLE_BARS
         self.show_bands = True
@@ -496,6 +510,11 @@ class ChartCanvas(QWidget):
         then the shaded envelope with a close line — rather than smearing into
         a mass that would read as more data than it is.
         """
+        if not series.ranged:
+            # A level series (an index): no range, so no body. Drawing candles
+            # here produced a field of floating notches and nothing else.
+            self._draw_price(painter, pane, series, low, high)
+            return
         count = len(series.close)
         slot = pane.width() / max(count, 1)
         if slot < CANDLE_MIN_SLOT:

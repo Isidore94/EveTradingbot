@@ -46,6 +46,20 @@ a day — so no chart drawn from it can say whether price rose or fell inside
 the day. The notch's height inside the body is the honest substitute: high in
 the range means the trading happened high in the range.
 
+### Two regressions the operator's screenshots caught
+
+**An index is not a candle series.** `signals/composite.py` builds a composite
+with `high == low == close` by construction — an index level is one number a
+day and has no intraday range — so every FORGE candle was a zero-height body
+with a notch floating in it, and MARKET rendered as a field of dashes.
+`ChartSeries.ranged` now reports whether the bars carry any range at all, and
+a series without one is drawn as a level line.
+
+**The canvas was not claiming its space.** `ChartCanvas` had the default
+non-expanding size policy, so inside a `section()` block it split the leftover
+height with its own title label and sat squashed at the bottom of a mostly
+empty pane. It is now `Expanding` in both directions.
+
 ### Readability, which was the actual complaint
 
 The 400-bar default gave ~3.5 px per bar on a desk pane. The chart now opens

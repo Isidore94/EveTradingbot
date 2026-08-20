@@ -45,7 +45,10 @@ evidence.
   open→close body was refused **on measurement**: yesterday's close falls
   outside today's range on **55.7%** of 4,034,697 bars and **69.0%** of
   tier-OK bars, so it would hang off its own wick on most bars. The chart now
-  opens at 120 bars with a 60/120/250/all selector. Presentation only — no
+  opens at 120 bars with a 60/120/250/all selector. A composite index carries
+  no intraday range (`high == low == close`), so MARKET draws FORGE and
+  FORGE-EW as level lines rather than zero-height candles, and the canvas now
+  expands instead of sharing its height with its own title. Presentation only — no
   detector, formula or verdict rule moved, so nothing on the live-validation
   checklist below changes state.
 - **The relative measurable gate (plan.md §13.2 amended, §17 D-29):**

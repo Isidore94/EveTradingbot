@@ -5,6 +5,76 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The spread is revenue when you are the one posting it
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §20.2 and §17 D-31.
+`uv run pytest -q` → **583 passed, 7 deselected**, ruff check + format clean.
+
+### The claim, and why it does not contradict §17
+
+§17's NOT PLAUSIBLE verdict was measured on a **taker** — cross the spread in,
+cross it out, 14.7% round-trip friction against a +2.80% gross edge. A
+**maker** posts both sides and *collects* that spread. The 98.8% median Forge
+spread that made taking hopeless is what a maker is paid. Both readings are
+true at once, because they are prices paid by opposite participants.
+
+Maker round trip at the operator's skills: broker 1.300% in + broker 1.300%
+out + sales tax 3.375% = **5.975%**.
+
+### The dust bid, measured before the page was designed
+
+Ranking a swept book by raw spread produces garbage. A 0.02 ISK bid against a
+129,000 ISK ask reads as a **608,000,000%** edge, and nothing will ever sell
+into that bid. Median raw net edge across 16,709 two-sided Forge types is
+**+181%**; p90 is **+37,492%**. Arithmetically correct, economically
+meaningless.
+
+Every row is therefore anchored to the **traded average** — the ESI daily
+mean, the one price transactions are known to have happened at. Of 16,381
+types with both a two-sided book and an average:
+
+| | |
+| --- | --- |
+| bid under **half** the traded average | **39.7%** |
+| bid under a tenth | 19.8% |
+| bid under a hundredth | 9.3% |
+| ask above **twice** the average | 23.6% |
+
+With the guards — bid ≥ 0.5× average, ask ≤ 2× average, ≥100 units/day —
+**2,230** names survive and **1,590** carry a positive net maker edge, median
+**+13.0%**, p90 **+57.3%**. Top name *Capital Ion Thruster*: bid 301,700, avg
+597,400, ask 871,600.
+
+The guards are **page controls, not constants**, and "show excluded" puts the
+rejects back with their `DUST_BID` / `WIDE_ASK` / `NO_AVG` flags, so the guard
+can be checked rather than trusted.
+
+### What it refuses to pretend to know
+
+Whether a posted order ever **fills**. Undercut risk — another trader posting
+0.01 ISK inside you for a fraction of the capital, defended only by relisting
+at a broker fee each time — and waiting time are **not** in the lake, and no
+number on the page bounds them. Volume, top-of-book depth and the top order's
+share of volume are reported as evidence, never as a probability, and the page
+prints the caveat rather than implying an edge nothing has measured.
+
+A book older than `costs.book_staleness_minutes` prices **nothing**. On the
+operator's 121-minute-old sweep the page showed an honest zero, which is the
+correct answer and not an empty one.
+
+### Also landed
+
+**SETTINGS** — an ntfy server/topic/token/priority form, at the operator's
+request and ahead of §20.5. It writes to the `meta` table of `state.db`, not
+`config.toml`: that file is the hand-edited, comment-rich contract of §11 D1,
+and no TOML *writer* exists among the four locked runtime dependencies. Saving
+a server with no topic is refused rather than half-stored. **Nothing is
+delivered yet and the page says so** — no file under `gui/` may import an HTTP
+client, so evaluation and delivery stay in §20.5, in the daemon.
+
+A hub dropdown covers every configured hub plus an all-hubs entry, and SPREADS
+is also a DESK tab.
+
 ## 2026-08-20 — DESK: pick on the left, decide on the right
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §20.1. `uv run pytest -q` →

@@ -110,7 +110,19 @@ def desk(config, db):
 
 @pytest.mark.parametrize(
     "title",
-    ["DESK", "MARKET", "CHARTS", "BOARD", "FOCUS", "SCANNER", "PAPER", "LEARNING", "HEALTH"],
+    [
+        "DESK",
+        "MARKET",
+        "CHARTS",
+        "BOARD",
+        "FOCUS",
+        "SCANNER",
+        "SPREADS",
+        "PAPER",
+        "LEARNING",
+        "HEALTH",
+        "SETTINGS",
+    ],
 )
 def test_every_page_opens_on_fixture_data(qtbot, desk, title):
     from evescreener.gui.pages import PAGES
@@ -133,9 +145,11 @@ def test_the_window_registers_every_page_in_priority_order(qtbot, desk, config):
         "BOARD",
         "FOCUS",
         "SCANNER",
+        "SPREADS",
         "PAPER",
         "LEARNING",
         "HEALTH",
+        "SETTINGS",
     ]
     window.timer.stop()
 
@@ -459,6 +473,84 @@ def test_a_type_with_no_bars_says_so_rather_than_drawing_nothing(qtbot, desk):
     qtbot.addWidget(panel)
     panel.show_series(series)
     assert "999999" in panel.title.text()
+
+
+# -- SETTINGS and SPREADS ---------------------------------------------------
+
+
+def test_settings_stores_ntfy_in_the_state_db_not_config_toml(qtbot, desk):
+    """config.toml is hand-edited and there is no TOML writer in the deps."""
+    from evescreener.gui.pages.settings import SettingsPage, ntfy_settings
+
+    page = SettingsPage(desk)
+    qtbot.addWidget(page)
+    page.ensure_current()
+
+    page.server.setText("https://ntfy.example.org")
+    page.topic.setText("eve-desk-8f3a1c")
+    page.token.setText("tk_secret")
+    page._save()
+    assert "eve-desk-8f3a1c" in page.message.text()
+
+    stored = ntfy_settings(desk.db)
+    assert stored["server"] == "https://ntfy.example.org"
+    assert stored["topic"] == "eve-desk-8f3a1c"
+    assert stored["token"] == "tk_secret"
+
+    # A reopened page shows what was stored.
+    again = SettingsPage(desk)
+    qtbot.addWidget(again)
+    again.ensure_current()
+    assert again.topic.text() == "eve-desk-8f3a1c"
+
+
+def test_settings_refuses_a_server_with_no_topic(qtbot, desk):
+    """Half a destination is not a partial setup, it is an unusable one."""
+    from evescreener.gui.pages.settings import SettingsPage, ntfy_settings
+
+    page = SettingsPage(desk)
+    qtbot.addWidget(page)
+    page.ensure_current()
+    page.server.setText("https://ntfy.sh")
+    page.topic.setText("   ")
+    page._save()
+    assert "nothing saved" in page.message.text()
+    assert ntfy_settings(desk.db)["topic"] == ""
+
+
+def test_the_spreads_page_offers_every_hub_and_an_all_entry(qtbot, desk):
+    from evescreener.gui.pages.spreads import SpreadsPage
+
+    page = SpreadsPage(desk)
+    qtbot.addWidget(page)
+    labels = [page.hub.itemText(index) for index in range(page.hub.count())]
+    assert labels[-1] == "All hubs"
+    assert len(labels) == len(desk.config.freight.hub_systems) + 1
+    # Selecting "All hubs" asks for every region at once.
+    page.hub.setCurrentIndex(page.hub.count() - 1)
+    assert len(page.hub.currentData()) == len(desk.config.freight.hub_systems)
+
+
+def test_the_spreads_page_paints_a_hub_with_no_book_without_raising(qtbot, desk):
+    from evescreener.gui.pages.spreads import SpreadsPage
+    from evescreener.spreads import HubSpreads
+
+    page = SpreadsPage(desk)
+    qtbot.addWidget(page)
+    page.paint([HubSpreads(region_id=10_000_999, hub="Nowhere", note="no book on disk")])
+    assert "no book on disk" in page.summary.text()
+    assert page.table.rowCount() == 0
+
+
+def test_the_spreads_page_states_what_it_cannot_measure(qtbot, desk):
+    """Undercut and waiting risk are unmodelled and the page must say so."""
+    from evescreener.gui.pages.spreads import SpreadsPage
+
+    page = SpreadsPage(desk)
+    qtbot.addWidget(page)
+    caveat = page.caveat.text().lower()
+    assert "undercut" in caveat
+    assert "unmodelled" in caveat or "does not know" in caveat
 
 
 # -- Focus never auto-removes -----------------------------------------------

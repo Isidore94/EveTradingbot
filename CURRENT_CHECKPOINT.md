@@ -45,10 +45,10 @@ as **plan.md §20**, phased, one per session, each gated green.
 | phase | state |
 |---|---|
 | §20.1 DESK — consolidated review page | **IMPLEMENTED + GREEN** |
-| §20.2 SPREADS — maker / station trading | **NEXT** |
-| §20.3 TOP PERFORMERS 1w / 1m | not started |
+| §20.2 SPREADS — maker / station trading | **IMPLEMENTED + GREEN** (§17 D-31) |
+| §20.3 TOP PERFORMERS 1w / 1m | **NEXT** |
 | §20.4 REGIONS — cross-region hauling | not started |
-| §20.5 ALERTS + ntfy | not started |
+| §20.5 ALERTS + ntfy | not started — SETTINGS form landed early, delivery not built |
 
 **Setups are out of scope for this track** by operator decision; the action on
 every surface is a paper trade.
@@ -64,7 +64,16 @@ which any existing measurement covers.
 
 ## Verification baseline (2026-08-20)
 
-- **Latest — DESK, the consolidated review page (plan.md §20.1):**
+- **Latest — SPREADS and SETTINGS (plan.md §20.2, §17 D-31):**
+  `uv run pytest -q` → **583 passed, 7 deselected**, ruff check + format clean.
+  The maker read of the book, anchored to the traded average because 39.7% of
+  two-sided Forge books have a bid under half of it. 1,590 Forge names carry a
+  positive net maker edge on a simulated-fresh book (median +13.0%); on the
+  real 121-minute-old sweep the page correctly showed an honest zero.
+  **Owed live gate:** run `sweep-books`, then confirm the SPREADS list against
+  the in-game market for a handful of names — no row on this page has ever
+  been checked against a real order book, and fill probability is unmodelled.
+- **DESK, the consolidated review page (plan.md §20.1):**
   `uv run pytest -q` → **566 passed, 7 deselected**, ruff check + format clean.
   FOCUS/BOARD/SCANNER as tabs on the left, the one chart on the right, nothing
   removed from the rail. The window now owns the single `ChartPanel` and docks

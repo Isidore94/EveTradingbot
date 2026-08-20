@@ -24,6 +24,8 @@ from .learning import LearningPage
 from .market import MarketPage
 from .paper import PaperPage
 from .scanner import ScannerPage
+from .settings import SettingsPage
+from .spreads import SpreadsPage
 
 __all__ = [
     "BoardPage",
@@ -36,6 +38,8 @@ __all__ = [
     "PAGES",
     "PaperPage",
     "ScannerPage",
+    "SettingsPage",
+    "SpreadsPage",
 ]
 
 # Left-rail order. This is the operator's stated priority, not alphabetical.
@@ -46,7 +50,9 @@ PAGES = (
     ("BOARD", BoardPage),
     ("FOCUS", FocusPage),
     ("SCANNER", ScannerPage),
+    ("SPREADS", SpreadsPage),
     ("PAPER", PaperPage),
     ("LEARNING", LearningPage),
     ("HEALTH", HealthPage),
+    ("SETTINGS", SettingsPage),
 )

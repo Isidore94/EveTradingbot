@@ -32,6 +32,7 @@ from .base import DeskPage
 from .board import BoardPage
 from .focus import FocusPage
 from .scanner import ScannerPage
+from .spreads import SpreadsPage
 
 __all__ = ["DeskReviewPage"]
 
@@ -40,6 +41,7 @@ __all__ = ["DeskReviewPage"]
 TABS = (
     ("FOCUS", FocusPage),
     ("BOARD", BoardPage),
+    ("SPREADS", SpreadsPage),
     ("SCANNER", ScannerPage),
 )
 

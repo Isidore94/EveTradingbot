@@ -94,12 +94,30 @@ def test_floor_grid_is_scored_across_the_whole_grid(seeded_lake):
 
 def test_derived_floor_follows_the_stated_rule():
     grid = [
-        {"min_median_isk_value": 10e6, "min_median_order_count": 5, "types": 900,
-         "share_of_types": 0.9, "captured_daily_isk": 1e12, "share_of_turnover": 0.999},
-        {"min_median_isk_value": 100e6, "min_median_order_count": 30, "types": 300,
-         "share_of_types": 0.3, "captured_daily_isk": 0.97e12, "share_of_turnover": 0.97},
-        {"min_median_isk_value": 1e9, "min_median_order_count": 100, "types": 40,
-         "share_of_types": 0.04, "captured_daily_isk": 0.5e12, "share_of_turnover": 0.5},
+        {
+            "min_median_isk_value": 10e6,
+            "min_median_order_count": 5,
+            "types": 900,
+            "share_of_types": 0.9,
+            "captured_daily_isk": 1e12,
+            "share_of_turnover": 0.999,
+        },
+        {
+            "min_median_isk_value": 100e6,
+            "min_median_order_count": 30,
+            "types": 300,
+            "share_of_types": 0.3,
+            "captured_daily_isk": 0.97e12,
+            "share_of_turnover": 0.97,
+        },
+        {
+            "min_median_isk_value": 1e9,
+            "min_median_order_count": 100,
+            "types": 40,
+            "share_of_types": 0.04,
+            "captured_daily_isk": 0.5e12,
+            "share_of_turnover": 0.5,
+        },
     ]
     derived = derive_floor(grid, target_turnover_share=0.95)
     assert derived["resolved"]
@@ -109,8 +127,14 @@ def test_derived_floor_follows_the_stated_rule():
 
 def test_derived_floor_is_unresolved_rather_than_guessed():
     grid = [
-        {"min_median_isk_value": 1e9, "min_median_order_count": 100, "types": 4,
-         "share_of_types": 0.01, "captured_daily_isk": 1e9, "share_of_turnover": 0.10}
+        {
+            "min_median_isk_value": 1e9,
+            "min_median_order_count": 100,
+            "types": 4,
+            "share_of_types": 0.01,
+            "captured_daily_isk": 1e9,
+            "share_of_turnover": 0.10,
+        }
     ]
     derived = derive_floor(grid, target_turnover_share=0.95)
     assert not derived["resolved"]

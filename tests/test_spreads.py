@@ -59,7 +59,7 @@ def costs(config) -> CostModel:
 # -- the arithmetic ---------------------------------------------------------
 
 
-def test_net_edge_is_measured_against_what_is_actually_committed(costs):
+def test_the_quoted_margin_is_measured_against_what_is_actually_committed(costs):
     """Not the mid: a maker who measures on the mid counts half the spread twice."""
     frame = maker_edge_frame(
         _book([(1, 100.0, 130.0)]),
@@ -70,8 +70,8 @@ def test_net_edge_is_measured_against_what_is_actually_committed(costs):
     row = frame.iloc[0]
     outlay = costs.buy_outlay(100.0, maker=True)
     proceeds = costs.sell_proceeds(130.0, maker=True)
-    assert row["net_isk"] == pytest.approx(proceeds - outlay)
-    assert row["net_pct"] == pytest.approx((proceeds - outlay) / outlay * 100.0)
+    assert row["quoted_margin_isk"] == pytest.approx(proceeds - outlay)
+    assert row["quoted_margin_pct"] == pytest.approx((proceeds - outlay) / outlay * 100.0)
     # Both sides pay broker; only the sale pays tax.
     assert outlay > 100.0 and proceeds < 130.0
     assert row["state"] == "OK"
@@ -82,7 +82,7 @@ def test_the_maker_round_trip_costs_broker_twice_and_tax_once(costs):
     fee_pct = costs.sales_tax_pct + 2 * costs.broker_fee_pct
     frame = maker_edge_frame(_book([(1, 100.0, 100.0)]), costs, averages={1: 100.0})
     # Bid == ask means the whole round trip is fee, and it is a loss.
-    assert frame.iloc[0]["net_pct"] == pytest.approx(-fee_pct, abs=0.2)
+    assert frame.iloc[0]["quoted_margin_pct"] == pytest.approx(-fee_pct, abs=0.2)
 
 
 # -- the guard this page exists for -----------------------------------------
@@ -101,7 +101,7 @@ def test_a_dust_bid_is_flagged_not_ranked(costs):
     assert dust["state"] == "DUST_BID"
     assert real["state"] == "OK"
     # The arithmetic is still reported — it is flagged, not hidden or repaired.
-    assert dust["net_pct"] > 1_000_000
+    assert dust["quoted_margin_pct"] > 1_000_000
     assert filter_rows(frame)["type_id"].tolist() == [2]
 
 
@@ -143,8 +143,8 @@ def test_a_stale_book_prices_nothing(costs):
     )
     row = frame.iloc[0]
     assert row["state"] == "STALE"
-    assert not np.isfinite(row["net_pct"])
-    assert not np.isfinite(row["net_isk"])
+    assert not np.isfinite(row["quoted_margin_pct"])
+    assert not np.isfinite(row["quoted_margin_isk"])
     assert filter_rows(frame).empty
 
 
@@ -184,7 +184,7 @@ def test_filtering_is_exclusion_and_ordering_only(costs):
     )
     shown = filter_rows(frame, min_units=DEFAULT_MIN_UNITS)
     assert shown["type_id"].tolist() == [1], "type 2 is under the volume floor"
-    for column in ("best_bid", "best_ask", "net_pct"):
+    for column in ("best_bid", "best_ask", "quoted_margin_pct"):
         original = frame.set_index("type_id")[column]
         kept = shown.set_index("type_id")[column]
         for type_id in kept.index:

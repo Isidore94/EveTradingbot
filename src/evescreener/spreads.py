@@ -35,7 +35,9 @@ events the data is silent about:
 
 * **being undercut** — another trader can post 0.01 ISK inside your order for
   a fraction of your capital, and the only defence is relisting, which costs a
-  broker fee every time (`CostModel.relist_cost`);
+  broker fee every time. That fee is **not modelled**: the game charges on the
+  change between old and new price, and the exact terms have never been
+  verified against a live client (plan.md §0 open check #5);
 * **waiting** — a spread is realised only when *both* sides fill, and nothing
   here bounds how long that takes, or whether it happens at all.
 
@@ -67,6 +69,8 @@ __all__ = [
     "DEFAULT_MAX_ASK_VS_AVG",
     "DEFAULT_MIN_BID_VS_AVG",
     "DEFAULT_MIN_UNITS",
+    "GUARD_PROVENANCE",
+    "UNMODELLED_COSTS",
     "HubSpreads",
     "filter_rows",
     "hub_choices",
@@ -82,25 +86,42 @@ COLUMNS = [
     "best_bid",
     "avg",
     "best_ask",
-    "net_pct",
-    "net_isk",
+    "quoted_margin_pct",
+    "quoted_margin_isk",
     "bid_vs_avg",
     "ask_vs_avg",
     "median_units",
     "bid_depth",
     "fill_note",
+    "execution_model",
+    "unmodelled_costs",
     "state",
 ]
 
 ALL_HUBS = "All hubs"
 
-# Operator-facing defaults, derived from the measurement in the module
-# docstring rather than chosen. They are page controls, not constants: the
-# page shows them and lets them move, because a hidden filter is a hidden
-# opinion.
+# Operator heuristics. They are page controls, not constants, because a hidden
+# filter is a hidden opinion.
 DEFAULT_MIN_UNITS = 100.0
 DEFAULT_MIN_BID_VS_AVG = 0.50
 DEFAULT_MAX_ASK_VS_AVG = 2.00
+
+GUARD_PROVENANCE = (
+    "The 0.5x bid and 2.0x ask guards are OPERATOR HEURISTICS, not derived "
+    "thresholds. §17 D-31 originally described them as derived from "
+    "measurement; that was an overclaim and is corrected by §21 R4. The "
+    "measurement behind them counted how many observations fall beyond "
+    "cutoffs that had already been chosen — which describes the cutoffs, it "
+    "does not derive them. Deriving them would need an outcome-based, "
+    "preregistered and preferably out-of-sample study of which quotes "
+    "actually filled, and no such study exists. The counts they produced "
+    "(39.7% of books below 0.5x, 23.6% above 2.0x) remain reproducible and "
+    "are unchanged; only the claim about where the numbers came from is."
+)
+
+#: Every cost the maker read does NOT model. Named on each row so an omission
+#: can never be mistaken for a modelled zero (§21 R4).
+UNMODELLED_COSTS = "queue position, fill probability, waiting time, undercut risk, relist fees"
 
 
 def hub_choices(config: Config) -> list[tuple[str, tuple[int, ...]]]:
@@ -148,12 +169,12 @@ def _fill_note(median_units, top_share) -> str:
     return "undercut risk unmodelled"
 
 
-def _state(net_pct, bid_vs_avg, ask_vs_avg) -> str:
+def _state(margin_pct, bid_vs_avg, ask_vs_avg) -> str:
     """The row's own verdict on whether it is worth reading.
 
     Ordered by which problem is disqualifying first. A dust bid is checked
-    before the arithmetic because an enormous `net_pct` computed off a 0.02
-    ISK bid is not a large edge, it is a meaningless one.
+    before the arithmetic because an enormous margin computed off a 0.02 ISK
+    bid is not a large one, it is a meaningless one.
     """
     if not np.isfinite(bid_vs_avg) or not np.isfinite(ask_vs_avg):
         return "NO_AVG"
@@ -161,7 +182,7 @@ def _state(net_pct, bid_vs_avg, ask_vs_avg) -> str:
         return "DUST_BID"
     if ask_vs_avg > DEFAULT_MAX_ASK_VS_AVG:
         return "WIDE_ASK"
-    if not np.isfinite(net_pct):
+    if not np.isfinite(margin_pct):
         return "UNKNOWN"
     return "OK"
 
@@ -175,12 +196,21 @@ def maker_edge_frame(
     averages: dict[int, float] | None = None,
     hub: str = "",
     stale: bool = False,
+    average_is_stale: bool = False,
 ) -> pd.DataFrame:
     """Price a swept book from the maker's side. Pure; no I/O.
 
-    `net_pct` is the return on the ISK actually committed — the bid *plus* the
-    broker fee paid to post it. Not the mid, and not the bare bid: a maker who
-    measures against the mid is counting half the spread twice.
+    `quoted_margin_pct` is the margin the book is **quoting** on the ISK
+    actually committed — the bid *plus* the broker fee paid to post it. Not the
+    mid, and not the bare bid: a maker who measures against the mid is counting
+    half the spread twice.
+
+    It is deliberately **not** called an edge or a net return. Those words
+    promise that costs have been netted out, and the largest costs here have
+    not been: nothing in this lake models queue position, fill probability,
+    waiting time, undercut risk or relist fees. This is the price at which two
+    resting orders sit, minus the fees that are known. What the operator would
+    actually keep is a strictly smaller and unmeasured number.
     """
     view = spread_view(book)
     if view.empty:
@@ -191,10 +221,17 @@ def maker_edge_frame(
 
     bid = pd.to_numeric(view["best_bid"], errors="coerce")
     ask = pd.to_numeric(view["best_ask"], errors="coerce")
-    outlay = bid.map(lambda value: costs.buy_outlay(value, maker=True))
-    proceeds = ask.map(lambda value: costs.sell_proceeds(value, maker=True))
-    net_isk = proceeds - outlay
-    net_pct = np.where(outlay > 0, net_isk / outlay * 100.0, np.nan)
+    # Broker fee is per station, because standings are per corporation (§21 R4).
+    venues = view["exec_location_id"] if "exec_location_id" in view else None
+    broker = (
+        pd.Series([costs.broker_fee_at(value) for value in venues], index=view.index)
+        if venues is not None
+        else pd.Series(costs.broker_fee_pct, index=view.index)
+    )
+    outlay = bid * (1.0 + broker / 100.0)
+    proceeds = ask * (1.0 - (costs.sales_tax_pct + broker) / 100.0)
+    margin_isk = proceeds - outlay
+    margin_pct = np.where(outlay > 0, margin_isk / outlay * 100.0, np.nan)
 
     frame = pd.DataFrame({"type_id": view["type_id"].astype(int)})
     frame["name"] = frame["type_id"].map(lambda tid: names.get(int(tid), f"type {int(tid)}"))
@@ -217,23 +254,34 @@ def maker_edge_frame(
 
     if stale:
         # A stale quote is not a cheap quote, it is an unmeasured one (§4).
-        frame["net_pct"] = np.nan
-        frame["net_isk"] = np.nan
+        frame["quoted_margin_pct"] = np.nan
+        frame["quoted_margin_isk"] = np.nan
         frame["state"] = "STALE"
         frame["fill_note"] = "book too old to price"
+        frame["execution_model"] = "none"
+        frame["unmodelled_costs"] = UNMODELLED_COSTS
     else:
-        frame["net_pct"] = net_pct
-        frame["net_isk"] = net_isk
-        frame["state"] = [
-            _state(net, low, high)
-            for net, low, high in zip(
-                net_pct, frame["bid_vs_avg"], frame["ask_vs_avg"], strict=False
-            )
-        ]
+        frame["quoted_margin_pct"] = margin_pct
+        frame["quoted_margin_isk"] = margin_isk
+        if average_is_stale:
+            # The traded average is what makes DUST_BID decidable. A stale one
+            # decides nothing, so it cannot bless a row as OK (§21 R4).
+            frame["quoted_margin_pct"] = np.nan
+            frame["quoted_margin_isk"] = np.nan
+            frame["state"] = "STALE_AVG"
+        else:
+            frame["state"] = [
+                _state(margin, low, high)
+                for margin, low, high in zip(
+                    margin_pct, frame["bid_vs_avg"], frame["ask_vs_avg"], strict=False
+                )
+            ]
         frame["fill_note"] = [
             _fill_note(units, share)
             for units, share in zip(frame["median_units"], top_share, strict=False)
         ]
+    frame["execution_model"] = "none"
+    frame["unmodelled_costs"] = UNMODELLED_COSTS
     return frame[COLUMNS]
 
 
@@ -259,9 +307,9 @@ def filter_rows(
         units = pd.to_numeric(out["median_units"], errors="coerce")
         out = out[units.notna() & (units >= min_units)]
     if positive_only:
-        net = pd.to_numeric(out["net_pct"], errors="coerce")
+        net = pd.to_numeric(out["quoted_margin_pct"], errors="coerce")
         out = out[net.notna() & (net > 0)]
-    return out.sort_values("net_pct", ascending=False, na_position="last")
+    return out.sort_values("quoted_margin_pct", ascending=False, na_position="last")
 
 
 def maker_spreads(

@@ -23,7 +23,7 @@ the spread at the ask-walk VWAP for the size — not best ask, not mid.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 from .config import Config
 
@@ -91,6 +91,9 @@ class CostModel:
     notional_tiers_isk: tuple[float, ...]
     book_staleness_minutes: int
     annual_capital_cost_pct: float
+    #: Operator-observed effective broker rates by station id (§21 R4). Empty
+    #: means "use the skill-derived base everywhere", the previous behaviour.
+    broker_fee_overrides: dict = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, config: Config) -> CostModel:
@@ -124,9 +127,52 @@ class CostModel:
         rate = self.broker_fee_pct if maker else 0.0
         return gross_isk * (1.0 + rate / 100.0)
 
-    def relist_cost(self, gross_isk: float) -> float:
-        """Cost of modifying a resting order (plan.md §0 open check #5)."""
-        return gross_isk * (self.broker_fee_pct / 100.0) * self.relist_surcharge_multiple
+    def broker_fee_at(self, location_id: int | None) -> float:
+        """Broker fee at one station, which is not one number game-wide (§21 R4).
+
+        Broker fee scales with corporation standings, and standings are held
+        per corporation — so the rate differs between hubs owned by different
+        NPC corps. A single scalar applied everywhere quietly prices Amarr as
+        if it were Jita. Overrides are **operator-observed effective rates**,
+        never derived; with none configured this returns the skill-derived
+        base, which is the previous behaviour exactly.
+        """
+        if location_id is None:
+            return self.broker_fee_pct
+        return self.broker_fee_overrides.get(int(location_id), self.broker_fee_pct)
+
+    def with_broker_overrides(self, overrides: dict[int, float]) -> CostModel:
+        """A copy carrying operator-**observed** per-station broker rates.
+
+        These are transcribed from what the client actually charged, not
+        computed from standings the system cannot read. That is why they are
+        an override and not a model.
+        """
+        return replace(
+            self,
+            broker_fee_overrides={int(key): float(value) for key, value in overrides.items()},
+        )
+
+    def relist_cost_unverified(
+        self, *, old_price: float, new_price: float, quantity: float = 1.0
+    ) -> float:
+        """Cost of modifying a resting order — **UNVERIFIED** (plan.md §0 #5).
+
+        The previous `relist_cost(gross_isk)` charged a broker fee on the whole
+        order value. That is not the game's formula: EVE charges on the change
+        between the **old** and **new** price, so the old form overstated a
+        one-tick undercut by orders of magnitude and understated nothing.
+
+        This form takes the price change, which is the right shape — but the
+        exact terms and skill discount have never been checked against a live
+        client, and plan.md §0 open check #5 remains open. **No analytical
+        output may consume this**, and a test enforces that: a wrong cost model
+        is worse than an absent one, because it looks answered.
+        """
+        delta = abs(float(new_price) - float(old_price))
+        return (
+            delta * float(quantity) * (self.broker_fee_pct / 100.0) * self.relist_surcharge_multiple
+        )
 
     def escrow_capital_days(self, notional_isk: float, days: float) -> float:
         """ISK-days of capital an escrowed buy locks up; 0% by default."""

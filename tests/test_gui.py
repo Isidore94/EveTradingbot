@@ -550,7 +550,9 @@ def test_the_spreads_page_states_what_it_cannot_measure(qtbot, desk):
     qtbot.addWidget(page)
     caveat = page.caveat.text().lower()
     assert "undercut" in caveat
-    assert "unmodelled" in caveat or "does not know" in caveat
+    assert "quoted margin" in caveat, "it is a quoted margin, not an edge (§21 R4)"
+    assert "before execution risk" in caveat
+    assert "heuristic" in caveat
 
 
 # -- Focus never auto-removes -----------------------------------------------

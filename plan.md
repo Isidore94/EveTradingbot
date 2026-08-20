@@ -1171,7 +1171,7 @@ this document's prior text is recorded here with its reason.
 | D-28 | **`universe.seed_watchlist` is deleted.** | It read `config.universe.watchlist` and resolved all 50 §11 D4 names, and **nothing in `src/` ever called it** — only the tests did. The roster was seeded through the documented `watch add` path on 2026-08-20 (50 resolved, 0 unresolved) and those entries are operator-owned. Wiring an automatic seeder was deliberately not done: a re-seed would resurrect a name the operator had removed, which is §11 D4's never-auto-removed rule failing in the other direction. |
 | D-29 | **§13.2's `measurable` gate becomes RELATIVE.** A type is measurable only when `atr / close >= signals.min_atr_fraction`; below it the gate is UNKNOWN, and UNKNOWN fails (§4). One epsilon governs the ATR **and** the AVWAP sigma, applied at one definition site (`atr.measurable_fraction`, enforced inside `atr_last` so no scalar consumer can bypass it) plus the two per-bar paths in `setup.py` and `rrs_series`. The §13.2 text is amended with the old wording left visible. | **Measured, and the default is derived rather than chosen.** Across 2,914 Forge types with a positive ATR, `atr/close` is bimodal: a degenerate cluster from **1.7e-14** to about 1e-11, then three orders of magnitude of near-empty space — p1 is **1.6e-08**, p2 is **2.4e-05** — then the working distribution (p50 **5.8e-02**). **1e-6 sits at the top of that gap**: it marks **39 types (1.33%)** UNKNOWN and touches nothing in the working distribution. 1e-5 would take 1.82% and 1e-4 would take 2.68%, reaching into names that are quiet rather than broken; the conservative end of an empirical gap is defensible in a way that a round number inside the continuum is not. **Effect:** max abs RRS falls from **9.05e11 to 1.19e7**, abs RRS > 1,000 from 77 types to 51, p1 from −1,966 to −677 and p99 from +2,661 to +710, while the median is **unchanged at +3.18** — the body of the distribution is untouched, which is what a surgical gate looks like. Backtest instances **147,140 → 145,655** (−1.0%) and the verdict is **NOT PLAUSIBLE at every horizon**, unchanged. The digest produced **the same 25 candidates, none dropped** — the degenerate types were never clearing costs; they were polluting the board's sort and the RRS distribution. **What this does NOT fix, stated plainly:** 51 types still exceed abs RRS 1,000, and they are *not* degenerate. *Hemorphite II-Grade* has a healthy `atr/close` of 1.55e-04 and reads RRS −2,932 because it fell 45% in 20 bars — **2,936× its own ATR**. That is RRS working, not failing. The board's value sort therefore still shows large magnitudes at the top; they are honest measurements of violent moves, several of which trace to unfiltered ESI prints in `close`, which reporting deliberately does not clamp. |
 | D-30 | **The chart draws range candles; a prev-close body is refused on measurement, not on principle.** The operator asked for conventional candlesticks, reasoning that EVE trades 24/7 so there is no session gap and yesterday's close is today's open. That is correct about the market and wrong about this data, and it was settled by measuring rather than arguing. Each candle is a filled body spanning the day's **low→high**, crossed by a notch at the **average**, coloured against the previous average. §4's no-synthesized-`open` invariant is **unchanged**. | **Measured on the full lake — 4,034,697 bars with a previous close.** `close` is the ESI daily *mean transaction price*, not a last trade, so yesterday's mean is not where today opened. Yesterday's close lands **outside** today's measured `[low, high]` on **55.70%** of all bars (27.81% above the high, 27.89% below the low). It is **worse on exactly the names the desk charts**: **68.97%** of tier-OK bars, **66.40%** of THIN, **58.07%** of watchlist bars — and still **46.10%** after excluding the 40.8% of bars where `high == low`. A conventional body would therefore hang off the end of its own wick on the *majority* of bars: not merely a fabrication, a visibly broken rendering. Clamping it into the range would make over half the chart's bodies artefacts of the clamp. **What the data does support:** the range is measured, the average is measured, and the day-over-day change in the average is a comparison between two measured numbers — so body, notch and colour are each real. **What no chart from this lake can ever show:** intraday direction. ESI records no sequence within a day, so whether price rose or fell inside the day is not recoverable at any price; the notch's height within the body is the honest substitute. **Readability, the actual complaint:** the previous HLC rendering was unreadable at the 400-bar default (3.5 px/bar on a desk pane). The chart now opens at **120 bars** with a 60/120/250/all selector, and degrades by measured slot width rather than smearing. **Level series are not candle series.** A composite index is built with `high == low == close` (signals/composite.py — an index level is one number per day), so candles drawn from one are zero-height bodies and MARKET rendered FORGE and FORGE-EW as a field of floating notches. `ChartSeries.ranged` detects the absence of any intraday range and the painter draws a level line instead. Separately, `ChartCanvas` had a non-expanding size policy, so in a `section()` block it split the available height with its own title label and sat squashed at the bottom of a mostly empty pane; it is now Expanding. |
-| D-31 | **SPREADS reads the book from the maker's side, and refuses the dust bid.** §17's NOT PLAUSIBLE verdict was measured on a *taker* — cross in, cross out, 14.7% round-trip friction against a +2.80% gross edge. A maker posts both sides and **collects** the spread, so the 98.8% median Forge spread that killed the taker is the maker's revenue. `books.spread_view()` and `CostModel.buy_outlay/sell_proceeds(maker=True)` already existed; `spreads.py` composes them. Maker round trip at the operator's skills = broker 1.300% in + broker 1.300% out + sales tax 3.375% = **5.975%**. Nothing here contradicts §17: both readings are true at once, because they are prices paid by opposite participants. | **The dust bid is the failure mode, and it was measured before the page was designed.** Ranking the raw book by spread produces garbage: a 0.02 ISK bid against a 129,000 ISK ask reads as a **608,000,000%** edge and nothing will ever sell into that bid. Median raw `net_pct` across 16,709 two-sided Forge types is **+181%**, p90 **+37,492%** — numbers that are arithmetically correct and economically meaningless. Anchoring on the **traded average** (the ESI daily mean, the one price transactions are known to have happened at), of 16,381 types with both a two-sided book and an average: **39.7%** have a best bid under half the average (19.8% under a tenth, 9.3% under a hundredth) and **23.6%** have a best ask above twice it. With the guards — bid ≥ 0.5× average, ask ≤ 2× average, ≥100 units/day — **2,230** names survive and **1,590** carry a positive net maker edge, median **+13.0%**, p90 **+57.3%**, top name *Capital Ion Thruster* at bid 301,700 / avg 597,400 / ask 871,600. Guards are **page controls, not constants**, and 'show excluded' returns the rejects with their `DUST_BID`/`WIDE_ASK`/`NO_AVG` flags so the guard can be checked rather than trusted. **What is still unmeasured and is stated on the page rather than modelled:** whether a posted order ever fills. Undercut risk (0.01 ISK inside your order, defended only by relisting at a broker fee each time) and waiting time are **not** in the lake and no number here bounds them. Volume, top-of-book depth and the top order's share are reported as evidence, never as a probability. A book older than `costs.book_staleness_minutes` prices **nothing** — on the operator's 121-minute-old sweep the page correctly showed an honest zero. |
+| D-31 | **SPREADS reads the book from the maker's side, and refuses the dust bid.** §17's NOT PLAUSIBLE verdict was measured on a *taker* — cross in, cross out, 14.7% round-trip friction against a +2.80% gross edge. A maker posts both sides and **collects** the spread, so the 98.8% median Forge spread that killed the taker is the maker's revenue. `books.spread_view()` and `CostModel.buy_outlay/sell_proceeds(maker=True)` already existed; `spreads.py` composes them. Maker round trip at the operator's skills = broker 1.300% in + broker 1.300% out + sales tax 3.375% = **5.975%**. Nothing here contradicts §17: both readings are true at once, because they are prices paid by opposite participants. | **The dust bid is the failure mode, and it was measured before the page was designed.** Ranking the raw book by spread produces garbage: a 0.02 ISK bid against a 129,000 ISK ask reads as a **608,000,000%** edge and nothing will ever sell into that bid. Median raw `net_pct` across 16,709 two-sided Forge types is **+181%**, p90 **+37,492%** — numbers that are arithmetically correct and economically meaningless. Anchoring on the **traded average** (the ESI daily mean, the one price transactions are known to have happened at), of 16,381 types with both a two-sided book and an average: **39.7%** have a best bid under half the average (19.8% under a tenth, 9.3% under a hundredth) and **23.6%** have a best ask above twice it. With the guards — bid ≥ 0.5× average, ask ≤ 2× average, ≥100 units/day — **2,230** names survive and **1,590** carry a positive net maker edge, median **+13.0%**, p90 **+57.3%**, top name *Capital Ion Thruster* at bid 301,700 / avg 597,400 / ask 871,600. **CORRECTED by §21 R4 (2026-08-20):** the sentence above originally read that these guards were *derived* from measurement. That was an overclaim and the original wording is left visible here so the correction is auditable. The measurement counted how many observations fall beyond cutoffs that had **already been chosen** — which describes the cutoffs, it does not derive them. They are **operator heuristics**; deriving them would need an outcome-based, preregistered, preferably out-of-sample study of which quotes actually filled, and no such study exists. The counts (39.7% / 23.6%) and the thresholds (0.5x, 2.0x) are **unchanged** — only the claim about their provenance is. Guards are **page controls, not constants**, and 'show excluded' returns the rejects with their `DUST_BID`/`WIDE_ASK`/`NO_AVG` flags so the guard can be checked rather than trusted. **What is still unmeasured and is stated on the page rather than modelled:** whether a posted order ever fills. Undercut risk (0.01 ISK inside your order, defended only by relisting at a broker fee each time) and waiting time are **not** in the lake and no number here bounds them. Volume, top-of-book depth and the top order's share are reported as evidence, never as a probability. A book older than `costs.book_staleness_minutes` prices **nothing** — on the operator's 121-minute-old sweep the page correctly showed an honest zero. |
 
 ### §0 named checks — status after this build
 
@@ -1561,8 +1561,8 @@ it is adjacent.**
 |---|---|---|
 | **R1** | Executable order-book identity and validated snapshots | **IMPLEMENTED + GREEN** |
 | **R2** | Completed-bar enforcement and independent bar freshness | **IMPLEMENTED + GREEN** |
-| R3 | Backtest price bounds, statistics and friction labels | not started |
-| R4 | Maker analysis and location-specific cost semantics | not started |
+| **R3** | Backtest price bounds, statistics and friction labels | **IMPLEMENTED + GREEN** |
+| **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
 | R5 | Killmail lead-lag hypothesis fidelity | not started |
 | R6 | Learning freshness and eligible-sample handling | not started |
 | R7 | Desk threading, invalidation and worker lifecycle | not started |
@@ -1676,3 +1676,98 @@ fails loudly, optional settings no longer do.
 **Owed live gate (R2).** Confirm on the operator's machine that a deliberately
 skipped `ingest-history` run makes the screen report bars stale while the book
 still reads fresh, and that gates go UNKNOWN rather than silently passing.
+
+### §21 R3 — Price bounds, honest statistics, and friction that says what it is — **IMPLEMENTED + GREEN**
+
+**No frozen verdict moved.** The golden fixture's haircuts (entry 0.015, exit
+0.020) never reach the new clamp, so every previously measured value is
+identical and the verdict is still **NOT PLAUSIBLE** at every cell. What
+changed is what is *claimed*, not what was measured.
+
+**1. Stress prices are bounded.** `exit_close * (1 - haircut * multiple)` goes
+negative for a wide book: with bid 1, ask 99 and mid 50 the exit haircut is
+~0.98, so 2x stress gave a factor of -0.96 — a sale realising negative ISK and
+an unlevered long returning worse than -100%. `stress_factors()` clamps the
+stressed haircut to 1.0, representing zero liquidity explicitly: the exit
+realises nothing, the position is a total loss, and -100% is the floor.
+
+**2. The Wilson bound is labelled as what it is.** `z = 1.96` is the two-sided
+95% critical value, so as a one-sided lower bound it is a **97.5%** bound; the
+prose called it 95% one-sided. **The number is unchanged** — moving it would
+move a frozen verdict — and the label is corrected via
+`wilson_one_sided_confidence()`. The error ran conservative: a 97.5% bound is
+stricter than a 95% one, so a NOT PLAUSIBLE verdict cannot have been flattered
+by it.
+
+**3. Overlapping instances are no longer counted as independent.**
+`effective_samples()` counts non-overlapping `horizon`-day blocks **per type**,
+and `wilson_lb_clustered` is reported **beside** the naive `wilson_lb` rather
+than replacing it. The correction is deliberately the crudest defensible one:
+one that can be checked by hand is worth more than a tighter one that cannot.
+
+**4. Friction reports its parts, and they compound.** One number was described
+two ways — the round-trip haircut already contained sales tax while the control
+text called 14.7% friction "before tax". `book_haircut_pct`, `sales_tax_pct`
+and `total_friction_pct` are separate now, with
+`total = 1 - (1 - book)(1 - tax)`, slightly *less* than the sum because tax is
+levied on what the book already left. Reporting the sum would overstate the
+cost of a strategy already judged NOT PLAUSIBLE.
+
+**5. `max_drawdown_pct` is withdrawn.** It compounded *overlapping* trades in
+date order with no portfolio or capital-allocation model. It was not a
+drawdown, and the -100% readings at 2x and 3x are the artefact that gives it
+away. The measured values are preserved in
+`tests/fixtures/golden_signals.json` under `backtest_withdrawn_pre_r3` with
+their reason, so no historical number is erased.
+
+**Owed live gate (R3).** Re-run the backtest on the real lake: confirm the
+verdict is unchanged, that `n_eff` is materially below `samples`, and that no
+cell reports a net return below -100%.
+
+### §21 R4 — A quoted margin is not an expected edge — **IMPLEMENTED + GREEN**
+
+**No threshold moved and no count was regenerated.** Every number in §17 D-31
+is reproducible and unchanged. What changed is what the numbers are *claimed*
+to be.
+
+**1. `net_pct` is now `quoted_margin_pct`.** "Net" promises that costs have
+been netted out. The largest ones have not been: nothing in this lake models
+queue position, fill probability, waiting time, undercut risk or relist fees.
+The value is the margin the book is **quoting** between two resting orders,
+minus the fees that are known. Every row now also carries
+`execution_model = "none"` and a literal `unmodelled_costs` list, so an
+omission can never be read as a modelled zero. The page header says "QUOTED
+MARGIN, BEFORE EXECUTION RISK".
+
+**2. The 0.5x / 2.0x guards are labelled operator heuristics.** §17 D-31 said
+they were derived from measurement; that sentence is **corrected in place with
+the original wording left visible**. Counting how many observations fall
+beyond an already-chosen cutoff describes the cutoff, it does not derive it.
+`spreads.GUARD_PROVENANCE` carries the correction in code.
+
+**3. Broker fee is per station.** Standings are held per corporation, so the
+rate differs between hubs owned by different NPC corps; one scalar priced
+Amarr as if it were Jita. `CostModel.broker_fee_at(location_id)` and
+`with_broker_overrides()` take **operator-observed effective rates** —
+transcribed from what the client charged, never computed from standings the
+system cannot read. With none configured the behaviour is byte-identical to
+before. The maker margin now uses the rate at `exec_location_id`, which R1
+made available.
+
+**4. A stale traded average cannot bless a row.** The anchor is what makes
+DUST_BID decidable, so a stale one decides nothing: `average_is_stale` yields
+`STALE_AVG` and prices nothing.
+
+**5. `relist_cost` is withdrawn.** It charged a broker fee on the *whole order
+value*; EVE charges on the change between old and new price, so it overstated
+a one-tick undercut by orders of magnitude. It is now
+`relist_cost_unverified(old_price, new_price, quantity)` — the right shape,
+but the exact terms and skill discount have never been checked against a live
+client and plan.md §0 open check #5 remains open. **A test asserts no module
+under `src/` consumes it**, because a wrong cost model is worse than an absent
+one: it looks answered.
+
+**Owed live gate (R4).** Transcribe the actual broker fee the client charges
+at Jita 4-4 and at one secondary hub, and confirm `broker_fee_at` reproduces
+them. Separately, verify the order-modification fee against the client before
+anything is allowed to consume `relist_cost_unverified`.

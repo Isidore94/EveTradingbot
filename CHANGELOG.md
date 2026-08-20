@@ -5,6 +5,62 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A quoted margin is not an expected edge (§21 R4)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R4. `uv run pytest -q` ->
+**663 passed, 7 deselected**, ruff check + format clean.
+
+No threshold moved and no count was regenerated. What changed is what the
+numbers are claimed to be.
+
+- **`net_pct` -> `quoted_margin_pct`.** "Net" promises costs have been netted
+  out; queue position, fill probability, waiting time, undercut risk and
+  relist fees are not modelled at all. Every row carries
+  `execution_model = "none"` and a literal `unmodelled_costs` list. The page
+  says "QUOTED MARGIN, BEFORE EXECUTION RISK".
+- **The 0.5x / 2.0x guards are operator heuristics.** §17 D-31 called them
+  derived; that sentence is corrected in place with the original wording left
+  visible. Counting observations beyond an already-chosen cutoff describes the
+  cutoff, it does not derive it.
+- **Broker fee is per station.** Standings are per corporation, so one scalar
+  priced Amarr as Jita. `broker_fee_at()` / `with_broker_overrides()` take
+  operator-**observed** effective rates; with none configured, behaviour is
+  identical to before.
+- **A stale traded average yields `STALE_AVG` and prices nothing.**
+- **`relist_cost` is withdrawn.** It charged the broker fee on the whole order
+  value; EVE charges on the old-to-new price change. It is now
+  `relist_cost_unverified()`, and a test asserts nothing under `src/` consumes
+  it — a wrong cost model is worse than an absent one, because it looks
+  answered.
+
+## 2026-08-20 — A sale cannot realise negative ISK (§21 R3)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R3. `uv run pytest -q` ->
+**651 passed, 7 deselected**, ruff check + format clean.
+
+**No frozen verdict moved.** The golden haircuts never reach the new clamp, so
+every previously measured value is identical and every cell is still NOT
+PLAUSIBLE. What changed is what is *claimed*.
+
+- **Stress prices are bounded.** `exit_close * (1 - haircut * multiple)` went
+  negative for a wide book — bid 1 / ask 99 / mid 50 gives a ~0.98 exit
+  haircut, so 2x stress produced -0.96 and a return worse than -100%.
+  `stress_factors()` clamps the stressed haircut to 1.0, so zero liquidity is
+  a total loss rather than an impossible price.
+- **The Wilson bound is labelled correctly.** `z = 1.96` is a one-sided
+  **97.5%** bound, not 95%. The number is unchanged — moving it would move a
+  frozen verdict — and the error ran conservative.
+- **Overlapping instances are no longer independent observations.**
+  `effective_samples()` counts non-overlapping `horizon`-day blocks per type;
+  `wilson_lb_clustered` sits beside `wilson_lb` rather than replacing it.
+- **Friction reports its parts, and they compound**:
+  `total = 1 - (1 - book)(1 - tax)`, less than the sum, because tax is levied
+  on what the book already left.
+- **`max_drawdown_pct` is withdrawn** — compounding overlapping trades in date
+  order is not an equity curve, and the -100% readings at 2x/3x give it away.
+  The values are preserved in the golden fixture under
+  `backtest_withdrawn_pre_r3`.
+
 ## 2026-08-20 — A week-old bar is not a fresh signal (§21 R2)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R2. `uv run pytest -q` →

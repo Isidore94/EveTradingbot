@@ -37,8 +37,8 @@ HEADERS = [
     "bid",
     "traded avg",
     "ask",
-    "net %",
-    "net ISK/unit",
+    "quoted margin %",
+    "quoted margin ISK/unit",
     "bid/avg",
     "ask/avg",
     "units/day",
@@ -48,12 +48,14 @@ HEADERS = [
 ]
 
 CAVEAT = (
-    "Net % is the maker round trip: post a bid, post an ask, pay broker on both "
-    "and sales tax on the sale. What it does NOT know is whether either order "
-    "ever fills — undercut risk and waiting time are unmodelled, because "
-    "nothing in the lake measures them. Rows are anchored to the traded "
-    "average; 39.7% of two-sided Forge books have a bid under half of it and "
-    "are flagged DUST_BID rather than ranked."
+    "QUOTED MARGIN, BEFORE EXECUTION RISK — not an edge and not a net return. "
+    "It is the margin the book is quoting between two resting orders, minus "
+    "broker fees at that station and sales tax. It does NOT model queue "
+    "position, fill probability, waiting time, undercut risk or relist fees, "
+    "because nothing in this lake measures them; what you would actually keep "
+    "is a strictly smaller and unmeasured number. Rows are anchored to the "
+    "traded average, and the 0.5x bid / 2.0x ask guards are OPERATOR "
+    "HEURISTICS rather than derived thresholds (plan.md §21 R4)."
 )
 
 
@@ -188,8 +190,8 @@ class SpreadsPage(DeskPage):
                     _cell(format_isk(row["best_bid"]), row["best_bid"]),
                     _cell(format_isk(row["avg"]), row["avg"]),
                     _cell(format_isk(row["best_ask"]), row["best_ask"]),
-                    _cell(_pct(row["net_pct"]), row["net_pct"]),
-                    _cell(format_isk(row["net_isk"]), row["net_isk"]),
+                    _cell(_pct(row["quoted_margin_pct"]), row["quoted_margin_pct"]),
+                    _cell(format_isk(row["quoted_margin_isk"]), row["quoted_margin_isk"]),
                     _cell(_ratio(row["bid_vs_avg"]), row["bid_vs_avg"]),
                     _cell(_ratio(row["ask_vs_avg"]), row["ask_vs_avg"]),
                     _cell(_units(row["median_units"]), row["median_units"]),

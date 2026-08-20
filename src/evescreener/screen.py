@@ -53,6 +53,9 @@ class Candidate:
     destruction_z: float | None
     tier_breakevens: list[dict] = field(default_factory=list)
     net_edge_pct: float | None = None
+    # The DISTANCE from the close back to anchored value, not a forecast. The
+    # thesis is reversion to value; how likely that is, is what expected_r and
+    # the backtest speak to.
     expected_move_pct: float | None = None
     entry_price: float | None = None
     exit_price: float | None = None

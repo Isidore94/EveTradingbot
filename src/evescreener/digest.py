@@ -159,7 +159,10 @@ def build_digest(
             lines.append(
                 f"**{index}. {name}** — expected {_fmt(row.get('expected_r'), 2, 'R')} "
                 f"· net edge {_fmt(row.get('net_edge_pct'), 2, '%')} "
-                f"(expected move {_fmt(row.get('expected_move_pct'), 2, '%')})"
+                # "to anchored value" is the DISTANCE to the target, not a
+                # forecast. Calling it an "expected move" would claim a
+                # confidence the system does not have.
+                f"({_fmt(row.get('expected_move_pct'), 2, '%')} to anchored value)"
             )
             lines.append(f"    {row.get('thesis', '')}")
             if row.get("evidence"):

@@ -487,3 +487,15 @@ def test_an_all_unknown_backtest_says_unknown_is_not_a_pass(config, seeded_db):
 def test_no_backtest_means_no_banner(config, seeded_db):
     result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
     assert "⚠ **The backtest" not in build_digest(config, result)
+
+
+def test_the_digest_calls_the_target_a_distance_not_a_forecast(config, seeded_db):
+    """ "Expected move" would claim a confidence the system does not have."""
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, book_for(ids), now=NOW)
+    text = build_digest(config, result)
+    if result.candidates:
+        assert "to anchored value)" in text
+        assert "expected move" not in text

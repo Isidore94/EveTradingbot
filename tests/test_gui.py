@@ -320,16 +320,18 @@ def test_dense_windows_fall_back_rather_than_smear_into_a_block(qtbot, desk):
             canvas.grab()  # paints through every density regime without raising
 
 
-def test_the_chart_opens_zoomed_in_enough_to_read(qtbot, desk):
-    """400 bars on a desk pane cannot resolve a body; the default must not try."""
+def test_the_chart_opens_on_the_whole_series(qtbot, desk):
+    """The operator reads this on a 4K pane, where the full history resolves."""
     from evescreener.gui.chart import DEFAULT_VISIBLE_BARS, ChartPanel, build_series
 
+    assert DEFAULT_VISIBLE_BARS == 0, "0 means every bar"
     panel = ChartPanel()
     qtbot.addWidget(panel)
-    assert panel.canvas.visible == DEFAULT_VISIBLE_BARS <= 150
-    panel.show_series(build_series(desk, 601))
-    panel.zoom.setCurrentIndex(panel.zoom.count() - 1)  # "all"
     assert panel.canvas.visible == 0
+    assert panel.zoom.currentData() == 0, "the selector must agree with the canvas"
+    panel.show_series(build_series(desk, 601))
+    panel.zoom.setCurrentIndex(0)  # "60"
+    assert panel.canvas.visible == 60
 
 
 def test_an_index_is_drawn_as_a_line_because_it_has_no_range(qtbot, desk):

@@ -108,7 +108,7 @@ BACKGROUND = QColor(24, 26, 30)
 CANDLE_MIN_SLOT = 1.2  # under this: shaded envelope and a close line
 CANDLE_BODY_SLOT = 2.5  # under this: a one-pixel coloured range, no body
 CANDLE_NOTCH_SLOT = 4.0  # under this: no average notch, it would not resolve
-DEFAULT_VISIBLE_BARS = 120
+DEFAULT_VISIBLE_BARS = 0  # 0 = the whole series; a 4K pane resolves 400+ bars
 
 
 def bar_colours(close: np.ndarray) -> list[QColor]:
@@ -642,7 +642,7 @@ class ChartPanel(QWidget):
         self.zoom = QComboBox()
         for label, value in (("60", 60), ("120", 120), ("250", 250), ("all", 0)):
             self.zoom.addItem(label, value)
-        self.zoom.setCurrentIndex(1)
+        self.zoom.setCurrentIndex(self.zoom.count() - 1)
         self.zoom.currentIndexChanged.connect(self._zoom)
         toggles.addWidget(self.zoom)
         layout.addLayout(toggles)

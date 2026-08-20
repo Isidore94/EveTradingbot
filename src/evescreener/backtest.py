@@ -213,9 +213,13 @@ def _stats(
         return HorizonStats(horizon, tier, multiple, 0, 0, None, None, None, None, None, None)
     wins = int((returns > 0).sum())
     ordered = instances.sort_values("datetime")
-    half = len(ordered) // 2
-    first = ordered.iloc[:half]["net_return_pct"].to_numpy(dtype="float64")
-    second = ordered.iloc[half:]["net_return_pct"].to_numpy(dtype="float64")
+    # §13.6 says "both halves of the sample PERIOD", so the split is by date,
+    # not by instance count — a burst of instances in one month must not
+    # silently become a whole "half".
+    stamps = pd.to_datetime(ordered["datetime"], utc=True)
+    midpoint = stamps.min() + (stamps.max() - stamps.min()) / 2
+    first = ordered[stamps <= midpoint]["net_return_pct"].to_numpy(dtype="float64")
+    second = ordered[stamps > midpoint]["net_return_pct"].to_numpy(dtype="float64")
     return HorizonStats(
         horizon_days=horizon,
         notional_isk=tier,

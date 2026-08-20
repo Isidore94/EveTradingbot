@@ -323,3 +323,29 @@ def test_report_always_states_its_own_limitations(config):
 def test_report_states_the_frozen_hypothesis(config):
     report = render_backtest(run_backtest(config, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()))
     assert "frozen in plan.md §13.1 before this study ran" in report
+
+
+def test_halves_split_by_date_not_by_instance_count():
+    """§13.6 says "both halves of the sample PERIOD" — so the split is temporal.
+
+    A burst of instances inside one month must not silently become a whole
+    "half" of a year-long sample.
+    """
+    from evescreener.backtest import _stats
+
+    # 100 instances in January, 4 in December. A count-split would put the
+    # boundary inside January; a date-split puts it in June.
+    dates = list(pd.date_range("2026-01-01", periods=100, freq="h", tz="UTC")) + list(
+        pd.date_range("2026-12-01", periods=4, freq="D", tz="UTC")
+    )
+    frame = pd.DataFrame(
+        {
+            "datetime": dates,
+            "net_return_pct": [5.0] * 100 + [-5.0] * 4,
+        }
+    )
+    stats = _stats(frame, horizon=10, tier=250e6, multiple=1.0, wilson_z=1.96)
+    # First half = the 100 January winners; second half = the 4 December losers.
+    assert stats.first_half_wilson_lb > 0.9
+    assert stats.second_half_wilson_lb == 0.0
+    assert stats.second_half_breakeven == 1.0

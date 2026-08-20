@@ -171,6 +171,10 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        # WAL allows one writer at a time. Without a busy timeout a concurrent
+        # writer (a manual sweep during a long crawl) fails instantly with
+        # "database is locked" instead of waiting its turn.
+        self.conn.execute("PRAGMA busy_timeout=15000")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
         self.set_meta("schema_version", str(SCHEMA_VERSION))

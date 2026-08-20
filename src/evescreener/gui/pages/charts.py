@@ -8,9 +8,16 @@ how two names quietly end up compared against two different anchor sets.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from ..chart import ChartPanel, build_series
+from ..chart import build_series
 from .base import DeskPage
 
 __all__ = ["ChartsPage"]
@@ -43,8 +50,12 @@ class ChartsPage(DeskPage):
         row.addWidget(self.bad)
         self.layout.addWidget(bar)
 
-        self.panel = ChartPanel()
-        self.layout.addWidget(self.panel, 1)
+        # The panel itself belongs to the window, not to this page — DESK
+        # shows the same one. This lays out the hole it drops into.
+        holder = QWidget()
+        self.chart_slot = QVBoxLayout(holder)
+        self.chart_slot.setContentsMargins(0, 0, 0, 0)
+        self.layout.addWidget(holder, 1)
         self.current: int | None = None
 
         self.buy.clicked.connect(self._buy)
@@ -59,6 +70,8 @@ class ChartsPage(DeskPage):
         """Re-point at `type_id`. Always the same panel."""
         self.current = int(type_id)
         self.setup_tag = setup_tag
+        if self.panel is None:  # pragma: no cover - the window always docks one
+            return
         positions = [
             position
             for position in self._open_positions()

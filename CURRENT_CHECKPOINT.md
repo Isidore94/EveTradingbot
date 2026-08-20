@@ -36,9 +36,42 @@ Every item on it is an **operator action**. The build cannot self-certify: the
 whole point of the ladder is that a machine's confidence in itself is not
 evidence.
 
+## Active sub-track: plan.md §20 — the daily desk
+
+The operator asked (2026-08-20) for a consolidated daily-review page, alerts
+with ntfy, top performers, region trading and a spreads tab. That is recorded
+as **plan.md §20**, phased, one per session, each gated green.
+
+| phase | state |
+|---|---|
+| §20.1 DESK — consolidated review page | **IMPLEMENTED + GREEN** |
+| §20.2 SPREADS — maker / station trading | **NEXT** |
+| §20.3 TOP PERFORMERS 1w / 1m | not started |
+| §20.4 REGIONS — cross-region hauling | not started |
+| §20.5 ALERTS + ntfy | not started |
+
+**Setups are out of scope for this track** by operator decision; the action on
+every surface is a paper trade.
+
+**§20.2 is the one with an analytical claim behind it.** §17's NOT PLAUSIBLE
+verdict was measured on a *taker* strategy — cross in, cross out, 14.7%
+round-trip friction against a +2.80% gross edge. A maker posts both sides and
+**collects** the spread, so the 98.8% median Forge spread that killed the
+taker is the maker's revenue. `books.spread_view()` and
+`CostModel.sell_proceeds(maker=...)` already exist. The open question the tab
+must not paper over is **fill plausibility and undercut risk**, neither of
+which any existing measurement covers.
+
 ## Verification baseline (2026-08-20)
 
-- **Latest — the chart draws range candles (plan.md §19.2, §17 D-30):**
+- **Latest — DESK, the consolidated review page (plan.md §20.1):**
+  `uv run pytest -q` → **566 passed, 7 deselected**, ruff check + format clean.
+  FOCUS/BOARD/SCANNER as tabs on the left, the one chart on the right, nothing
+  removed from the rail. The window now owns the single `ChartPanel` and docks
+  it into the visible host, so §19's one-chart rule holds literally across two
+  pages. The chart opens on the whole series. Presentation and composition
+  only — no detector, formula or verdict rule moved.
+- **The chart draws range candles (plan.md §19.2, §17 D-30):**
   `uv run pytest -q` → **560 passed, 7 deselected**, ruff check + format clean.
   Body = the day's measured low→high, notch = the average, colour = the move
   against the previous average; no `open` is synthesized. A conventional

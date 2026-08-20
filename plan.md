@@ -1443,3 +1443,74 @@ here is LIVE_VALIDATED. In particular:
   setup on the LEARNING page is UNVALIDATED and every number on it is
   UNKNOWN** — correctly.
 * The regret-tracking arithmetic is tested against synthetic ledgers only.
+
+## §20 — The daily desk (added 2026-08-20, operator request)
+
+The operator's stated loop: *"open it, walk the lists, chart each name, paper
+trade the ones I like, tab out."* Eight rail pages made that a tour. §20
+consolidates the review into one page and adds the four things the loop is
+missing. **Setups are explicitly out of scope for now** — the action on every
+surface is a paper trade, not a setup tag.
+
+**Phase order, one per session, each gated green before the next starts.**
+
+### §20.1 — DESK, the consolidated review page — **IMPLEMENTED + GREEN**
+
+One page: source tabs on the left, the chart on the right, paper-trade from
+the row. It **composes the real page classes** (`FocusPage`, `BoardPage`,
+`ScannerPage`) rather than forking them, so there is no second watchlist
+implementation to drift. The rail keeps every existing page (operator's
+choice); DESK is added as the first entry, not a replacement.
+
+**One chart survives.** The window now owns the single `ChartPanel` and
+*moves* it into whichever visible page declares a `chart_slot`
+(`DeskPage.dock_chart`). DESK and CHARTS therefore share one panel, one anchor
+set and one set of overlays — §19 Part 2 page 2 is preserved literally, not
+merely in spirit. A test asserts `findChildren(ChartPanel) == 1`.
+
+Charting from inside DESK does not navigate away; charting from a page with no
+slot (MARKET, PAPER) still jumps to CHARTS as before.
+
+### §20.2 — SPREADS: maker / station trading — **NEXT**
+
+**This inverts the sign of the measured friction finding, and that is the
+reason to build it.** §17's NOT PLAUSIBLE verdict was measured on a *taker*
+strategy: cross the spread in, cross it out, and 14.7% round-trip friction
+eats a +2.80% gross edge. A maker does the opposite — posts a bid, posts an
+ask, and **collects** that spread. The 98.8% median Forge spread that killed
+the taker is the maker's revenue line.
+
+The primitives already exist: `books.spread_view()` computes
+`best_bid`/`best_ask`/`spread_pct`, and `CostModel.sell_proceeds(maker=...)`
+already distinguishes posting from crossing. Round-trip maker cost at the
+operator's skills is broker 1.300% in + broker 1.300% out + sales tax 3.375%
+≈ **5.98%**.
+
+What must NOT be waved through: a wide spread is not an edge if nothing fills.
+The tab owes a fill-plausibility column (volume, `order_count`, depth at top
+of book) and must render a stale book as UNKNOWN, never as a priced row.
+Undercut risk is real and is **not** modelled by any existing measurement —
+say so on the page rather than implying an edge the lake has not measured.
+
+### §20.3 — TOP PERFORMERS (1w / 1m)
+
+Rank the tracked universe by return over 5 and 20 **completed** bars. Pure
+computation over the existing lake. Becomes a DESK tab. UNKNOWN when fewer
+than the required bars exist; THIN badged, never silently mixed.
+
+### §20.4 — REGIONS: cross-region hauling
+
+Surfacing work, not new analysis: `crossregion.py` already nets real PushX
+freight and sales tax across hub pairs, and measured 10 of 151,113 pairs
+clearing at 0.25B, best +13.63%. The tab must carry the caveat the CLI
+carries — **those are simultaneous snapshots for a haul that takes days** —
+visibly, not in a footnote.
+
+### §20.5 — ALERTS + ntfy
+
+Rule store, evaluation on refresh and in the daemon, dedupe state so one
+condition cannot spam, and ntfy HTTP delivery **alongside** the Discord
+contract of §11. Extending the locked delivery decision is a plan-level edit
+and is recorded here as one. `httpx` already covers the transport; no new
+runtime dependency. Re-arm only after a condition clears.
+

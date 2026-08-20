@@ -5,6 +5,37 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — DESK: pick on the left, decide on the right
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §20.1. `uv run pytest -q` →
+**566 passed, 7 deselected**, ruff check + format clean.
+
+The operator's loop is "open it, walk the lists, chart each name, paper trade
+the ones I like, tab out", and eight rail pages made that a tour. **DESK** is
+one page: FOCUS / BOARD / SCANNER as tabs on the left, the chart on the right,
+Paper Buy on every row. It is the first entry in the rail and **replaces
+nothing** — every existing page still works.
+
+**It composes rather than forks.** The left tabs are the real `FocusPage`,
+`BoardPage` and `ScannerPage` classes over the same `DeskData`, so there is no
+second watchlist to drift out of step with the first.
+
+**There is still exactly one chart.** The window now owns the single
+`ChartPanel` and *moves* it into whichever visible page declares a
+`chart_slot` (`DeskPage.dock_chart`). DESK and CHARTS share one panel, one
+anchor set and one set of overlays, so §19's "one window, re-pointed, never a
+stack" holds literally — a test asserts `findChildren(ChartPanel) == 1`.
+Charting from inside DESK no longer navigates away; charting from a page with
+nowhere to put a chart still jumps to CHARTS.
+
+Also: the chart opens on the **whole series** rather than 120 bars, since the
+operator reads it on a 4K pane where 400+ bars resolve. The 60/120/250
+selector stays for narrowing.
+
+Lazy compute is unchanged and matters more here — a DESK tab computes when
+first looked at, so opening the page costs its first tab rather than the sum
+of all of them.
+
 ## 2026-08-20 — The body is the range, because the range is what was measured
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §19.2 and §17 D-30.

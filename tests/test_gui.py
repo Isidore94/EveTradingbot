@@ -110,7 +110,7 @@ def desk(config, db):
 
 @pytest.mark.parametrize(
     "title",
-    ["MARKET", "CHARTS", "BOARD", "FOCUS", "SCANNER", "PAPER", "LEARNING", "HEALTH"],
+    ["DESK", "MARKET", "CHARTS", "BOARD", "FOCUS", "SCANNER", "PAPER", "LEARNING", "HEALTH"],
 )
 def test_every_page_opens_on_fixture_data(qtbot, desk, title):
     from evescreener.gui.pages import PAGES
@@ -121,12 +121,13 @@ def test_every_page_opens_on_fixture_data(qtbot, desk, title):
     assert page.title == title
 
 
-def test_the_window_registers_all_eight_pages_in_priority_order(qtbot, desk, config):
+def test_the_window_registers_every_page_in_priority_order(qtbot, desk, config):
     from evescreener.gui.app import DeskWindow
 
     window = DeskWindow(config, data=desk)
     qtbot.addWidget(window)
     assert list(window.pages) == [
+        "DESK",
         "MARKET",
         "CHARTS",
         "BOARD",
@@ -224,27 +225,86 @@ def test_the_chart_is_one_window_that_repoints(qtbot, desk, config):
     window = DeskWindow(config, data=desk)
     qtbot.addWidget(window)
     window.timer.stop()
+    window.show_page("CHARTS")
     charts = window.pages["CHARTS"]
-    before = id(charts.panel)
     window.chart_type(601)
     assert charts.current == 601
     window.chart_type(602)
     assert charts.current == 602
-    assert id(charts.panel) is not None and id(charts.panel) == before, (
-        "re-pointing must reuse the panel, never build a second one"
+    assert charts.panel is window.chart_panel, (
+        "re-pointing must reuse the window's panel, never build a second one"
     )
 
 
-def test_charting_from_the_board_reaches_the_chart_page(qtbot, desk, config):
+def test_desk_and_charts_share_the_single_panel(qtbot, desk, config):
+    """Two panels would mean two anchor sets. There is exactly one (§19)."""
+    from evescreener.gui.app import DeskWindow
+    from evescreener.gui.chart import ChartPanel
+
+    window = DeskWindow(config, data=desk)
+    qtbot.addWidget(window)
+    window.timer.stop()
+
+    window.show_page("DESK")
+    window.chart_type(601)
+    deck = window.pages["DESK"]
+    assert deck.current == 601
+    assert deck.panel is window.chart_panel
+
+    window.show_page("CHARTS")
+    charts = window.pages["CHARTS"]
+    assert charts.panel is window.chart_panel
+    # The panel physically moved; it was not copied.
+    assert window.chart_panel.parent() is not deck
+
+    panels = window.findChildren(ChartPanel)
+    assert len(panels) == 1, f"expected one chart panel, found {len(panels)}"
+
+
+def test_charting_from_a_page_that_cannot_host_one_goes_to_charts(qtbot, desk, config):
     from evescreener.gui.app import DeskWindow
 
     window = DeskWindow(config, data=desk)
     qtbot.addWidget(window)
     window.timer.stop()
+    window.show_page("BOARD")
     board = window.pages["BOARD"]
     board.chart_requested.emit(603)
     assert window.pages["CHARTS"].current == 603
     assert window.rail.currentItem().text() == "CHARTS"
+
+
+def test_charting_from_inside_desk_does_not_navigate_away(qtbot, desk, config):
+    """The whole point of DESK: pick on the left, chart on the right, stay."""
+    from evescreener.gui.app import DeskWindow
+
+    window = DeskWindow(config, data=desk)
+    qtbot.addWidget(window)
+    window.timer.stop()
+    window.show_page("DESK")
+    deck = window.pages["DESK"]
+    deck.panes["FOCUS"].chart_requested.emit(604)
+    assert deck.current == 604
+    assert window.rail.currentItem().text() == "DESK", "DESK must not bounce to CHARTS"
+
+
+def test_desk_composes_the_real_pages_rather_than_forking_them(qtbot, desk, config):
+    from evescreener.gui.app import DeskWindow
+    from evescreener.gui.pages.board import BoardPage
+    from evescreener.gui.pages.focus import FocusPage
+    from evescreener.gui.pages.scanner import ScannerPage
+
+    window = DeskWindow(config, data=desk)
+    qtbot.addWidget(window)
+    window.timer.stop()
+    deck = window.pages["DESK"]
+    assert isinstance(deck.panes["FOCUS"], FocusPage)
+    assert isinstance(deck.panes["BOARD"], BoardPage)
+    assert isinstance(deck.panes["SCANNER"], ScannerPage)
+    # New data must reach the tabs, not just the page holding them.
+    deck.refresh(desk)
+    for pane in deck.panes.values():
+        assert pane.data is desk
 
 
 def test_the_chart_draws_no_synthesized_open(qtbot, desk):

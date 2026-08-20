@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
+from .chart import ChartPanel
 from .data import desk_input_key, load_desk
 from .pages import PAGES
 
@@ -44,7 +45,11 @@ QLabel { color: #dfe3ea; }
 QListWidget { background: #141619; border: none; font-size: 13px; }
 QListWidget::item { padding: 10px 14px; }
 QListWidget::item:selected { background: #2a2f38; color: #ffffff; }
-QTableWidget { background: #1e2126; gridline-color: #2c3037; }
+QTableWidget { background: #1e2126; gridline-color: #2c3037;
+    alternate-background-color: #23262c; }
+QTabWidget::pane { border: 1px solid #2c3037; }
+QTabBar::tab { background: #23262c; padding: 6px 14px; border: 1px solid #2c3037; }
+QTabBar::tab:selected { background: #2a2f38; color: #ffffff; }
 QHeaderView::section { background: #23262c; padding: 4px; border: 0; }
 QPushButton { background: #2a2f38; border: 1px solid #3a4049; padding: 5px 10px; }
 QPushButton:disabled { color: #6a707a; }
@@ -54,7 +59,7 @@ QLineEdit, QPlainTextEdit, QComboBox, QDoubleSpinBox { background: #23262c;
 
 
 class DeskWindow(QMainWindow):
-    """The desk. One window, one chart, eight pages."""
+    """The desk. One window, one chart, nine pages."""
 
     def __init__(self, config: Config, *, region_id: int | None = None, data=None) -> None:
         super().__init__()
@@ -63,6 +68,11 @@ class DeskWindow(QMainWindow):
         self.data = data if data is not None else load_desk(config, region_id=self.region_id)
         self.setWindowTitle(f"EveTradingbot desk — region {self.region_id}")
         self.resize(1500, 940)
+
+        # The one chart panel. It belongs to the window and is *moved* into
+        # whichever page is showing a chart, so DESK and CHARTS share a single
+        # panel, a single anchor set and a single set of overlays (§19).
+        self.chart_panel = ChartPanel()
 
         splitter = QSplitter(Qt.Horizontal)
         self.rail = QListWidget()
@@ -123,18 +133,27 @@ class DeskWindow(QMainWindow):
         self.stack.setCurrentIndex(index)
         page = self.stack.widget(index)
         if page is not None:
+            page.dock_chart(self.chart_panel)
             page.ensure_current()
 
     def current_page(self):
         return self.stack.currentWidget()
 
     def chart_type(self, type_id: int) -> None:
-        """Re-point the one chart window and bring it forward."""
-        charts = self.pages.get("CHARTS")
-        if charts is None:  # pragma: no cover - CHARTS is always registered
-            return
-        charts.show_type(int(type_id))
-        self.show_page("CHARTS")
+        """Re-point the one chart window, without losing the operator's place.
+
+        If the page they are on can host the chart — DESK, CHARTS — it charts
+        there and they stay put. Only a page with nowhere to put a chart sends
+        them to CHARTS, which is the old behaviour and still the right one for
+        a click on MARKET or PAPER.
+        """
+        host = self.current_page()
+        if getattr(host, "chart_slot", None) is None:
+            host = self.pages.get("CHARTS")
+            if host is None:  # pragma: no cover - CHARTS is always registered
+                return
+            self.show_page("CHARTS")
+        host.show_type(int(type_id))
 
     # -- refresh -----------------------------------------------------------
     def tick(self) -> None:

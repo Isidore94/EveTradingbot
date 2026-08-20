@@ -42,6 +42,22 @@ class DeskPage(QWidget):
     #: Heavy pages compute off-thread. See the module docstring.
     heavy = False
 
+    #: A page that wants to show the chart declares a slot for it and the
+    #: window **moves its one `ChartPanel`** into whichever such page is
+    #: visible. That is how "one chart window, re-pointed, never a stack"
+    #: (§19 Part 2 page 2) survives a second page wanting to show one: there
+    #: is still exactly one panel, one anchor set and one set of overlays, and
+    #: it is impossible to end up comparing two names against two of them.
+    chart_slot = None
+    panel = None
+
+    def dock_chart(self, panel) -> None:
+        """Take custody of the window's single chart panel."""
+        if self.chart_slot is None or panel is None:
+            return
+        self.panel = panel
+        self.chart_slot.addWidget(panel)
+
     def __init__(self, data, parent=None) -> None:
         super().__init__(parent)
         self.data = data

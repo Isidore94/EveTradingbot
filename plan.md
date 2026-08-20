@@ -1546,15 +1546,63 @@ dependencies. Nothing is delivered yet and the page says so: nothing under
 `gui/` may import an HTTP client, so evaluation and delivery remain §20.5 and
 belong to the daemon.
 
-### §20.3 — TOP PERFORMERS (1w / 1m) — **PAUSED, not cancelled**
+### §20.3 — TOP PERFORMERS (1w / 1m) — **IMPLEMENTED + GREEN**
 
-Paused 2026-08-20 by operator authorization so the §21 remediation track
-runs first. The scope below is unchanged and resumes when §21 R8 is green.
+Resumed after §21 R8 and landed as `performers.py` (core, no Qt) plus the TOP
+page and a DESK tab. Ranks the tracked universe by trailing return, badges
+THIN, and reports UNKNOWN wherever a return is not defensible.
 
+**Three amendments to the scope above, each with its reason. The original text
+is preserved here:**
 
-Rank the tracked universe by return over 5 and 20 **completed** bars. Pure
-computation over the existing lake. Becomes a DESK tab. UNKNOWN when fewer
-than the required bars exist; THIN badged, never silently mixed.
+> *Original:* "Rank the tracked universe by return over **5 and 20** completed
+> bars. UNKNOWN when fewer than the required bars exist; THIN badged, never
+> silently mixed."
+
+**1. The windows are 7 and 30 days, not 5 and 20 bars.** Five trading days is
+a week only because an equity exchange shuts at the weekend. **EVE's market
+never closes**, so five days is five days. Ranking on 5/20 would have measured
+five days and labelled it a week — a habit ported from the source system
+rather than a decision about this one (§6).
+
+**2. The windows are calendar days, not bar counts.** A thin type trading on
+the 22nd, 27th, 28th and 31st has bars that are not consecutive days, so
+counting seven *rows* back spans nearly a month. This is the same defect §21
+R5 fixed in the lead-lag study, found again here, and fixed the same way: the
+window is a literal `day − N`.
+
+**3. The ranked return is print-resistant, and the raw one is shown beside
+it.** CCP does not filter outlier prints and `close` is the day's *mean*
+transaction price, so one fat-fingered trade drags a whole bar. Measured on
+the real Forge lake:
+
+| | raw close-to-close | median-of-3-days |
+|---|---|---|
+| worst 7-day reading | **+49,699,900%** | removed |
+| median difference from raw | — | **0.88 pp** |
+| types reading >1000% | 39 (1.32%) | 23 (0.78%) |
+
+*Batch Compressed Plagioclase II-Grade* is the worst case and shows the
+mechanism exactly: a single order set the 2026-08-02 daily average to **0.01
+ISK**, and that bar was the window's start point.
+
+A median needs something to be a median *of*: an endpoint window holding one
+bar offers no defence at all, which is why that name still read +49,699,900%
+after the first fix. Fewer than **two** observations at an endpoint is now
+UNKNOWN — the name has no defensible return over that window, and saying so is
+the answer.
+
+**No further threshold was invented.** Genuinely repriced names still read in
+the thousands of percent. The page shows raw beside robust so the operator can
+see the two disagree, rather than trusting a cutoff nobody derived (§21 R4).
+
+**This ranks; it does not recommend.** The system's own measurement is that
+continuation does not pay in an elastic-supply market (§6, §17), and the page
+says so.
+
+**Owed live gate (§20.3).** Chart the top five names and confirm against the
+in-game market that the move is real rather than an artefact of thin trading;
+confirm a THIN name is badged and a stale name reads UNKNOWN.
 
 ### §20.4 — REGIONS: cross-region hauling
 

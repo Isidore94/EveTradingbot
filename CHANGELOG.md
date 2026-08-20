@@ -5,6 +5,35 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A week is seven days, and a print is not a return (§20.3)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §20.3. `uv run pytest -q` ->
+**740 passed, 7 deselected**, ruff check + format clean.
+
+TOP PERFORMERS resumes after the §21 remediation track and lands as
+`performers.py` plus the TOP page and a DESK tab. Three things the original
+scope got wrong, each corrected with its reason and the old text preserved in
+the plan:
+
+- **The windows are 7 and 30 days, not 5 and 20 bars.** Five trading days is a
+  week only because an equity exchange shuts at the weekend. EVE never closes.
+- **The windows are calendar days, not bar counts.** A thin type trading on the
+  22nd, 27th, 28th and 31st has bars that are not consecutive days, so counting
+  seven rows back spans nearly a month — the same defect §21 R5 fixed in the
+  lead-lag study, found again and fixed the same way.
+- **The ranked return is print-resistant.** CCP does not filter outlier prints
+  and `close` is a daily mean, so one trade drags a whole bar. The worst raw
+  7-day reading on the real lake was **+49,699,900%**: *Batch Compressed
+  Plagioclase II-Grade* had a single order set its 2026-08-02 average to 0.01
+  ISK. A three-day median at each end costs 0.88 pp against the raw number
+  where the data is sound, and an endpoint window with fewer than two
+  observations is UNKNOWN — a median over one observation is that observation,
+  which is why that name still read +49,699,900% after the first fix.
+
+No further threshold was invented: genuinely repriced names still read in the
+thousands of percent, and the raw number sits beside the robust one so the
+operator can see them disagree (§21 R4).
+
 ## 2026-08-20 — Isolation proved, parity restored, a retracted number removed (§21 R8)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R8. `uv run pytest -q` ->

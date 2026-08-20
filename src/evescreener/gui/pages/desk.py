@@ -31,6 +31,7 @@ from PySide6.QtWidgets import QSplitter, QTabWidget, QVBoxLayout, QWidget
 from .base import DeskPage
 from .board import BoardPage
 from .focus import FocusPage
+from .performers import PerformersPage
 from .scanner import ScannerPage
 from .spreads import SpreadsPage
 
@@ -41,6 +42,7 @@ __all__ = ["DeskReviewPage"]
 TABS = (
     ("FOCUS", FocusPage),
     ("BOARD", BoardPage),
+    ("TOP", PerformersPage),
     ("SPREADS", SpreadsPage),
     ("SCANNER", ScannerPage),
 )

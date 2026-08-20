@@ -111,8 +111,8 @@ as **plan.md §20**, phased, one per session, each gated green.
 |---|---|
 | §20.1 DESK — consolidated review page | **IMPLEMENTED + GREEN** |
 | §20.2 SPREADS — maker / station trading | **IMPLEMENTED + GREEN** (§17 D-31) |
-| §20.3 TOP PERFORMERS 1w / 1m | **NEXT** |
-| §20.4 REGIONS — cross-region hauling | not started |
+| §20.3 TOP PERFORMERS 1w / 1m | **IMPLEMENTED + GREEN** |
+| §20.4 REGIONS — cross-region hauling | **NEXT** |
 | §20.5 ALERTS + ntfy | not started — SETTINGS form landed early, delivery not built |
 
 **Setups are out of scope for this track** by operator decision; the action on

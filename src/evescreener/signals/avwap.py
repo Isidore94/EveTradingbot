@@ -37,6 +37,7 @@ __all__ = [
     "band_position",
     "segmented_band_series",
     "classify_band",
+    "zone_from_position",
 ]
 
 BAND_NAMES = ("LOWER_3", "LOWER_2", "LOWER_1", "VWAP", "UPPER_1", "UPPER_2", "UPPER_3")
@@ -232,15 +233,15 @@ def band_position(price: float | None, bands: AvwapBands) -> float | None:
     return (float(price) - float(bands.vwap)) / float(bands.sigma)
 
 
-def classify_band(price: float | None, bands: AvwapBands) -> str:
-    """Name the zone the price is in. UNKNOWN when it cannot be measured.
+def zone_from_position(position: float | None) -> str:
+    """Name the zone from a sigma position. The one threshold ladder.
 
-    The tradeable read is a **dip below anchored value**, so the below-VWAP
-    zones are the interesting ones. Nothing here rewards strength into a band:
-    strength into a value zone is distribution risk (plan.md §6).
+    `dip_sigma` in the per-bar series IS this position, so the scanner, the
+    charts and the backtest all classify through this function rather than
+    each carrying its own copy of the thresholds. A second copy is a second
+    thing to drift.
     """
-    position = band_position(price, bands)
-    if position is None:
+    if position is None or not np.isfinite(position):
         return "UNKNOWN"
     if position >= 3:
         return "ABOVE_UPPER_3"
@@ -257,3 +258,13 @@ def classify_band(price: float | None, bands: AvwapBands) -> str:
     if position >= -3:
         return "LOWER_2_3"
     return "BELOW_LOWER_3"
+
+
+def classify_band(price: float | None, bands: AvwapBands) -> str:
+    """Name the zone the price is in. UNKNOWN when it cannot be measured.
+
+    The tradeable read is a **dip below anchored value**, so the below-VWAP
+    zones are the interesting ones. Nothing here rewards strength into a band:
+    strength into a value zone is distribution risk (plan.md §6).
+    """
+    return zone_from_position(band_position(price, bands))

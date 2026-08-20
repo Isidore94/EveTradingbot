@@ -24,13 +24,19 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
+    "CLOUD_SLOPE_BARS",
     "CloudState",
     "cloud_state",
     "cross_within",
     "ema",
     "ema_cloud",
+    "moving_average",
     "sma",
 ]
+
+# How many bars the cloud's slope is read over. One constant, so the last-bar
+# read and the per-bar backtest read cannot disagree about what "rising" means.
+CLOUD_SLOPE_BARS = 3
 
 
 def _closes(frame: pd.DataFrame) -> pd.Series:
@@ -83,13 +89,17 @@ def ema(frame: pd.DataFrame, length: int) -> pd.Series:
     return pd.Series(out, index=closes.index, name=f"ema{length}")
 
 
-def _series_for(frame: pd.DataFrame, kind: str, length: int) -> pd.Series:
+def moving_average(frame: pd.DataFrame, kind: str, length: int) -> pd.Series:
+    """`sma` or `ema` by name. An unknown name is a loud error, not a default."""
     kind = str(kind).lower()
     if kind == "sma":
         return sma(frame, length)
     if kind == "ema":
         return ema(frame, length)
     raise ValueError(f"unknown moving-average kind {kind!r}; expected 'sma' or 'ema'")
+
+
+_series_for = moving_average
 
 
 def cross_within(
@@ -167,7 +177,7 @@ def ema_cloud(frame: pd.DataFrame, fast_length: int, slow_length: int) -> pd.Dat
 
 
 def cloud_state(
-    frame: pd.DataFrame, fast_length: int, slow_length: int, *, slope_bars: int = 3
+    frame: pd.DataFrame, fast_length: int, slow_length: int, *, slope_bars: int = CLOUD_SLOPE_BARS
 ) -> CloudState:
     """Cloud read at the last bar: above / inside / below, rising / falling.
 

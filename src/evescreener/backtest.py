@@ -38,6 +38,7 @@ from .store.db import Database
 from .timeutil import iso, utcnow
 
 __all__ = [
+    "verdict_banner",
     "BacktestResult",
     "HorizonStats",
     "measure_haircuts",
@@ -437,12 +438,19 @@ def find_instances(
     anchor_dates=(),
     db: Database | None = None,
     progress=None,
+    setup=None,
 ) -> tuple[pd.DataFrame, dict]:
     """Every historical instance of the setup, with its forward closes attached.
 
     One row per `(type_id, entry date, horizon)` carrying the raw forward
     close. Costs are applied later so the same instance set can be repriced at
     every tier and haircut multiple without re-scanning the lake.
+
+    `setup` selects an **operator setup** (plan.md §19 Part 3) instead of the
+    built-in rule. The cost realism, the horizons and the limitations
+    statement are identical either way — an operator setup is measured on the
+    same terms as the house one, which is the whole point of being able to
+    measure it.
     """
     records: list[dict] = []
     gates: dict[str, int] = {}
@@ -458,7 +466,13 @@ def find_instances(
             continue
         for key, value in gate_summary(result).items():
             gates[key] = gates.get(key, 0) + value
-        hits = np.flatnonzero(result["is_setup"].to_numpy())
+        if setup is None:
+            fires = result["is_setup"].to_numpy()
+        else:
+            from .setups import SetupContext, fire_series
+
+            fires = fire_series(setup, SetupContext(frame=frame, evaluated=result)).to_numpy()
+        hits = np.flatnonzero(fires)
         if hits.size == 0:
             continue
         closes = result["close"].to_numpy(dtype="float64")
@@ -542,8 +556,14 @@ def run_backtest(
     region_id: int | None = None,
     anchor_dates=(),
     progress=None,
+    setup=None,
 ) -> BacktestResult:
-    """The whole study: find instances, price them, score them, judge them."""
+    """The whole study: find instances, price them, score them, judge them.
+
+    Pass `setup` to measure one of the operator's setups instead of the
+    built-in rule (`backtest --setup NAME`). Same costs, same horizons, same
+    limitations statement.
+    """
     settings = config.backtest
     params = SetupParams(
         entry_band_sigma=settings.entry_band_sigma,
@@ -590,6 +610,21 @@ def run_backtest(
             "than pricing history at zero slippage"
         )
 
+    if setup is not None:
+        from .setups import unmeasurable_conditions
+
+        result.params["setup"] = setup.name
+        result.params["setup_conditions"] = [c.as_dict() for c in setup.conditions]
+        blocked = unmeasurable_conditions(setup)
+        if blocked:
+            result.notes.append(
+                "this setup contains condition(s) that cannot be evaluated over history "
+                "without lookahead — " + "; ".join(blocked) + " — so it produces NO "
+                "instances here. The setup is not silently reduced to its other "
+                "conditions, because that would score a different setup than the one "
+                "written down."
+            )
+
     instances, gates = find_instances(
         bars,
         composite,
@@ -598,6 +633,7 @@ def run_backtest(
         anchor_dates=anchor_dates,
         db=db,
         progress=progress,
+        setup=setup,
     )
     result.gates = gates
     result.types_evaluated = int(bars["type_id"].nunique()) if not bars.empty else 0
@@ -661,6 +697,36 @@ def run_backtest(
         verdicts[str(horizon)] = verdict(stats)
     result.verdicts = verdicts
     return result
+
+
+def verdict_banner(backtest_verdict: dict | None) -> str:
+    """A one-line warning when the backtest says this setup class did not pass.
+
+    One function, so the digest, the MARKET page and the SCANNER page carry
+    the **same wording**. A banner that is phrased differently in two places
+    reads as two different findings.
+    """
+    if not backtest_verdict:
+        return ""
+    verdicts = {
+        horizon: judgement.get("verdict")
+        for horizon, judgement in backtest_verdict.items()
+        if isinstance(judgement, dict)
+    }
+    if not verdicts:
+        return ""
+    if any(value == "PLAUSIBLE" for value in verdicts.values()):
+        return ""
+    if all(value == "UNKNOWN" for value in verdicts.values()):
+        return (
+            "⚠ **The backtest returned UNKNOWN at every horizon** — too small a "
+            "sample to judge, which is not the same as a pass."
+        )
+    return (
+        "⚠ **The backtest says this setup class is NOT PLAUSIBLE at every horizon "
+        "tested**, against a rule frozen before the measurement. The rows below are "
+        "what the screen found today; they are not evidence the class works."
+    )
 
 
 def render_backtest(result: BacktestResult) -> str:

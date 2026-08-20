@@ -40,9 +40,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .signals.avwap import AvwapBands, classify_band
+from .signals.avwap import AvwapBands, classify_band, zone_from_position
 from .signals.levels import levels_near
-from .signals.moving import cloud_state, cross_within, ema, sma
+from .signals.moving import (
+    CLOUD_SLOPE_BARS,
+    cloud_state,
+    cross_within,
+    ema,
+    ema_cloud,
+    moving_average,
+    sma,
+)
 
 __all__ = [
     "CONDITION_SPECS",
@@ -56,8 +64,11 @@ __all__ = [
     "UNVALIDATED",
     "VALIDATED",
     "describe_condition",
+    "HISTORY_UNMEASURABLE",
     "evaluate_setup",
+    "fire_series",
     "load_setups",
+    "unmeasurable_conditions",
     "validation_state",
 ]
 
@@ -438,6 +449,7 @@ class SetupContext:
     rrs_sector: float | None = None
     sector_ticker: str | None = None
     bands: AvwapBands | None = None
+    rrs_sector_series: pd.Series | None = None
 
     @property
     def close(self) -> float | None:
@@ -663,3 +675,168 @@ def validation_state(*, backtested: bool, closed_trades: int) -> str:
     if backtested or int(closed_trades) >= MIN_TRADES_TO_VALIDATE:
         return VALIDATED
     return UNVALIDATED
+
+
+# -- per-bar evaluation, for the backtest -----------------------------------
+
+# Conditions that cannot be evaluated bar by bar over history without looking
+# at data the bar did not have. `near_level` is the one: the level store is
+# built from the whole series, so asking "was price near a level on day 40?"
+# with a store that knows about day 300 is lookahead. The setup is not
+# silently reduced to its other conditions — a setup containing one of these
+# produces NO historical instances, and the backtest says why.
+HISTORY_UNMEASURABLE = frozenset({"near_level"})
+
+
+def _bool_series(index, value: bool) -> pd.Series:
+    return pd.Series(value, index=index, dtype="object")
+
+
+def _unknown_series(index) -> pd.Series:
+    return pd.Series([None] * len(index), index=index, dtype="object")
+
+
+def _compare_series(op: str, values: pd.Series, threshold: float) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    known = np.isfinite(numeric)
+    result = pd.Series([None] * len(numeric), index=numeric.index, dtype="object")
+    if not known.any():
+        return result
+    passed = OPS[op](numeric[known], threshold)
+    result[known] = passed.astype(bool)
+    return result
+
+
+def _condition_series(condition: Condition, context: SetupContext) -> pd.Series:
+    """One tri-state value per bar. None means UNKNOWN at that bar."""
+    frame = context.frame
+    index = frame.index
+    params = condition.params
+    kind = condition.kind
+
+    if kind in HISTORY_UNMEASURABLE:
+        return _unknown_series(index)
+
+    if kind == "price_vs_ma":
+        line = (
+            sma(frame, params["length"]) if params["ma"] == "sma" else ema(frame, params["length"])
+        )
+        closes = pd.to_numeric(frame["close"], errors="coerce")
+        known = np.isfinite(line) & np.isfinite(closes)
+        result = _unknown_series(index)
+        comparison = closes > line if params["op"] == "above" else closes < line
+        result[known] = comparison[known].astype(bool)
+        return result
+
+    if kind == "cloud":
+        cloud = ema_cloud(frame, params["fast"], params["slow"])
+        if cloud.empty:
+            return _unknown_series(index)
+        closes = pd.to_numeric(frame["close"], errors="coerce")
+        known = np.isfinite(cloud["upper"]) & np.isfinite(cloud["lower"]) & np.isfinite(closes)
+        result = _unknown_series(index)
+        position = pd.Series("inside", index=index, dtype="object")
+        position[closes > cloud["upper"]] = "above"
+        position[closes < cloud["lower"]] = "below"
+        ok = pd.Series(True, index=index)
+        if params["position"] != "any":
+            ok &= position == params["position"]
+        if params["slope"] != "any":
+            change = cloud["slow"].diff(CLOUD_SLOPE_BARS)
+            slope = pd.Series("flat", index=index, dtype="object")
+            slope[change > 0] = "rising"
+            slope[change < 0] = "falling"
+            known &= np.isfinite(change)
+            ok &= slope == params["slope"]
+        result[known] = ok[known].astype(bool)
+        return result
+
+    if kind == "ma_cross":
+        fast = moving_average(frame, params["ma"], params["fast"])
+        slow = moving_average(frame, params["ma"], params["slow"])
+        known = np.isfinite(fast) & np.isfinite(slow)
+        above = fast > slow
+        if params["direction"] == "up":
+            event = above & ~above.shift(1, fill_value=False)
+        else:
+            event = ~above & above.shift(1, fill_value=False)
+        event &= known & known.shift(1, fill_value=False)
+        window = int(params["within"])
+        recent = event.rolling(window, min_periods=1).max().fillna(0).astype(bool)
+        result = _unknown_series(index)
+        # A cross needs the pair to exist across the whole window, or "no
+        # cross" is a statement about the warm-up rather than about price.
+        usable = known.rolling(window, min_periods=window).min().fillna(0).astype(bool)
+        result[usable] = recent[usable].astype(bool)
+        return result
+
+    if kind == "band_zone":
+        if context.evaluated is None or "dip_sigma" not in getattr(
+            context.evaluated, "columns", []
+        ):
+            return _unknown_series(index)
+        position = pd.to_numeric(context.evaluated["dip_sigma"], errors="coerce")
+        position.index = index[: len(position)]
+        zones = position.map(zone_from_position)
+        result = _unknown_series(index)
+        known = zones != "UNKNOWN"
+        result[known.reindex(index, fill_value=False)] = zones[known].isin(params["zone"])
+        return result
+
+    if kind == "dip_sigma":
+        if context.evaluated is None or "dip_sigma" not in getattr(
+            context.evaluated, "columns", []
+        ):
+            return _unknown_series(index)
+        return _compare_series(params["op"], context.evaluated["dip_sigma"], params["value"])
+
+    if kind == "rrs":
+        if params["scope"] == "sector":
+            if context.rrs_sector_series is None:
+                return _unknown_series(index)
+            return _compare_series(params["op"], context.rrs_sector_series, params["value"])
+        if context.evaluated is None or "rrs" not in getattr(context.evaluated, "columns", []):
+            return _unknown_series(index)
+        return _compare_series(params["op"], context.evaluated["rrs"], params["value"])
+
+    if kind == "participation":
+        if context.evaluated is None or "participation" not in getattr(
+            context.evaluated, "columns", []
+        ):
+            return _unknown_series(index)
+        return _compare_series(params["op"], context.evaluated["participation"], params["value"])
+
+    if kind == "change":
+        closes = pd.to_numeric(frame["close"], errors="coerce")
+        earlier = closes.shift(int(params["bars"]))
+        change = (closes / earlier - 1.0) * 100.0
+        change[earlier <= 0] = np.nan
+        return _compare_series(params["op"], change, params["value"])
+
+    raise SetupError(f"condition kind {kind!r} has no per-bar evaluator")  # pragma: no cover
+
+
+def fire_series(setup: Setup, context: SetupContext) -> pd.Series:
+    """Boolean per bar: did every condition hold there?
+
+    UNKNOWN at a bar means the setup did not fire at that bar — the same rule
+    the last-bar path uses, applied to history so the backtest measures the
+    same thing the scanner shows.
+    """
+    index = context.frame.index
+    if len(index) == 0:
+        return pd.Series(dtype=bool)
+    fired = pd.Series(True, index=index)
+    for condition in setup.conditions:
+        values = _condition_series(condition, context)
+        fired &= values.map(lambda value: value is True)
+    return fired.astype(bool)
+
+
+def unmeasurable_conditions(setup: Setup) -> tuple[str, ...]:
+    """Which of a setup's conditions cannot be measured over history."""
+    return tuple(
+        describe_condition(condition)
+        for condition in setup.conditions
+        if condition.kind in HISTORY_UNMEASURABLE
+    )

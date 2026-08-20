@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from .backtest import verdict_banner
 from .config import Config
 from .paths import append_jsonl
 from .timeutil import iso, utcnow
@@ -88,28 +89,9 @@ def split_content(text: str, limit: int) -> list[str]:
 
 
 def _verdict_banner(backtest_verdict: dict | None) -> str:
-    """A one-line warning when the backtest says this setup class did not pass."""
-    if not backtest_verdict:
-        return ""
-    verdicts = {
-        horizon: judgement.get("verdict")
-        for horizon, judgement in backtest_verdict.items()
-        if isinstance(judgement, dict)
-    }
-    if not verdicts:
-        return ""
-    if any(value == "PLAUSIBLE" for value in verdicts.values()):
-        return ""
-    if all(value == "UNKNOWN" for value in verdicts.values()):
-        return (
-            "⚠ **The backtest returned UNKNOWN at every horizon** — too small a "
-            "sample to judge, which is not the same as a pass."
-        )
-    return (
-        "⚠ **The backtest says this setup class is NOT PLAUSIBLE at every horizon "
-        "tested**, against a rule frozen before the measurement. The rows below are "
-        "what the screen found today; they are not evidence the class works."
-    )
+    """The shared banner. Defined in backtest.py so every surface says the same
+    sentence — the digest, the MARKET page and the SCANNER page (§19 Part 2)."""
+    return verdict_banner(backtest_verdict)
 
 
 def _fmt(value, digits=2, suffix="") -> str:

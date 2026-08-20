@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     backtest = sub.add_parser("backtest", help="the historical viability study (plan.md §13)")
     backtest.add_argument("--max-types", type=int, help="cap the types scanned")
+    backtest.add_argument(
+        "--setup",
+        help="measure one of config/setups.jsonl's setups instead of the built-in rule; "
+        "same costs, same horizons, same limitations statement",
+    )
 
     killmails = sub.add_parser("killmails", help="destruction backfill, live poll, or the study")
     killmails.add_argument(
@@ -123,6 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="value",
         help="value = deepest below anchored value; strength = RRS; change = day move",
     )
+
+    scan = sub.add_parser("scan", help="run the built-in setup and every enabled operator setup")
+    scan.add_argument("--setup", help="run only this setup by name")
+    scan.add_argument("--top", type=int, default=15, help="hits to show per setup (default: 15)")
+
+    setups_cmd = sub.add_parser("setups", help="list config/setups.jsonl, validated on load")
+    setups_cmd.add_argument("--all", action="store_true", help="include disabled setups")
 
     anchors = sub.add_parser(
         "anchors", help="patch-notes watcher: append anchor CANDIDATES for confirmation"
@@ -417,8 +429,21 @@ class _ScanView:
 
 def _cmd_backtest(config: Config, args) -> int:
     from .backtest import render_backtest, run_backtest, write_backtest
+    from .setups import SETUPS_FILE, load_setups
 
     region = _region(config, args)
+    setup = None
+    if getattr(args, "setup", None):
+        wanted = args.setup.casefold()
+        matched = [
+            candidate
+            for candidate in load_setups(Path.cwd() / "config" / SETUPS_FILE)
+            if candidate.name.casefold() == wanted
+        ]
+        if not matched:
+            print(f"no setup named {args.setup!r}; run `setups` to list them")
+            return 2
+        setup = matched[0]
 
     def progress(index, total, found):
         print(f"  ... {index}/{total} types scanned, {found} instances", flush=True)
@@ -434,6 +459,7 @@ def _cmd_backtest(config: Config, args) -> int:
             composite.frame,
             _latest_book(config, region),
             db=db,
+            setup=setup,
             region_id=region,
             anchor_dates=_anchor_dates(config),
             progress=progress,
@@ -708,6 +734,101 @@ def _cmd_board(config: Config, args) -> int:
     return 0
 
 
+def _sector_context(config: Config, db, bars, region: int):
+    """Sector definitions and their index frames, or empty when unbuilt.
+
+    A sector that could not be built simply is not in the returned mapping,
+    which makes every `rrs scope=sector` condition on its members UNKNOWN
+    rather than silently answered with FORGE.
+    """
+    from .indices import build_index_set, load_sectors
+    from .universe import index_eligible_type_ids
+
+    sectors = load_sectors(Path.cwd() / "config" / "sectors.jsonl")
+    if not sectors or bars is None or bars.empty:
+        return sectors, {}
+    volumes = {
+        int(row["type_id"]): float(row["median_unit_volume"] or 0.0)
+        for row in db.conn.execute(
+            "SELECT type_id, median_unit_volume FROM universe WHERE region_id=?", (region,)
+        )
+    }
+    index_set = build_index_set(
+        config,
+        db,
+        bars,
+        member_ids=index_eligible_type_ids(db, region) or None,
+        unit_volume=volumes,
+        sectors=sectors,
+    )
+    frames = {
+        ticker: composite.frame
+        for ticker, composite in index_set.sectors.items()
+        if composite.known
+    }
+    return sectors, frames
+
+
+def _cmd_setups(config: Config, args) -> int:
+    from .setups import SETUPS_FILE, describe_condition, load_setups
+
+    path = Path.cwd() / "config" / SETUPS_FILE
+    setups = load_setups(path)
+    if not setups:
+        print(f"no setups in {path} — the scanner will run the built-in rule only")
+        return 0
+    for setup in setups:
+        if not setup.enabled and not args.all:
+            continue
+        marks = ["enabled" if setup.enabled else "DISABLED"]
+        if setup.example:
+            marks.append("example")
+        print(f"{setup.name} [{', '.join(marks)}]")
+        if setup.notes:
+            print(f"  {setup.notes}")
+        for condition in setup.conditions:
+            print(f"    - {describe_condition(condition)}")
+    return 0
+
+
+def _cmd_scan(config: Config, args) -> int:
+    from .report import _latest, _load
+    from .scanner import render_scan, run_scan
+    from .setups import SETUPS_FILE, load_setups
+
+    region = _region(config, args)
+    setups = load_setups(Path.cwd() / "config" / SETUPS_FILE)
+    if args.setup:
+        wanted = args.setup.casefold()
+        matched = [setup for setup in setups if setup.name.casefold() == wanted]
+        if not matched:
+            print(f"no setup named {args.setup!r}; run `setups` to list them")
+            return 2
+        setups = matched
+    reports = config.paths.reports
+    backtest = _load(_latest(reports, "backtest")) or {}
+    with _open_db(config) as db:
+        bars, composite, _all_bars = _composite_and_bars(config, db, region)
+        sectors, sector_frames = _sector_context(config, db, bars, region)
+        result = run_scan(
+            config,
+            db,
+            bars,
+            getattr(composite, "frame", None),
+            _latest_book(config, region),
+            setups=setups,
+            sectors=sectors,
+            sector_frames=sector_frames,
+            anchor_dates=_anchor_dates(config),
+            region_id=region,
+            backtest_verdict=backtest.get("verdicts"),
+        )
+    for scan in result.setups:
+        scan.hits = scan.hits[: max(1, int(args.top))]
+    print(render_scan(result))
+    return 0
+
+
 def _cmd_anchors(config: Config, args) -> int:
     from .patchnotes import FeedError, fetch_patch_notes, sync_anchor_candidates
     from .signals.anchors import load_anchors
@@ -862,6 +983,8 @@ HANDLERS = {
     "watch": _cmd_watch,
     "brief": _cmd_brief,
     "board": _cmd_board,
+    "scan": _cmd_scan,
+    "setups": _cmd_setups,
     "anchors": _cmd_anchors,
     "report": _cmd_report,
     "daemon": _cmd_daemon,

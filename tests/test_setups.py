@@ -320,3 +320,158 @@ def test_describe_covers_every_shipped_condition():
     for setup in load_setups(REPO_SETUPS):
         for condition in setup.conditions:
             assert describe_condition(condition)
+
+
+# -- per-bar evaluation must agree with the last-bar path -------------------
+
+
+def _context_with_gates(closes, **kwargs):
+    work = frame(closes)
+    from evescreener.signals.setup import SetupParams, evaluate_setups
+
+    params = SetupParams(min_bars=20)
+    evaluated = evaluate_setups(work, None, params, anchor_dates=())
+    return SetupContext(frame=work, evaluated=evaluated, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        Condition("price_vs_ma", {"ma": "sma", "length": 20, "op": "above"}),
+        Condition("price_vs_ma", {"ma": "ema", "length": 21, "op": "below"}),
+        Condition("cloud", {"fast": 9, "slow": 21, "position": "above", "slope": "any"}),
+        Condition("cloud", {"fast": 9, "slow": 21, "position": "any", "slope": "rising"}),
+        Condition("ma_cross", {"ma": "ema", "fast": 9, "slow": 21, "direction": "up", "within": 5}),
+        Condition("dip_sigma", {"op": "at_most", "value": -0.5}),
+        Condition("participation", {"op": "at_least", "value": 0.7}),
+        Condition("change", {"bars": 10, "op": "at_least", "value": 1.0}),
+        Condition("band_zone", {"zone": ["LOWER_1_2", "LOWER_2_3", "BELOW_LOWER_3"]}),
+    ],
+)
+def test_the_per_bar_series_agrees_with_the_last_bar_read(condition):
+    """The backtest must measure what the scanner shows, condition by condition.
+
+    A drift between the two is the failure that makes a backtest worse than
+    no backtest: the study would score a setup nobody is being shown.
+    """
+    from evescreener.setups import fire_series
+
+    rng = np.random.default_rng(11)
+    closes = 100 * np.exp(np.cumsum(rng.normal(0.0005, 0.02, 200)))
+    context = _context_with_gates(closes)
+    # The last-bar path needs bands for band_zone; give it the same numbers
+    # the per-bar path reads out of `dip_sigma`.
+    setup = Setup(name="probe", conditions=(condition,))
+    per_bar = fire_series(setup, context)
+    if condition.kind == "band_zone":
+        from evescreener.signals.avwap import zone_from_position
+
+        zone = zone_from_position(float(context.evaluated["dip_sigma"].iloc[-1]))
+        expected = zone in condition.params["zone"]
+    else:
+        expected = evaluate_setup(setup, context).fired
+    assert bool(per_bar.iloc[-1]) == bool(expected), condition.as_dict()
+
+
+def test_a_condition_that_cannot_be_measured_over_history_yields_no_instances():
+    """A level condition cannot be backtested without lookahead, so it isn't.
+
+    The setup is NOT quietly reduced to its other conditions — that would
+    score a different setup than the one written down.
+    """
+    from evescreener.setups import HISTORY_UNMEASURABLE, fire_series, unmeasurable_conditions
+
+    assert "near_level" in HISTORY_UNMEASURABLE
+    setup = Setup(
+        name="x",
+        conditions=(
+            Condition("change", {"bars": 5, "op": "at_least", "value": -100.0}),
+            Condition("near_level", {"level": "hv", "within_atr": 1.0, "side": "any"}),
+        ),
+    )
+    context = _context_with_gates(np.linspace(100, 200, 120))
+    assert not fire_series(setup, context).any()
+    assert unmeasurable_conditions(setup) == ("within 1.00 ATR of a hv level",)
+
+
+def test_a_sector_rrs_series_is_used_when_supplied():
+    from evescreener.setups import fire_series
+
+    context = _context_with_gates(np.linspace(100, 200, 120))
+    strong = pd.Series(2.0, index=context.frame.index)
+    setup = Setup(
+        name="x",
+        conditions=(Condition("rrs", {"scope": "sector", "op": "at_least", "value": 1.0}),),
+    )
+    context.rrs_sector_series = strong
+    assert fire_series(setup, context).all()
+    context.rrs_sector_series = None
+    assert not fire_series(setup, context).any(), "no sector series is UNKNOWN, not a pass"
+
+
+# -- backtest --setup -------------------------------------------------------
+
+
+def test_the_backtest_measures_an_operator_setup_on_the_same_terms(config):
+    """`backtest --setup NAME` reuses the whole cost pipeline, unchanged."""
+    from evescreener.backtest import find_instances
+    from evescreener.signals.setup import SetupParams
+
+    rng = np.random.default_rng(3)
+    rows = []
+    for type_id in (600, 601):
+        closes = 100 * np.exp(np.cumsum(rng.normal(0.0, 0.02, 240)))
+        stamps = pd.date_range("2026-01-01 11:00", periods=240, freq="D", tz="UTC")
+        for position, stamp in enumerate(stamps):
+            rows.append(
+                {
+                    "type_id": type_id,
+                    "region_id": 10000002,
+                    "datetime": stamp,
+                    "high": closes[position] * 1.02,
+                    "low": closes[position] * 0.98,
+                    "close": closes[position],
+                    "volume": 50_000.0,
+                    "order_count": 40,
+                    "isk_value": closes[position] * 50_000.0,
+                    "fetched_at": "x",
+                }
+            )
+    bars = pd.DataFrame(rows)
+    setup = Setup(
+        name="Above the 20",
+        conditions=(Condition("price_vs_ma", {"ma": "sma", "length": 20, "op": "above"}),),
+    )
+    params = SetupParams(min_bars=120)
+    instances, _gates = find_instances(bars, None, params, (5, 10), setup=setup)
+    assert not instances.empty, "a permissive setup must produce historical instances"
+    assert set(instances["horizon_days"]) == {5, 10}
+    assert (instances["entry_close"] > 0).all()
+
+
+def test_the_backtest_of_a_lookahead_setup_produces_nothing_and_says_why(config):
+    from evescreener.backtest import find_instances
+    from evescreener.signals.setup import SetupParams
+
+    stamps = pd.date_range("2026-01-01 11:00", periods=200, freq="D", tz="UTC")
+    closes = np.linspace(100, 200, 200)
+    bars = pd.DataFrame(
+        {
+            "type_id": 600,
+            "region_id": 10000002,
+            "datetime": stamps,
+            "high": closes * 1.02,
+            "low": closes * 0.98,
+            "close": closes,
+            "volume": 50_000.0,
+            "order_count": 40,
+            "isk_value": closes * 50_000.0,
+            "fetched_at": "x",
+        }
+    )
+    setup = Setup(
+        name="Level touch",
+        conditions=(Condition("near_level", {"level": "hv", "within_atr": 1.0, "side": "any"}),),
+    )
+    instances, _gates = find_instances(bars, None, SetupParams(min_bars=120), (5,), setup=setup)
+    assert instances.empty, "a setup that cannot be measured without lookahead measures nothing"

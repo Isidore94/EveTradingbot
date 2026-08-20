@@ -18,12 +18,43 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
+    "MIN_ATR_FRACTION",
     "atr_last",
     "atr_series",
+    "measurable_fraction",
     "risk_unit",
     "true_range",
     "winsorized_true_range",
 ]
+
+#: A scale (an ATR, or an AVWAP sigma) below this fraction of price is not a
+#: risk unit — it is the last bits of a float (plan.md §17 D-29).
+#:
+#: **Derived from the real lake, not chosen.** Across 2,914 Forge types with a
+#: positive ATR, `atr/close` is bimodal: a degenerate cluster from 1.7e-14 to
+#: about 1e-11, then almost nothing, then the working distribution. p1 is
+#: **1.6e-08** and p2 is **2.4e-05** — three orders of magnitude of near-empty
+#: space between them. 1e-6 sits at the top of that gap. It marks **38 types
+#: (1.30%)** UNKNOWN and leaves every name in the working distribution alone;
+#: 1e-5 would take 1.82% and 1e-4 would take 2.68%, reaching into names that
+#: are quiet rather than broken. The conservative end of an empirical gap is a
+#: defensible default in a way that a round number in the continuum is not.
+MIN_ATR_FRACTION = 1e-6
+
+
+def measurable_fraction(scale, close, *, min_fraction: float = MIN_ATR_FRACTION):
+    """Is `scale` a usable risk unit at this price? Works on scalars or Series.
+
+    **One epsilon, one definition site.** ATR and the AVWAP sigma are two
+    different denominators with the same failure mode — a series that does not
+    move makes both of them float noise, and everything that divides by them
+    then explodes. Both ask this function.
+    """
+    scale = np.asarray(scale, dtype="float64")
+    close = np.asarray(close, dtype="float64")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        fraction = np.where(close > 0, scale / close, np.nan)
+    return np.isfinite(fraction) & (scale > 0) & (fraction >= float(min_fraction))
 
 
 def true_range(frame: pd.DataFrame) -> pd.Series:
@@ -92,14 +123,34 @@ def atr_series(
 
 
 def atr_last(
-    frame: pd.DataFrame, *, length: int = 20, winsor_k: float = 8.0, winsor_window: int = 60
+    frame: pd.DataFrame,
+    *,
+    length: int = 20,
+    winsor_k: float = 8.0,
+    winsor_window: int = 60,
+    min_fraction: float = MIN_ATR_FRACTION,
 ) -> float | None:
-    """The current ATR, or None. None means UNKNOWN and UNKNOWN always fails."""
+    """The current ATR, or None. None means UNKNOWN and UNKNOWN always fails.
+
+    The floor is applied **here**, at the single place every scalar consumer
+    reads an ATR — RRS, the screen, the brief, the scanner, the chart, the
+    paper prefill and `risk_unit` all come through this function, so none of
+    them can be given a risk unit made of float noise. Pass
+    `min_fraction=0.0` to read the raw value (fixtures do, to prove the guard
+    is what changed the answer).
+    """
     series = atr_series(frame, length=length, winsor_k=winsor_k, winsor_window=winsor_window)
     if series.empty:
         return None
     value = series.iloc[-1]
     if not np.isfinite(value) or value <= 0:
+        return None
+    close = pd.to_numeric(frame["close"], errors="coerce").dropna()
+    if close.empty:
+        return None
+    if not bool(
+        measurable_fraction(float(value), float(close.iloc[-1]), min_fraction=min_fraction)
+    ):
         return None
     return float(value)
 

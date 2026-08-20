@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .atr import atr_last
+from .atr import MIN_ATR_FRACTION, atr_last, measurable_fraction
 
 __all__ = [
     "RelativeStrength",
@@ -65,6 +65,7 @@ def real_relative_strength(
     members: int | None = None,
     winsor_k: float = 8.0,
     winsor_window: int = 60,
+    min_atr_fraction: float = MIN_ATR_FRACTION,
 ) -> RelativeStrength:
     """`(Δsym − power_index × ATR_sym) / ATR_sym`, where power_index = Δref/ATR_ref.
 
@@ -84,13 +85,30 @@ def real_relative_strength(
     reference_move = reference_close[-1] - reference_close[-1 - length]
     # ATR excludes the final bar, exactly as upstream (`bars[:-1]`).
     symbol_atr = atr_last(
-        symbol_bars.iloc[:-1], length=length, winsor_k=winsor_k, winsor_window=winsor_window
+        symbol_bars.iloc[:-1],
+        length=length,
+        winsor_k=winsor_k,
+        winsor_window=winsor_window,
+        min_fraction=min_atr_fraction,
     )
+    # The reference is an index: `high == low == close` by construction, so its
+    # ATR is a close-to-close proxy (§17 D-23) and a price-relative floor does
+    # not describe it. Only the per-type denominator is guarded here.
     reference_atr = atr_last(
-        reference_bars.iloc[:-1], length=length, winsor_k=winsor_k, winsor_window=winsor_window
+        reference_bars.iloc[:-1],
+        length=length,
+        winsor_k=winsor_k,
+        winsor_window=winsor_window,
+        min_fraction=0.0,
     )
     if not symbol_atr or not reference_atr:
-        return RelativeStrength(None, None, scope, members, "ATR unavailable or zero")
+        return RelativeStrength(
+            None,
+            None,
+            scope,
+            members,
+            "ATR unavailable, zero, or too small a fraction of price to be a risk unit",
+        )
     power_index = reference_move / reference_atr
     rrs = (symbol_move - (power_index * symbol_atr)) / symbol_atr
     if not np.isfinite(rrs):
@@ -105,6 +123,7 @@ def rrs_series(
     length: int = 20,
     winsor_k: float = 8.0,
     winsor_window: int = 60,
+    min_atr_fraction: float = MIN_ATR_FRACTION,
 ) -> pd.Series:
     """RRS at every bar, vectorized, aligned to `symbol_frame`.
 
@@ -142,6 +161,15 @@ def rrs_series(
         power_index = aligned_reference_move / aligned_reference_atr
         values = (symbol_move - power_index * symbol_atr) / symbol_atr
     values = values.where(np.isfinite(values))
+    # Same floor as the scalar path: a per-type ATR that is float noise is not
+    # a denominator, and dividing by it is what produced RRS in the billions
+    # (§17 D-29). The reference is an index and is deliberately not guarded.
+    usable = measurable_fraction(
+        symbol_atr.to_numpy(dtype="float64"),
+        symbol_close.to_numpy(dtype="float64"),
+        min_fraction=min_atr_fraction,
+    )
+    values = values.where(pd.Series(usable, index=symbol_atr.index))
     values.index = symbol_frame.index
     return values
 

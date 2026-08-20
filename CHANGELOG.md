@@ -5,6 +5,88 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A risk unit made of float noise is not a risk unit
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §13.2 (amended) and §17 D-29.
+`uv run pytest -q` → **556 passed, 7 deselected**, ruff check + format clean.
+
+### The defect
+
+§13.2's `measurable` gate asked only `atr > 0`. On the real lake that admitted
+**1.33% of tracked types whose ATR is float noise** — near-flat series where
+the twenty-day "range" is the last bits of a double, measured as low as
+**1.7e-14 of price**. Everything that divides by a risk unit then exploded:
+*Power Couplings* read RRS **−905 billion**. Both surfaces that rank by depth
+— the board's value sort and the screen — select for exactly those names.
+
+### The floor, derived rather than chosen
+
+`atr/close` across 2,914 Forge types is **bimodal**:
+
+| percentile | atr/close |
+|---|---|
+| p0.1 | 1.8e-14 |
+| p1 | **1.6e-08** |
+| p2 | **2.4e-05** |
+| p5 | 5.0e-04 |
+| p50 | 5.8e-02 |
+
+Three orders of magnitude of near-empty space separate the degenerate cluster
+from the working distribution. **`min_atr_fraction = 1e-6` sits at the top of
+that gap**, marking 39 types (1.33%) UNKNOWN and touching nothing that trades.
+1e-5 would take 1.82% and 1e-4 would take 2.68%, reaching into names that are
+quiet rather than broken.
+
+### One epsilon, one definition site
+
+`atr.measurable_fraction` is the only place the question is answered, and the
+floor is enforced **inside `atr_last`** — so RRS, the screen, the brief, the
+scanner, the chart, the paper prefill and `risk_unit` all inherit it and none
+can bypass it. The two per-bar paths (`setup.py`, `rrs_series`) call the same
+function. It governs the **AVWAP sigma** as well as the ATR, because dip-σ
+divides by sigma and a flat series makes both degenerate.
+
+The composite reference ATR is deliberately **not** floored: an index carries
+`high == low == close` (§17 D-23), so a price-relative test does not describe
+it. Only the per-type denominator is guarded.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| types blocked | — | **39 (1.33%)** |
+| max abs RRS | **9.05e11** | **1.19e7** |
+| abs RRS > 1,000 | 77 types | **51** |
+| RRS p1 / p99 | −1,966 / +2,661 | **−677 / +710** |
+| RRS median | +3.18 | **+3.18 (unchanged)** |
+| backtest instances | 147,140 | **145,655** (−1.0%) |
+| backtest verdict | NOT PLAUSIBLE | **NOT PLAUSIBLE** |
+| digest candidates | 25 | **25, none dropped** |
+
+The unchanged median is the point: the body of the distribution never moved.
+**No golden fixture needed regenerating** — on clean data the gate changes
+nothing, the same evidence of surgicality the return clamp produced.
+
+That the digest is untouched is worth stating plainly: the degenerate types
+were never clearing costs. They were polluting the board's ordering and the
+RRS distribution, not the candidate list.
+
+### What this does NOT fix
+
+**51 types still exceed abs RRS 1,000, and they are not degenerate.**
+*Hemorphite II-Grade* has a perfectly healthy `atr/close` of 1.55e-04 and
+reads RRS **−2,932** because it fell 45% in twenty bars — **2,936× its own
+ATR**. That is RRS working, not failing: a quiet type that collapses really is
+that weak relative to how it normally moves. The board's value sort therefore
+still shows large magnitudes at the top. Several of those moves trace to
+unfiltered ESI prints in `close`, and **reporting stays unclamped by design**
+— the board prints what ESI printed.
+
+### Also
+
+- MARKET renders top weight as **10.0%** rather than `0.10000000000000003`,
+  and entropy to three places.
+
 ## 2026-08-20 — The desk stops computing on the thread that draws it
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §19.2 (amended) and §17 D-24…D-28.

@@ -56,6 +56,7 @@ def setup_params(config: Config) -> SetupParams:
         participation_window=config.screen.participation_window,
         atr_winsor_k=config.signals.atr_winsor_k,
         atr_winsor_window=config.signals.atr_winsor_window,
+        min_atr_fraction=config.signals.min_atr_fraction,
     )
 
 

@@ -38,6 +38,12 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
+- **Latest — the relative measurable gate (plan.md §13.2 amended, §17 D-29):**
+  `uv run pytest -q` → **556 passed, 7 deselected**, ruff check + format clean.
+  39 types (1.33%) now read UNKNOWN rather than carrying a float-noise risk
+  unit; max abs RRS falls 9.05e11 → 1.19e7 with the median unchanged at +3.18.
+  Backtest 145,655 instances, still NOT PLAUSIBLE at every horizon. The digest
+  produced the same 25 candidates.
 - **Latest — FORGE's outlier clamp and the desk's threading contract (plan.md
   §17 D-22…D-28, §19.2 amended):** `uv run pytest -q` → **544 passed, 7
   deselected**, ruff check + format clean, `selftest` → **12/12**. FORGE now
@@ -217,25 +223,46 @@ broken RRS: instances rose 125,254 → **147,140** and the verdict is still
 **NOT PLAUSIBLE at every horizon**, which is the expected result because that
 verdict rests on measured friction and never reads RRS.
 
-### 3b. The RRS tail is a per-type ATR problem — OPEN, not fixed
+### 3b. A degenerate per-type ATR — RESOLVED 2026-08-20, with a caveat
 
-Surfaced only once the index was fixed; the −1,479 offset had masked it
-completely. **84.3%** of the tracked universe now sits inside abs(RRS) ≤ 10.
-The other **15.7%** does not, and **2.6%** exceeds 1,000 — because those
-types' own ATR is effectively zero. Measured: *Power Couplings* ATR
-**4.16e-11** (1.6e-10% of close) → RRS **−905 billion**; *Analog Panel*
-−679 billion; *Admixti Mutanite* +12 billion.
+Fixed under plan.md §13.2 (amended) and §17 **D-29**. §13.2's `measurable`
+gate is now **relative**: `atr / close >= signals.min_atr_fraction`, below
+which the gate reads UNKNOWN and UNKNOWN fails. One epsilon governs the ATR
+and the AVWAP sigma, enforced inside `atr_last` so no scalar consumer can
+bypass it.
 
-`atr_last` already refuses `atr <= 0`, but a tiny positive ATR passes, and
-`rrs = (Δsym − power_index × ATR_sym) / ATR_sym` then divides by it. The
-plausible answer is that an ATR which is a negligible fraction of price is not
-a measurable risk unit and should read UNKNOWN — but that is a change to the
-frozen ATR/RRS surface, needing its own golden fixtures and sign-off, so it is
-recorded here rather than patched.
+**The default is derived from the lake, not invented.** `atr/close` is
+bimodal — a degenerate cluster at 1e-14…1e-11, then p1 = **1.6e-08**, p2 =
+**2.4e-05**, p50 = **5.8e-02**. `1e-6` sits at the top of that empty band.
 
-Practical impact today: a near-pinned type can present an arbitrarily large
-RRS and so pass or fail the strength gate on noise. It affects the tail of the
-universe, not the names the screen actually surfaces.
+| | before | after |
+|---|---|---|
+| types blocked | — | **39 (1.33%)** |
+| max abs RRS | 9.05e11 | **1.19e7** |
+| abs RRS > 1,000 | 77 | **51** |
+| RRS p1 / p99 | −1,966 / +2,661 | **−677 / +710** |
+| RRS median | +3.18 | **+3.18** |
+| backtest instances | 147,140 | **145,655** |
+| backtest verdict | NOT PLAUSIBLE | **NOT PLAUSIBLE** |
+| digest candidates | 25 | **25, none dropped** |
+
+No golden fixture needed regenerating: on clean data the gate changes nothing.
+
+**The caveat, because the acceptance was written expecting more.** The board's
+value sort still shows large magnitudes at the top, and this fix was never
+going to change that. Those rows are **not** ghost names: *Hemorphite
+II-Grade* has `atr/close` of 1.55e-04 — ordinary — and reads RRS −2,932
+because it fell 45% in twenty bars, i.e. **2,936× its own ATR**. That is a
+correct measurement of an extreme move. The one visible board row this fix did
+change is *Second-hand Parts* (`atr/close` 1.22e-10, a genuine ghost), whose
+RRS is now UNKNOWN.
+
+What is left at the top of that sort is mostly **unfiltered ESI prints in the
+per-type `close` series** — the §0 check #4 phenomenon — and reporting stays
+unclamped by design. If the operator wants the board's *ordering* to stop
+selecting for those, that is a separate decision about the sort key, not about
+the measurable gate.
+
 
 ### 4. The desk blocked its own GUI thread — RESOLVED 2026-08-20
 

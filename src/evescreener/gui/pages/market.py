@@ -100,10 +100,12 @@ class MarketPage(DeskPage):
                 f"FORGE {level:,.2f}"
                 + (f"  ({change:+.2f}% on the day)" if change is not None else "  (Δ UNKNOWN)")
             )
+            top_weight = diagnostics.get("top_weight")
+            entropy = diagnostics.get("weight_entropy")
             self.diagnostics.setText(
                 f"{diagnostics.get('members', BLANK)} members · top weight "
-                f"{diagnostics.get('top_weight', BLANK)} · entropy "
-                f"{diagnostics.get('weight_entropy', BLANK)} · "
+                f"{f'{top_weight:.1%}' if isinstance(top_weight, float) else BLANK} · entropy "
+                f"{f'{entropy:.3f}' if isinstance(entropy, float) else BLANK} · "
                 f"{diagnostics.get('rebalances', 0)} rebalance(s). "
                 "Weighted by ISK turnover, not raw units — raw units would make this "
                 "index almost entirely Tritanium."

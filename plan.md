@@ -884,9 +884,22 @@ At bar `t`, a type is an instance of the setup iff **all** of:
 3. **Demand intact — participation.** `order_count(t) / mean(order_count,
    trailing 20, excluding t) ≥ participation_floor` (default 0.7). A price
    move on collapsing `order_count` is a thin-book artifact (§4).
-4. **Measurable.** ATR(20) is known, the bar is not a ghost day
-   (`order_count > 0`), and the type has at least `min_bars` (120) bars of
-   history at `t`.
+4. **Measurable.** ATR(20) is known **and is at least
+   `signals.min_atr_fraction` (1e-6) of the close**, the bar is not a ghost
+   day (`order_count > 0`), and the type has at least `min_bars` (120) bars of
+   history at `t`. The same floor governs the AVWAP sigma, because dip-σ
+   divides by it and fails the same way.
+
+   > **Superseded text, left visible (amended 2026-08-20, §17 D-29).** This
+   > gate previously read *"ATR(20) is known, the bar is not a ghost day
+   > (`order_count > 0`), and the type has at least `min_bars` (120) bars of
+   > history at `t`"* — an **absolute** test that asked only `atr > 0`. On the
+   > real lake that admitted 1.33% of tracked types whose ATR is float noise
+   > (measured as low as 1.7e-14 of price), and everything that divides by a
+   > risk unit then exploded: RRS reached **−905 billion**. An unmeasurable
+   > risk unit is uncertainty, not a pass (§4). This is a change to a frozen
+   > §13.2 definition, made with fixtures first and the old wording kept
+   > here.
 5. **Tradeable.** The type clears the census-derived liquidity floor.
 
 Any gate that cannot be evaluated is **UNKNOWN and fails** (tri-state, §8).
@@ -1156,6 +1169,7 @@ this document's prior text is recorded here with its reason.
 | D-26 | **The patch-notes watcher dedupes candidates on the article URL as well as on (date, label).** | Measured 2026-08-20: `config/anchors.jsonl` held *Patch Notes - Version 24.01* on both 08-19 and 08-20 under an identical source URL, because CCP re-dated the article. The watcher runs daily, so the operator would have been asked to confirm one patch twice, and confirming both would anchor twice on one event. The duplicate row was removed. |
 | D-27 | **`selftest`'s cost-model check derives the expected tax and fee from config** instead of hardcoding Accounting V's 3.375%. | The pinned constant asserted a *skill level*, not the arithmetic. It happened to hold for this operator (Accounting V, Broker Relations IV) and would have failed anyone who had not trained Accounting to V, on a correct install. |
 | D-28 | **`universe.seed_watchlist` is deleted.** | It read `config.universe.watchlist` and resolved all 50 §11 D4 names, and **nothing in `src/` ever called it** — only the tests did. The roster was seeded through the documented `watch add` path on 2026-08-20 (50 resolved, 0 unresolved) and those entries are operator-owned. Wiring an automatic seeder was deliberately not done: a re-seed would resurrect a name the operator had removed, which is §11 D4's never-auto-removed rule failing in the other direction. |
+| D-29 | **§13.2's `measurable` gate becomes RELATIVE.** A type is measurable only when `atr / close >= signals.min_atr_fraction`; below it the gate is UNKNOWN, and UNKNOWN fails (§4). One epsilon governs the ATR **and** the AVWAP sigma, applied at one definition site (`atr.measurable_fraction`, enforced inside `atr_last` so no scalar consumer can bypass it) plus the two per-bar paths in `setup.py` and `rrs_series`. The §13.2 text is amended with the old wording left visible. | **Measured, and the default is derived rather than chosen.** Across 2,914 Forge types with a positive ATR, `atr/close` is bimodal: a degenerate cluster from **1.7e-14** to about 1e-11, then three orders of magnitude of near-empty space — p1 is **1.6e-08**, p2 is **2.4e-05** — then the working distribution (p50 **5.8e-02**). **1e-6 sits at the top of that gap**: it marks **39 types (1.33%)** UNKNOWN and touches nothing in the working distribution. 1e-5 would take 1.82% and 1e-4 would take 2.68%, reaching into names that are quiet rather than broken; the conservative end of an empirical gap is defensible in a way that a round number inside the continuum is not. **Effect:** max abs RRS falls from **9.05e11 to 1.19e7**, abs RRS > 1,000 from 77 types to 51, p1 from −1,966 to −677 and p99 from +2,661 to +710, while the median is **unchanged at +3.18** — the body of the distribution is untouched, which is what a surgical gate looks like. Backtest instances **147,140 → 145,655** (−1.0%) and the verdict is **NOT PLAUSIBLE at every horizon**, unchanged. The digest produced **the same 25 candidates, none dropped** — the degenerate types were never clearing costs; they were polluting the board's sort and the RRS distribution. **What this does NOT fix, stated plainly:** 51 types still exceed abs RRS 1,000, and they are *not* degenerate. *Hemorphite II-Grade* has a healthy `atr/close` of 1.55e-04 and reads RRS −2,932 because it fell 45% in 20 bars — **2,936× its own ATR**. That is RRS working, not failing. The board's value sort therefore still shows large magnitudes at the top; they are honest measurements of violent moves, several of which trace to unfiltered ESI prints in `close`, which reporting deliberately does not clamp. |
 
 ### §0 named checks — status after this build
 

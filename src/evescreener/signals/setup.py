@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from ..bars import participation
-from .atr import atr_series
+from .atr import MIN_ATR_FRACTION, atr_series, measurable_fraction
 from .avwap import segmented_band_series
 from .rrs import rrs_series
 
@@ -57,6 +57,7 @@ class SetupParams:
     participation_window: int = 20
     atr_winsor_k: float = 8.0
     atr_winsor_window: int = 60
+    min_atr_fraction: float = MIN_ATR_FRACTION
 
 
 def anchor_grid(frame: pd.DataFrame, *, step_days: int, anchor_dates=()) -> list[int]:
@@ -132,8 +133,21 @@ def evaluate_setups(
     order_count = pd.to_numeric(work["order_count"], errors="coerce")
     bar_number = pd.Series(np.arange(1, size + 1), index=work.index)
 
+    close_series = pd.to_numeric(work["close"], errors="coerce")
+    # One epsilon, both denominators. A series that does not move makes the
+    # AVWAP sigma float noise exactly as it does the ATR, and dip-σ divides by
+    # sigma (§17 D-29).
+    sigma_usable = pd.Series(
+        measurable_fraction(
+            bands["sigma"].to_numpy(dtype="float64"),
+            close_series.to_numpy(dtype="float64"),
+            min_fraction=params.min_atr_fraction,
+        ),
+        index=work.index,
+    )
+
     dip = bands["dip_sigma"] if "dip_sigma" in bands else pd.Series(np.nan, index=work.index)
-    dip_unknown = ~np.isfinite(dip)
+    dip_unknown = ~np.isfinite(dip) | ~sigma_usable
     below = (dip <= -abs(params.entry_band_sigma)).fillna(False) & ~dip_unknown
 
     rrs_unknown = ~np.isfinite(rrs)
@@ -142,7 +156,15 @@ def evaluate_setups(
     thrust_unknown = ~np.isfinite(thrust)
     thrust_ok = (thrust >= params.participation_floor).fillna(False) & ~thrust_unknown
 
-    atr_unknown = ~np.isfinite(atr) | (atr <= 0)
+    atr_usable = pd.Series(
+        measurable_fraction(
+            atr.to_numpy(dtype="float64"),
+            close_series.to_numpy(dtype="float64"),
+            min_fraction=params.min_atr_fraction,
+        ),
+        index=work.index,
+    )
+    atr_unknown = ~np.isfinite(atr) | (atr <= 0) | ~atr_usable
     measurable = ~atr_unknown & (order_count > 0).fillna(False) & (bar_number >= params.min_bars)
 
     result = pd.DataFrame(

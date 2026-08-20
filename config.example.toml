@@ -146,6 +146,13 @@ atr_length = 20
 atr_winsor_k = 8.0
 atr_winsor_window = 60
 rrs_length = 20
+# A scale below this fraction of price is not a risk unit (plan.md §17 D-29).
+# Measured across 2,914 Forge types: atr/close is bimodal, with a degenerate
+# cluster at 1e-14..1e-11 and the working distribution starting around 2.4e-05
+# (p2). 1e-6 sits at the top of the empty band between them and marks 38 types
+# (1.30%) UNKNOWN. Raising it to 1e-5 takes 1.82%, 1e-4 takes 2.68%. Governs
+# the ATR *and* the AVWAP sigma — one epsilon, both denominators.
+min_atr_fraction = 1e-6
 # Forge Composite: turnover-weighted, chain-linked monthly, 10% single-type cap.
 composite_members = 100
 composite_single_weight_cap = 0.10

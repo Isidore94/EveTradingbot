@@ -130,6 +130,7 @@ class SignalsConfig:
     atr_winsor_k: float
     atr_winsor_window: int
     rrs_length: int
+    min_atr_fraction: float
     composite_members: int
     composite_single_weight_cap: float
     composite_rebalance_days: int

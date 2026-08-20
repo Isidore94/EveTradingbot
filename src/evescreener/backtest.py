@@ -576,6 +576,7 @@ def run_backtest(
         participation_window=config.screen.participation_window,
         atr_winsor_k=config.signals.atr_winsor_k,
         atr_winsor_window=config.signals.atr_winsor_window,
+        min_atr_fraction=config.signals.min_atr_fraction,
     )
     costs = CostModel.from_config(config)
     tiers = tuple(float(value) for value in config.costs.notional_tiers_isk)

@@ -1,0 +1,36 @@
+# config/setups.jsonl — the operator's setups. One JSON object per line.
+#
+# This file is DATA. Editing it changes what the scanner looks for, what the
+# charts draw, what a paper trade can be tagged with, and what `backtest
+# --setup NAME` measures. It never changes the system's own recommendation,
+# which stays the frozen dip-below-value rule in signals/setup.py.
+#
+# Schema:
+#   {"name": str, "enabled": bool, "conditions": [ ... ], "notes": str,
+#    "example": bool}
+# Every condition is validated on load. An unknown kind, a misspelled
+# parameter or an out-of-range value is a LOUD error naming this file and the
+# line — never a condition that quietly passes, and never one that quietly
+# fails either.
+#
+# Condition kinds (all from daily high/low/close/volume/order_count — nothing
+# here needs an open, and nothing may invent one):
+#   price_vs_ma    ma=sma|ema, length=n, op=above|below
+#   cloud          fast=a, slow=b, position=above|inside|below|any,
+#                  slope=rising|falling|flat|any
+#   ma_cross       ma=sma|ema, fast=a, slow=b, direction=up|down, within=k
+#   band_zone      zone=<zone name>|below_value|above_value|[list]
+#   dip_sigma      op=at_least|at_most|above|below, value=x
+#   rrs            scope=forge|sector, op=..., value=x
+#   participation  op=..., value=x
+#   near_level     level=hv|round|pivot, within_atr=j, side=any|above|below
+#   change         bars=n, op=..., value=percent
+#
+# Setups are long-only: there is no short side in this system.
+#
+# The three below are marked "example": true. They are here to show the shape
+# of the language, not because they have been shown to earn. Every setup is
+# UNVALIDATED until it has a backtest read or 20 tagged closed trades.
+{"name": "Dip into value, strength intact", "enabled": true, "example": true, "notes": "The house setup, written in the operator's own vocabulary so it can be measured against the others on equal terms. If a hand-written setup cannot beat this one, that is worth knowing.", "conditions": [{"kind": "band_zone", "zone": "below_value"}, {"kind": "dip_sigma", "op": "at_most", "value": -1.0}, {"kind": "rrs", "scope": "forge", "op": "at_least", "value": -0.5}, {"kind": "participation", "op": "at_least", "value": 0.7}]}
+{"name": "Cloud reclaim", "enabled": true, "example": true, "notes": "Price back above a rising 9/21 EMA ribbon after a cross, sitting near a high-volume level. Continuation-shaped on purpose: the system will not recommend this, but it will measure it honestly.", "conditions": [{"kind": "cloud", "fast": 9, "slow": 21, "position": "above", "slope": "rising"}, {"kind": "ma_cross", "ma": "ema", "fast": 9, "slow": 21, "direction": "up", "within": 5}, {"kind": "near_level", "level": "hv", "within_atr": 1.0}]}
+{"name": "Sector leader pullback", "enabled": false, "example": true, "notes": "Leading its own sector, above the 50 SMA, but pulled back below anchored value on a quiet week. Disabled by default — enable it when you want to watch it.", "conditions": [{"kind": "rrs", "scope": "sector", "op": "at_least", "value": 0.5}, {"kind": "price_vs_ma", "ma": "sma", "length": 50, "op": "above"}, {"kind": "band_zone", "zone": ["VWAP_LOWER_1", "LOWER_1_2"]}, {"kind": "change", "bars": 5, "op": "at_most", "value": 0.0}]}

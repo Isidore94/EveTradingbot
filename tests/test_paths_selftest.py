@@ -142,3 +142,21 @@ def test_selftest_report_counts_passes(config, repo_root):
     text = selftest_report(run_selftest(config, repo_root=repo_root))
     assert "checks passed" in text
     assert text.count("[PASS]") >= 6
+
+
+def test_checkpoint_truncates_the_wal(paths):
+    """Bulk ingest leaves a WAL that only a checkpoint reclaims."""
+    from evescreener.store.db import Database
+
+    db = Database(paths.db)
+    db.conn.executemany(
+        "INSERT INTO destruction(type_id, region_id, day, hull_losses, module_losses)"
+        " VALUES(?,?,?,?,?)",
+        [(index, 10000002, "2026-08-20", 1, 2) for index in range(5000)],
+    )
+    wal = paths.db.with_name(paths.db.name + "-wal")
+    assert wal.exists() and wal.stat().st_size > 0
+    result = db.checkpoint()
+    assert result["busy"] == 0
+    assert wal.stat().st_size == 0, "a truncating checkpoint must reclaim the space"
+    db.close()

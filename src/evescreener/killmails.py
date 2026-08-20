@@ -218,6 +218,8 @@ def backfill_archives(
     finally:
         if owns:
             client.close()
+        # A year of archives leaves a WAL bigger than most of the lake.
+        db.checkpoint()
     return result
 
 

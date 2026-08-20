@@ -363,6 +363,7 @@ async def run_census(
     if "reason" in book_stats:
         notes.append(book_stats["reason"])
 
+    db.checkpoint()
     frame = lake.read(region)
     return CensusResult(
         region_id=region,

@@ -513,8 +513,18 @@ it prints as volume/price.
 
 **Data volume:** 15,000–24,000 killmails/day globally — a few tens of MB/day of
 JSON, reduced on ingest to one row per `(type_id, region_bucket, date)`
-counting hull losses and fitted-module losses separately. Trivial next to the
-market lake. **Latency:** near-real-time via R2Z2 (minutes); irrelevant for the
+counting hull losses and fitted-module losses separately. ~~Trivial next to the
+market lake.~~ **Corrected 2026-08-20 by measurement: it is the opposite.** One
+year of archives reduces to **15,696,593 rows**, a **1.3 GB** `state.db` with a
+**731 MB** WAL beside it — roughly **30× the entire Parquet bar lake** (43 MB
+for 1.85M bars across 7,264 types). The reduction is genuine (2.8M killmails
+in, 41k rows per day out) but the row count is dominated by fitted modules:
+every loss contributes ~20 `(type, region, day)` keys, not one. Mitigations
+applied: bulk writes use `executemany`, queries aggregate by `(type_id, day)`
+in SQL with a type filter so only lake-resident types are ever materialized,
+and every bulk writer now checkpoints the WAL when it finishes. If this grows
+past comfort, the table belongs in Parquet partitioned by month like the bars,
+not in SQLite — a change worth making before a second year is backfilled. **Latency:** near-real-time via R2Z2 (minutes); irrelevant for the
 daily-bar backfill path.
 
 **Signal sketch (for the Phase 5 study, not v1):** `destruction_z = 7d destroyed

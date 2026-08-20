@@ -200,6 +200,21 @@ class Database:
         else:
             self.conn.execute("COMMIT")
 
+    def checkpoint(self) -> dict:
+        """Fold the WAL back into the database file and truncate it.
+
+        A bulk ingest leaves a very large WAL — measured 2026-08-20: a year of
+        killmail archives produced a 731 MB WAL beside a 1.3 GB database. The
+        space is only reclaimed on checkpoint, so every bulk writer calls this
+        when it finishes rather than leaving the operator to discover it.
+        """
+        row = self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        return {
+            "busy": row[0] if row else None,
+            "wal_pages": row[1] if row else None,
+            "checkpointed": row[2] if row else None,
+        }
+
     # -- meta --------------------------------------------------------------
     def set_meta(self, key: str, value: str) -> None:
         self.conn.execute(

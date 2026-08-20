@@ -10,13 +10,22 @@ verification stamp. `plan.md` owns the roadmap; `CHANGELOG.md` owns history.
 promoted to real ISK until the checklist below is worked through.
 
 **The system already has an answer to the question it was built for, and it is
-a negative one.** The setup class is NOT PLAUSIBLE at every horizon tested, on
-friction rather than direction; the destruction lead-lag effect does not
-survive its own pass rule; and of 315 tracked types only two have books tight
-enough for the measured edge to survive costs. The one measurably positive
-finding is cross-region: 14 of 151,123 hub pairs clear real freight and tax at
-0.25B, best +14.44%. All of it is in `plan.md` §17 and
-`data/reports/viability-*.md`.
+a negative one.** Measured on the full lake — 3,116,848 bars, 2,654 tracked
+types, 108,441 setup instances:
+
+- the setup class is **NOT PLAUSIBLE at every horizon**, on **friction rather
+  than direction** (10-day gross **+2.80%** at a 55.7% win rate against
+  **14.7%** round-trip friction before tax);
+- the destruction lead-lag effect **does not survive** (ρ=0.027 on 473,606
+  observations against a 0.10 threshold);
+- of 6,672 fillable Forge types, only **27** have round-trip friction under
+  1%, and only **2 of 315** measured tracked types are tight enough for the
+  measured edge to survive costs;
+- the one measurably positive finding is **cross-region**: 10 of 151,113 hub
+  pairs clear real PushX freight and sales tax at 0.25B, best **+13.63%** —
+  and that is a simultaneous-snapshot number for a haul that takes days.
+
+All of it is in `plan.md` §17 and `data/reports/viability-*.md`.
 
 That answer is *provisional on the cost model being right*, which is exactly
 what gate E measures. Do that one first.
@@ -59,11 +68,21 @@ evidence.
 
 ### B. Universe (was Phase 1's gate)
 
-- [ ] **48 hours unattended**, zero 429 and zero 420 in the ledger, orders
-      budget peak below 25% of the 12,000-token window.
-- [ ] **Census committed and read.** The derived floor replaces §11 D3's
-      pre-census estimate in `plan.md`. This gate is the licence for every
-      later "the universe is N" claim.
+- [x] **Budget discipline held during the build.** Zero 429s and zero 420s
+      across ~26,000 requests; the orders token floor observed was 10,176 of
+      12,000, i.e. a peak of **15.2%** against the gate's 25% target. Recorded
+      in the `sweep_ledger`.
+- [x] **Census run and the derived floor written into `plan.md` §11 D3**
+      (≥500M ISK median daily turnover, 2,654 types, 95.1% of turnover). This
+      gate is the licence for every later "the universe is N" claim, and it is
+      now earned.
+- [ ] **48 hours unattended** is still owed — the build ran the crawl once
+      under supervision, not the daemon across two days.
+- [ ] **Decide the `order_count` floor question** raised in §11 D3: the derived
+      floor's `order_count` component came out **zero**, so the anti-wash-trade
+      guard §3.6 wanted is not active in it. Either constrain the rule or keep
+      `config.toml`'s own `min_median_order_count` above it. This is a
+      plan-level decision, not a re-derivation.
 
 ### C. Signals (was Phase 2's gate)
 

@@ -233,7 +233,7 @@ def _composite_and_bars(config: Config, db, region: int):
     the tracked universe by design, and their bars must not vanish with the floor.
     """
     from .indices import FORGE
-    from .signals.composite import TURNOVER, build_composite
+    from .signals.composite import TURNOVER, build_composite, clamp_settings
     from .store.lake import BarLake
     from .universe import index_eligible_type_ids, tracked_type_ids
 
@@ -251,6 +251,7 @@ def _composite_and_bars(config: Config, db, region: int):
         members=config.signals.composite_members,
         single_cap=config.signals.composite_single_weight_cap,
         rebalance_days=config.signals.composite_rebalance_days,
+        **clamp_settings(config.signals),
         weighting=TURNOVER,
         member_ids=eligible or None,
         ticker=FORGE,

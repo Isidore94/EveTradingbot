@@ -5,6 +5,100 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — FORGE stops printing other people's typos
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §17 D-22, D-23. `uv run pytest -q`
+→ **527 passed, 7 deselected**, ruff check + format clean.
+
+### What was wrong
+
+FORGE had run **1,000 → 69,243** with single-day prints of **+1,661%**
+(2026-08-02), +94% and +57%, against a median daily move of 0.029%.
+
+Decomposition against the real lake named it exactly. On 2026-08-02 one
+member — *Vanguard Resonant Cypher*, type 95640 — printed `close 10.07 →
+22,450.00`, a **+222,839.4%** return, at a **0.75%** live weight. That single
+member-day contributed **+1,661.59%** of the +1,661.37% the index moved. All
+100 members were priced; no gap, no NaN, no missing bar.
+
+**The chain-link was never at fault.** §19.1's composition-churn fixture is
+correct and stayed green the whole way through. The poison was one line
+upstream of it: `returns = closes.pct_change()` consumed **raw** closes, and
+this repo's own §0 check #4 had already measured that CCP does not filter
+outlier prints (`close/low` reaching 12.8 billion×). The ATR path has
+winsorized for precisely that reason since Phase 2. The index path never did.
+
+And "it reverts tomorrow" is not a defence: an arithmetic weighted-return
+index can gain 222,839% and can only ever give back 100%. The level ratchets.
+
+### What it cost
+
+`power_index = Δref/ATR_ref` measured **1,478**, so every printed RRS sat in a
+−1,479 band — digest, `board`, `brief`, the desk columns. RRS is one of the
+four gates in the built-in setup, so the digest's "Nothing clears costs today"
+was not an honest zero. It was a broken gate.
+
+### The fix
+
+- **`winsorized_member_returns`** clamps each member's daily return at `k ×`
+  its own rolling median absolute return — same `k`, same window, same
+  clamp-and-flag shape as `atr.winsorized_true_range`, because it answers the
+  same measured fact. Config: `composite_return_clamp_k` (8.0), `_window`
+  (60), `_floor` (0.20).
+- **The floor is a fallback, never a lower bound.** Where a member has fewer
+  than five observations the ceiling is UNKNOWN, and UNKNOWN clamps rather
+  than passing through (§4). Clipping the ceiling *upward* to the floor would
+  have handed a normally-stable member permission to print exactly the outlier
+  this exists to catch.
+- **Returns are computed explicitly**, not by `pct_change`, so a member needs
+  a real bar on both `t-1` and `t`. pandas 3.0 no longer pads; pandas 2.x did,
+  and would have booked a member's whole post-gap re-rating as one day. The
+  code no longer depends on which is installed.
+- **Clamped-day counts ride in every index's diagnostics** — clamping is
+  visible, never silent.
+- **`clamp_settings()`** reads the knobs in one place, because five call sites
+  build indices and §19.1's whole point is that they share one engine.
+
+### Fixtures first (§11 D5)
+
+- `forge_outlier_2026-08-02.csv` — the **real** 100 members around the
+  incident, with a provenance JSON naming the culprit type, its two closes and
+  the measured returns.
+- A test that builds the same fixture with the clamp **disabled** and asserts
+  the >1,000% day reappears, so the clamp is demonstrably the fix.
+- Synthetic spike-and-revert and 45-day-gap fixtures, each paired with an
+  unclamped control.
+- **The existing golden index fixture needed no regeneration.** On clean data
+  the clamp touches nothing — the strongest evidence available that it is
+  surgical rather than a general smoothing.
+
+### Measured after
+
+| | before | after |
+|---|---|---|
+| FORGE level over 415 bars | 1,000 → 69,243 | 1,000 → **981** |
+| median abs daily move | 0.029% (with +1,661% days) | **0.340%** |
+| max abs daily move | +1,661% | **2.08%** |
+| `power_index` | 1,478.27 | **−3.28** |
+| RRS, middle 84% of the universe | all ≈ −1,479 | p5 **−2.20**, p50 **+3.12**, p95 **+6.73** |
+| digest candidates | 0 ("honest zero") | **25** |
+| clamped member-days | — | 101,616 of 590,522 (17.2%) |
+
+Nothing here touches a frozen formula, and the NOT PLAUSIBLE verdict is
+unaffected: it rests on measured round-trip friction from the live book and
+never reads RRS.
+
+### Found while verifying, NOT fixed — the RRS tail is a per-type ATR problem
+
+With the index fixed, **84.3%** of the tracked universe lands at p5 −2.20 /
+p50 +3.12 / p95 +6.73. The remaining **15.7%** carries abs(RRS) > 10 and
+**2.6%** exceeds 1,000 — because those types' own ATR is effectively zero
+(measured: *Power Couplings* ATR **4.16e-11**, i.e. 1.6e-10% of close, giving
+RRS −905 billion). `atr_last` rejects `atr <= 0` but a tiny positive ATR
+passes, and `rrs = (Δsym − power_index × ATR_sym) / ATR_sym` divides by it.
+This is independent of the index and was entirely masked by the −1,479 offset.
+It lives on the frozen RRS/ATR surface, so it is recorded rather than patched.
+
 ## 2026-08-20 — The compatibility-date guard, salvaged from the parallel Phase-0 build
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §17 D-21. `uv run pytest -q` →

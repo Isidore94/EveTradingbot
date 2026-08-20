@@ -1,0 +1,28 @@
+{
+  "acquired_at": "2026-08-20T17:00:00+00:00",
+  "source": "the operator's own Forge lake, built by `census` on 2026-08-20",
+  "region_id": 10000002,
+  "window": [
+    "2026-04-20T11:00:00+00:00",
+    "2026-08-16T11:00:00+00:00"
+  ],
+  "members": 100,
+  "rows": 11819,
+  "why": "Reproduces the FORGE day of 2026-08-02. One member, type 95640, printed close 10.07 -> 22,450.00 \u2014 a +222,839.4% daily return \u2014 at a sub-1% live weight, and that single member-day is the whole of the index move. All 100 members were priced that day, so no gap or NaN path is involved. Against the full live lake the index printed +1,661.37%; within this trimmed window, whose rebalance schedule starts at the window's own first date, it prints +2,014.36%. Same member, same day, same mechanism.",
+  "incident": {
+    "date": "2026-08-02",
+    "type_id": 95640,
+    "type_name": "Vanguard Resonant Cypher",
+    "close_before": 10.07,
+    "close_after": 22450.0,
+    "member_return_pct": 222839.4,
+    "index_move_pct_unclamped": 1661.37
+  },
+  "columns": [
+    "type_id",
+    "datetime",
+    "close",
+    "isk_value"
+  ],
+  "note": "Trimmed to exactly the 100 members the engine's own rebalance held on the incident day, and to the two value columns build_composite reads (close, isk_value). Nothing else changes the reproduction."
+}

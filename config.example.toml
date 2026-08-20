@@ -150,6 +150,21 @@ rrs_length = 20
 composite_members = 100
 composite_single_weight_cap = 0.10
 composite_rebalance_days = 30
+# Member-return winsorization (plan.md §17 D-22). ESI does not filter outlier
+# prints (§0 check #4), and one polluted member-day moved FORGE +1,661% on
+# 2026-08-02. Each member's daily return is clamped at k x its own rolling
+# median absolute return; the clamped-day count rides in the index
+# diagnostics. Same k and window as the ATR path, because it is the same
+# measured fact.
+composite_return_clamp_k = 8.0
+composite_return_clamp_window = 60
+# Fallback ceiling for a member with fewer than five observations, where the
+# rolling median does not exist yet. An unmeasurable ceiling clamps rather
+# than passing through — uncertainty is never permission (plan.md §4). It is
+# NOT a lower bound on a measured ceiling. 20% is chosen because ordinary EVE
+# days reach it (Scourge Light Missile printed -19.46% on 2026-08-20) while
+# one such member-day at the 10% weight cap can still only move the index 2%.
+composite_return_clamp_floor = 0.20
 # Cohort scope: nearest marketGroup ancestor with at least this many members.
 cohort_min_members = 8
 # Round-number ISK level family (1M / 100M / 1B are player anchors).

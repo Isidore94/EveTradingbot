@@ -163,56 +163,72 @@ earning its keep by accident.
 
 #### 3. The anchor watcher can double-count one event
 
-### 3. FORGE is broken, and it takes RRS down with it — BLOCKING
+### 3. FORGE printed composition artifacts, and RRS with it — RESOLVED 2026-08-20
 
-**Found by the first digest against real data.** Every RRS in the watchlist
-section printed between **−1474.8 and −1487.3**: a spread of 12 riding on a
-constant offset of about −1479. That constant is the reference term.
+Fixed under plan.md §17 **D-22**. Full write-up in `CHANGELOG.md`.
 
-`real_relative_strength` is `Δsym/ATR_sym − power_index`, where
-`power_index = Δref/ATR_ref` is measured on the FORGE composite. Measured
-here:
+**Verified diagnosis, not the assumed one.** The chain-link was sound and
+§19.1's churn fixture stayed green throughout. Decomposition against the real
+lake named a single member-day: on 2026-08-02 *Vanguard Resonant Cypher*
+(type 95640) printed `close 10.07 → 22,450.00`, a **+222,839.4%** return, at a
+**0.75%** live weight — contributing **+1,661.59%** of the +1,661.37% the
+index moved. All 100 members were priced that day, so no gap or NaN path was
+involved. The same shape explains 2026-05-17 (*HyperCore*, +2,298%, 4.11%
+weight → +94.38% of a +94.07% day) and 2026-08-18 (*HyperCore* again,
++1,385% → +58.91% of +57.13%).
 
-* index 20-bar move **+67,141**, index ATR(20) **45.4** → **power_index = 1,478**;
-* the index level itself has run **1,000 → 69,243** (69×) since 2025-07-01;
-* median daily index move is **0.029%**, but the series contains
-  **+1,661% on 2026-08-02** (2,126 → 37,456), **+94% on 2026-05-17**, and
-  **+57% on 2026-08-18**.
+**One assumed mechanism was ruled out.** The gap-reappearance path does not
+occur here: pandas 3.0.5's `pct_change` no longer pads (`fill_method=None`),
+so a member returning after a gap already yielded NaN. The returns are now
+computed explicitly anyway, so the answer does not depend on which pandas is
+installed.
 
-A turnover-weighted index of 100 capped members does not move 1,661% in a
-day. Those jumps are **composition artifacts leaking into the level** — the
-chain-link is not neutralising a basket change. §19.1's golden fixture asserts
-exactly this cannot happen ("a member joining at bar 60 priced 1,000× the
-rest leaves the level at exactly 1000.0 across all four rebalances"), and it
-passes; real data reaches the failure by some path the fixture does not model.
+**Fix:** member daily returns are winsorized at `k ×` each member's own
+rolling median absolute return before aggregation, mirroring the ATR path's
+TR clamp, with clamped-day counts in every index's diagnostics.
 
-Contributing, and worth checking first: the composite frame carries
-**`high == low == close` on every bar**. An index has no intraday range, so
-its "true range" collapses to |Δclose| and ATR(20) measures drift rather than
-range. That makes `power_index` structurally large even before the level bug;
-upstream this term is computed against SPY, which has a real range.
+**Acceptance, measured against the criteria stated before the fix:**
 
-**Consequences, stated plainly:**
+| criterion | before | after |
+|---|---|---|
+| FORGE level, 415 bars | 1,000 → 69,243 | 1,000 → **981.10** |
+| median abs daily move | 0.029%, punctuated by +1,661% days | **0.3396%** |
+| p95 / max abs daily move | — | **1.03% / 2.08%** |
+| `power_index` | **1,478.27** | **−3.280** |
+| RRS, middle 84% of universe | every name ≈ −1,479 | p5 **−2.20** · p50 **+3.12** · p95 **+6.73** |
+| digest | "Nothing clears costs today" | **25 candidates** |
 
-* **FORGE, FORGE-EW and every sector index are wrong** — §19.1 deliberately
-  routes them all through one engine, so there is no second path that escaped.
-  The desk's MARKET page is wrong.
-* **Every RRS the system prints is meaningless** — digest, `board`, `brief`,
-  and the desk columns — because a per-day constant of ~−1,479 swamps the
-  per-type signal.
-* **RRS is one of the four gates** in the built-in setup, so `screen`, `scan`
-  and the digest's candidate selection are affected.
-* **The NOT PLAUSIBLE verdict is NOT affected.** It rests on measured
-  round-trip friction (61.9% against a gross edge of the same order), which
-  comes from the live book and never touches RRS. The headline answer stands.
+That last row is the one that mattered: the honest zero was not honest. RRS
+is one of the four gates, so a −1,479 offset was failing every name in the
+universe and the digest was reporting a broken gate as an absence of
+opportunity.
 
-**Not fixed here, deliberately.** This is the frozen-formula and
-detector/scoring surface, where the standing rule is golden fixtures first and
-operator sign-off with them. What it needs is a fixture that reproduces the
-2026-08-02 rebalance from real bars, *then* the fix.
+**Nothing persisted needed rebuilding** — indices are computed live from the
+lake on every read, so there was no cached series to invalidate. The stored
+backtest *was* regenerated, since its gate counts were computed against the
+broken RRS: instances rose 125,254 → **147,140** and the verdict is still
+**NOT PLAUSIBLE at every horizon**, which is the expected result because that
+verdict rests on measured friction and never reads RRS.
 
-This is gate I's "eyeball FORGE against Adam4EVE — it must not disagree in
-**shape**" item, answered before it was walked. It disagrees in shape.
+### 3b. The RRS tail is a per-type ATR problem — OPEN, not fixed
+
+Surfaced only once the index was fixed; the −1,479 offset had masked it
+completely. **84.3%** of the tracked universe now sits inside abs(RRS) ≤ 10.
+The other **15.7%** does not, and **2.6%** exceeds 1,000 — because those
+types' own ATR is effectively zero. Measured: *Power Couplings* ATR
+**4.16e-11** (1.6e-10% of close) → RRS **−905 billion**; *Analog Panel*
+−679 billion; *Admixti Mutanite* +12 billion.
+
+`atr_last` already refuses `atr <= 0`, but a tiny positive ATR passes, and
+`rrs = (Δsym − power_index × ATR_sym) / ATR_sym` then divides by it. The
+plausible answer is that an ATR which is a negligible fraction of price is not
+a measurable risk unit and should read UNKNOWN — but that is a change to the
+frozen ATR/RRS surface, needing its own golden fixtures and sign-off, so it is
+recorded here rather than patched.
+
+Practical impact today: a near-pinned type can present an arbitrarily large
+RRS and so pass or fail the strength gate on noise. It affects the tail of the
+universe, not the names the screen actually surfaces.
 
 ### 4. The desk is not usable on the full universe — BLOCKING
 

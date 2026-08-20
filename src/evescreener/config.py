@@ -133,6 +133,9 @@ class SignalsConfig:
     composite_members: int
     composite_single_weight_cap: float
     composite_rebalance_days: int
+    composite_return_clamp_k: float
+    composite_return_clamp_window: int
+    composite_return_clamp_floor: float
     cohort_min_members: int
     round_number_levels_isk: tuple[float, ...]
     anchor_fresh_days: int

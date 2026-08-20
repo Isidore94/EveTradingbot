@@ -30,7 +30,7 @@ from pathlib import Path
 import pandas as pd
 
 from .config import Config
-from .signals.composite import EQUAL, TURNOVER, Composite, build_composite
+from .signals.composite import EQUAL, TURNOVER, Composite, build_composite, clamp_settings
 from .store.db import Database
 
 __all__ = [
@@ -308,6 +308,7 @@ def build_index_set(
         members=signals.composite_members,
         single_cap=signals.composite_single_weight_cap,
         rebalance_days=signals.composite_rebalance_days,
+        **clamp_settings(signals),
         weighting=TURNOVER,
         member_ids=eligible,
         ticker=FORGE,
@@ -320,6 +321,7 @@ def build_index_set(
         members=signals.composite_members,
         single_cap=1.0,
         rebalance_days=signals.composite_rebalance_days,
+        **clamp_settings(signals),
         weighting=EQUAL,
         member_ids=forge.member_ids or eligible,
         ticker=FORGE_EW,
@@ -368,6 +370,7 @@ def build_index_set(
             members=signals.composite_members,
             single_cap=signals.composite_single_weight_cap,
             rebalance_days=signals.composite_rebalance_days,
+            **clamp_settings(signals),
             min_members=sector.min_members,
             weighting=TURNOVER,
             member_ids=members,

@@ -25,7 +25,7 @@ from ..config import Config
 from ..indices import IndexSet, Sector, build_index_set, load_sectors, rotation_table
 from ..reasons import ReasonVocabulary, load_reasons
 from ..setups import Setup, load_setups
-from ..signals.composite import Composite
+from ..signals.composite import Composite, clamp_settings
 from ..store.db import Database
 from ..store.lake import BarLake, BookLake
 from ..timeutil import ensure_utc, parse_iso, utcnow
@@ -157,6 +157,7 @@ def load_desk(
             members=config.signals.composite_members,
             single_cap=config.signals.composite_single_weight_cap,
             rebalance_days=config.signals.composite_rebalance_days,
+            **clamp_settings(config.signals),
             weighting=TURNOVER,
             member_ids=eligible or None,
             ticker="FORGE",

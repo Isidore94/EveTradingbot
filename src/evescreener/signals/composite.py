@@ -22,6 +22,15 @@ FORGE-EW (equal weight over the *same* membership) and every sector index
 `weighting` and `member_ids`; the chain-link, the cap and the diagnostics are
 shared, because three index implementations would drift into three answers.
 
+**Member daily returns are winsorized before aggregation** (plan.md §17
+D-22). ESI publishes unfiltered prints — §0 check #4 measured `close/low`
+reaching 12.8 billion× — and the ATR path has clamped for exactly that reason
+since Phase 2 while this path did not. One polluted member-day is enough to
+destroy the level: on 2026-08-02 a single member at a 0.75% weight printed
+`close 10.07 → 22,450.00`, a +222,839% "return", and moved FORGE **+1,661%**
+in a day. The spike does not cancel when it reverts, because an arithmetic
+weighted-return index can gain 222,839% and can only ever give back 100%.
+
 **"Weighted by daily volume" means ISK TURNOVER — units × price — never raw
 unit volume.** Raw units would make the index essentially 100% Tritanium: it
 trades ~5 billion units a day at ~4 ISK. Turnover is the only common
@@ -37,7 +46,14 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-__all__ = ["Composite", "TURNOVER", "EQUAL", "build_composite"]
+__all__ = [
+    "Composite",
+    "TURNOVER",
+    "EQUAL",
+    "build_composite",
+    "winsorized_member_returns",
+    "clamp_settings",
+]
 
 # Weighting schemes. FORGE is TURNOVER; FORGE-EW is EQUAL over the same names.
 TURNOVER = "turnover"
@@ -95,6 +111,71 @@ def _capped_weights(turnover: pd.Series, cap: float) -> pd.Series:
     return weights / float(weights.sum())
 
 
+def clamp_settings(signals) -> dict:
+    """The member-return winsorization knobs, read from config in ONE place.
+
+    Five call sites build indices, and §19.1's whole point is that they share
+    one engine. Passing the clamp three keyword arguments at a time, five
+    times over, is precisely how they would stop sharing it.
+    """
+    return {
+        "return_clamp_k": signals.composite_return_clamp_k,
+        "return_clamp_window": signals.composite_return_clamp_window,
+        "return_clamp_floor": signals.composite_return_clamp_floor,
+    }
+
+
+def winsorized_member_returns(
+    closes: pd.DataFrame,
+    *,
+    k: float | None = 8.0,
+    window: int = 60,
+    floor: float = 0.20,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Member daily returns, clamped at `k ×` each member's own rolling median
+    absolute return. Returns `(returns, clamped_mask)`.
+
+    This mirrors `atr.winsorized_true_range` deliberately — same `k`, same
+    window, same "clamp and flag, never hide" shape — because it answers the
+    same measured fact (§0 check #4: CCP does not filter outlier prints).
+
+    Two decisions worth stating, because both are silent failure modes:
+
+    * **A member needs a real bar on BOTH days or it contributes nothing.**
+      The returns are computed explicitly rather than with `pct_change`,
+      whose `fill_method` default padded in pandas 2.x — which would hand a
+      member reappearing after a 45-day gap its entire re-rating as one
+      "daily" return. pandas 3.0 no longer pads, and this code does not
+      depend on which of the two is installed.
+    * **An unmeasurable ceiling clamps at the floor rather than passing the
+      return through.** Where a member has fewer than five observations, the
+      ceiling is UNKNOWN — and in this repo uncertainty never becomes
+      permission (plan.md §4). The floor is only ever that fallback; it is
+      **not** a lower bound on a measured ceiling, because clipping upward
+      would hand a normally-stable member permission to print exactly the
+      outlier this exists to catch.
+
+    `k=None` (or a non-finite `k`) disables clamping entirely. That exists so
+    a test can reproduce the pre-fix behaviour against the real 2026-08-02
+    fixture and prove the clamp is what fixes it.
+    """
+    previous = closes.shift(1)
+    usable = closes.notna() & previous.notna() & (previous > 0)
+    returns = (closes / previous - 1.0).where(usable)
+    empty_mask = pd.DataFrame(False, index=returns.index, columns=returns.columns)
+    if k is None or not np.isfinite(float(k)) or returns.empty:
+        return returns, empty_mask
+    magnitude = returns.abs()
+    median = magnitude.rolling(window, min_periods=5).median()
+    # The floor is a FALLBACK for an unmeasurable ceiling, never a lower bound
+    # on a measured one: clipping upward would hand a normally-stable member
+    # permission to print the very outlier this exists to catch.
+    ceiling = (median * float(k)).fillna(float(floor))
+    clamped = returns.notna() & (magnitude > ceiling)
+    cleaned = returns.where(~clamped, ceiling * np.sign(returns))
+    return cleaned, clamped.fillna(False)
+
+
 def build_composite(
     bars: pd.DataFrame,
     *,
@@ -106,6 +187,9 @@ def build_composite(
     member_ids=None,
     ticker: str = "FORGE",
     name: str | None = None,
+    return_clamp_k: float | None = 8.0,
+    return_clamp_window: int = 60,
+    return_clamp_floor: float = 0.20,
 ) -> Composite:
     """Chain-linked index over the supplied bar lake. One engine, three uses.
 
@@ -146,7 +230,12 @@ def build_composite(
                 "members": int(closes.shape[1]),
             },
         )
-    returns = closes.pct_change()
+    returns, clamped_mask = winsorized_member_returns(
+        closes,
+        k=return_clamp_k,
+        window=return_clamp_window,
+        floor=return_clamp_floor,
+    )
 
     dates = closes.index
     level = 1000.0
@@ -215,9 +304,16 @@ def build_composite(
             "order_count": np.ones(len(dates), dtype=int),
         }
     ).reset_index(drop=True)
-    # The composite has no true high/low; using close for both is the honest
-    # choice — an index level is a single number per day, and ATR on it reads
-    # close-to-close, which is exactly what the RRS power index wants.
+    # The composite carries `high == low == close` by construction: an index
+    # level is one number per day and has no intraday range to report.
+    # Downstream this means `atr.true_range` on a composite reduces to
+    # |Δclose|, so any ATR taken on it is a **close-to-close volatility
+    # proxy**, not a range measure. That is the honest reading and it is what
+    # the RRS power index wants — but it is deliberately smaller than a real
+    # instrument's ATR, so `power_index = Δref/ATR_ref` runs larger against a
+    # composite than against a ranged series. Post-fix that term sits in the
+    # low single digits; if it ever reaches the hundreds again, the index is
+    # broken, not volatile (plan.md §17 D-22).
     final_weights = weights if weights is not None else pd.Series(dtype="float64")
     diagnostics = {
         **label,
@@ -227,6 +323,16 @@ def build_composite(
         "single_cap": single_cap,
         "rebalance_days": rebalance_days,
         "rebalances": len(basket_history),
+        "return_clamp_k": return_clamp_k,
+        "return_clamp_window": return_clamp_window,
+        "return_clamp_floor": return_clamp_floor,
+        "clamped_member_days": int(clamped_mask.to_numpy().sum()),
+        "measured_member_days": int(returns.notna().to_numpy().sum()),
+        "clamped_share": (
+            float(clamped_mask.to_numpy().sum()) / float(returns.notna().to_numpy().sum())
+            if int(returns.notna().to_numpy().sum())
+            else None
+        ),
         "first_date": dates[0].isoformat(),
         "last_date": dates[-1].isoformat(),
         "level_last": float(levels[-1]),

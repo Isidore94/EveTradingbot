@@ -103,6 +103,21 @@ class UniverseConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class GuiConfig:
+    """The desk (plan.md §19 Part 2). Optional tier; core never imports Qt."""
+
+    refresh_seconds: int
+    chart_bars: int
+    sma_lengths: tuple[int, ...]
+    ema_lengths: tuple[int, ...]
+    cloud_fast: int
+    cloud_slow: int
+    show_hv_levels: bool
+    show_pivots: bool
+    show_round_levels: bool
+
+
+@dataclass(frozen=True, slots=True)
 class SdeConfig:
     latest_url: str
     bundle_url_template: str
@@ -189,6 +204,7 @@ class Config:
     cadence: CadenceConfig
     costs: CostsConfig
     universe: UniverseConfig
+    gui: GuiConfig
     sde: SdeConfig
     signals: SignalsConfig
     screen: ScreenConfig
@@ -220,6 +236,7 @@ _SECTIONS: dict[str, type] = {
     "cadence": CadenceConfig,
     "costs": CostsConfig,
     "universe": UniverseConfig,
+    "gui": GuiConfig,
     "sde": SdeConfig,
     "signals": SignalsConfig,
     "screen": ScreenConfig,

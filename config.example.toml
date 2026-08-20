@@ -115,6 +115,22 @@ watchlist = [
   "Ishtar", "Praxis", "Dominix", "Raven", "Megathron",
 ]
 
+[gui]
+# The desk. A UI timer may re-read the LOCAL lake and state db as often as it
+# likes; it must NEVER cause an ESI fetch before Expires (plan.md §3.2). The
+# refresh below only re-reads what is already on disk.
+refresh_seconds = 60
+chart_bars = 400
+# Overlays. These are DRAWN, not gates — the setup DSL decides what fires.
+sma_lengths = [20, 50, 200]
+ema_lengths = [9, 21]
+# The shaded two-EMA ribbon.
+cloud_fast = 9
+cloud_slow = 21
+show_hv_levels = true
+show_pivots = true
+show_round_levels = true
+
 [sde]
 # Official reworked static data. `latest_url` names the current build number;
 # the bundle URL is that number formatted into `bundle_url_template`. Only

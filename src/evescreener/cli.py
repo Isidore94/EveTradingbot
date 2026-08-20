@@ -194,6 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("report", help="regenerate the viability report (plan.md §16)")
 
+    sub.add_parser(
+        "gui", help="open the desk (needs the optional `gui` extra: uv sync --extra gui)"
+    )
+
     daemon = sub.add_parser("daemon", help="run all cadences in one asyncio process")
     daemon.add_argument("--ticks", type=int, help="stop after N scheduler ticks (testing)")
 
@@ -988,6 +992,13 @@ def _cmd_anchors(config: Config, args) -> int:
     return 0
 
 
+def _cmd_gui(config: Config, args) -> int:
+    """Open the desk. Qt is imported inside `run_desk`, never at module scope."""
+    from .gui import run_desk
+
+    return run_desk(config)
+
+
 def _cmd_report(config: Config, args) -> int:
     from .paper import PaperLedger
     from .report import build_viability_report, render_viability, write_viability
@@ -1121,6 +1132,7 @@ HANDLERS = {
     "learning": _cmd_learning,
     "anchors": _cmd_anchors,
     "report": _cmd_report,
+    "gui": _cmd_gui,
     "daemon": _cmd_daemon,
 }
 

@@ -36,7 +36,7 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
-- `uv run pytest -q` → **317 passed, 7 deselected** (network).
+- `uv run pytest -q` → **337 passed, 7 deselected** (network).
 - `uv run pytest -m network -q` → **7 passed in 139 s** against real endpoints:
   real history against the frozen bar contract, a second call skipped as
   still-fresh, a full 415-page Forge sweep inside the token self-cap, the
@@ -44,7 +44,7 @@ evidence.
   one real day of EVE Ref killmails, and a live PushX quote.
 - `uv run ruff check .` → clean. `uv run ruff format --check .` → clean.
 - `python -m evescreener selftest` → 7/7 checks passed.
-- **16,580 LOC** (10,561 product + 1,435 vendored + 4,584 tests) — 1,580 over
+- **17,134 LOC** (10,751 product + 1,435 vendored + 4,948 tests) — 2,134 over
   §1's budget, authorized by operator directive 2026-08-20 and recorded in
   §17 D-9.
 

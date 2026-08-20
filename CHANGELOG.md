@@ -12,9 +12,9 @@ consolidated live-validation checklist in `CURRENT_CHECKPOINT.md` is owed, and
 every gate on it is an operator action.
 
 Phases 0–6 of `plan.md` §8 collapsed into one build, plus the two promoted
-studies. **317 offline tests green, 7 network-marked live tests** (all passing
-against real endpoints), ruff clean. **16,580 LOC** — 10,561 product, 1,435
-vendored, 4,584 tests. That is **1,580 over §1's ≤15k budget**, which operator
+studies. **337 offline tests green, 7 network-marked live tests** (all passing
+against real endpoints), ruff clean. **17,134 LOC** — 10,751 product, 1,435
+vendored, 4,948 tests. That is **2,134 over §1's ≤15k budget**, which operator
 directive 2026-08-20 authorized for the added studies while requiring the count
 be stated; the product surface alone is 10.5k.
 

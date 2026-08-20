@@ -28,7 +28,9 @@ uv run python -m evescreener selftest
 
 uv run python -m evescreener sde       # static data: types, market groups, systems
 uv run python -m evescreener census    # the opportunity map (~2h once, then diff-append)
+uv run python -m evescreener anchors   # pull patch dates as anchor CANDIDATES
 uv run python -m evescreener sweep-books
+uv run python -m evescreener ingest-history   # daily bars for the tracked universe
 uv run python -m evescreener digest --dry-run
 ```
 
@@ -43,8 +45,17 @@ uv run python -m evescreener paper report          # §12.4 verdict tracker
 uv run python -m evescreener report                # §16 viability report
 ```
 
-`daemon` runs every cadence in one process; each other subcommand runs the same
-job once, for manual and backfill use.
+```bash
+uv run python -m evescreener daemon    # every cadence in one process
+```
+
+`daemon` owns the locked cadences (history at 11:20 UTC, digest at 16:00, the
+Forge book every cache window inside 15:00–17:00 and hourly otherwise); each
+other subcommand runs the same job once, for manual and backfill use.
+
+Before the anchor calendar is confirmed, `anchors --list` shows what is pending
+— the signal layer ignores unconfirmed candidates and falls back to a synthetic
+90-day anchor grid until you flip the ones you consider live.
 
 ## The rules that shape the code
 

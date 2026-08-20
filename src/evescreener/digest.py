@@ -109,6 +109,7 @@ def build_digest(
     backtest_verdict: dict | None = None,
     lead_lag_outcome: dict | None = None,
     watchlist: list[dict] | None = None,
+    learning=None,
 ) -> str:
     """Assemble the digest body. UTC only; the operator's clock is EVE's clock."""
     lines = [
@@ -238,6 +239,26 @@ def build_digest(
         )
         if paper_report.open_positions:
             lines.append(f"open positions: {len(paper_report.open_positions)}")
+
+    if learning is not None and learning.has_enough_for_a_digest_mention:
+        # Gated deliberately (§19 Part 4): the digest names a best and worst
+        # setup only once the whole ledger has 20 closed trades. Below that
+        # the ranking is noise dressed as a finding, and a daily message is
+        # exactly the wrong place to put noise.
+        measured = [record for record in learning.setups if record.state != "UNKNOWN"]
+        if measured:
+            best, worst = measured[0], measured[-1]
+            lines.append("")
+            lines.append("**What's working**")
+            lines.append(
+                f"· best: {best.name} — {best.closed} closed, expected "
+                f"{_fmt(best.expected_r, 2, 'R')}"
+            )
+            if worst.name != best.name:
+                lines.append(
+                    f"· worst: {worst.name} — {worst.closed} closed, expected "
+                    f"{_fmt(worst.expected_r, 2, 'R')}"
+                )
 
     if backtest_verdict or lead_lag_outcome:
         lines.append("")

@@ -129,6 +129,16 @@ def build_parser() -> argparse.ArgumentParser:
     paper_pass.add_argument("--reason-text", default="", help="optional free text")
     paper_pass.add_argument("--setup", help="the setup that surfaced it, if any")
 
+    learning = sub.add_parser(
+        "learning", help="what's working: per-setup and per-reason calibration"
+    )
+    learning.add_argument(
+        "--horizon",
+        type=int,
+        default=10,
+        help="forward days a recorded pass is measured over (default: 10)",
+    )
+
     reasons_cmd = sub.add_parser("reasons", help="the reason vocabulary, validated on load")
     reasons_cmd.add_argument(
         "--direction", choices=("like", "dislike"), help="show only one direction"
@@ -846,6 +856,35 @@ def _vocabulary():
     return load_reasons(Path.cwd() / "config" / REASONS_FILE)
 
 
+def _cmd_learning(config: Config, args) -> int:
+    from .backtest import measure_haircuts
+    from .learning import build_learning_report, render_learning
+    from .paper import PaperLedger
+    from .report import _latest, _load
+    from .setups import SETUPS_FILE, load_setups
+    from .store.lake import BarLake
+
+    region = _region(config, args)
+    ledger = PaperLedger(config.paths.paper_ledger, config)
+    setups = load_setups(Path.cwd() / "config" / SETUPS_FILE)
+    stored = _load(_latest(config.paths.reports, "backtest")) or {}
+    tested = {stored.get("params", {}).get("setup")} - {None}
+    report = build_learning_report(
+        config,
+        ledger,
+        bars=BarLake(config.paths).read(region),
+        haircuts=measure_haircuts(
+            _latest_book(config, region), tuple(config.costs.notional_tiers_isk)
+        ),
+        setups=setups,
+        vocabulary=_vocabulary(),
+        backtested=tested,
+        horizon_days=args.horizon,
+    )
+    print(render_learning(report))
+    return 0
+
+
 def _cmd_reasons(config: Config, args) -> int:
     vocabulary = _vocabulary()
     if not vocabulary:
@@ -1079,6 +1118,7 @@ HANDLERS = {
     "scan": _cmd_scan,
     "setups": _cmd_setups,
     "reasons": _cmd_reasons,
+    "learning": _cmd_learning,
     "anchors": _cmd_anchors,
     "report": _cmd_report,
     "daemon": _cmd_daemon,

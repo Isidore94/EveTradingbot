@@ -77,6 +77,48 @@ evidence.
   libfontconfig1`, after `apt-get update`). The operator's Windows machine
   needs none of this — `uv sync --extra gui` is the whole install there.
 
+## Deployment on the operator's desk (2026-08-20)
+
+The system now lives at `C:\Users\Aaron\EveTradingbot` on the always-on
+mini-PC, in its own directory and its own `.venv`, fully isolated from
+TradingBotV3 as §11 D1 requires. Nothing in this deployment reads, writes or
+schedules anything under `C:\Users\Aaron\TradingBotV3` or `C:\TradingBotData`.
+
+**Standing, and what is still owed:**
+
+| Step | State |
+|---|---|
+| `uv sync --extra dev --extra gui` | Done. Python 3.12.13, uv 0.12.3, PySide6 6.11.2. |
+| `config.toml` | Written, gitignored. Accounting **V**, Broker Relations **IV** → sales tax 3.375%, broker fee 1.300%. Discord webhook deliberately **empty**, so delivery reports `unconfigured` — correct behaviour, and gate D still owes the real webhook. |
+| `pytest -q` / `ruff` / `selftest` | **515 passed, 7 deselected**; ruff check + format clean; selftest **12/12**. |
+| `sde` | Build **3475087** — 52,863 types, 2,106 market groups, 8,490 systems. |
+| `census` | **RUNNING** at the 150 req/min self-cap, ~2h10m expected. Notably it is already past **2,363** history requests — the exact point where the pre-D-12 circuit breaker latched open — with `history_missing` still empty, so the D-12 fix holds against live ESI rather than only against fixtures. |
+| `anchors` | Run. 8 posts in the feed, 1 new candidate. **See the duplicate below.** |
+| `sweep-books`, `ingest-history`, `digest --dry-run` | **NOT RUN** — deliberately sequenced after the census so two processes never hold independent self-cap state against one IP. |
+| Killmail backfill | **SKIPPED** by operator decision (1.3 GB, and §14's lead-lag already returned negative). |
+| The desk | Constructed offscreen against the **real** data directory: all eight pages built, `window.refresh()` fed them one local read, all eight selected without error. `book_age_minutes` is `None` and the book renders **STALE**, which is correct with no sweep yet. This is a smoke test of the Qt stack on this machine, **not** checklist I — that is still the operator's to walk. |
+| Desktop shortcut | `EVE Screener Desk.lnk` → `.venv\Scripts\pythonw.exe launch_gui.py`, working dir the repo. |
+| Daemon task | Registered as **`\EveScreener daemon`**, currently **Disabled**. Logon trigger for this operator, `PT2M` delay, action `uv.exe run python -m evescreener daemon` in the repo directory, `MultipleInstancesPolicy=IgnoreNew`, no execution time limit. **Enable it once the bootstrap finishes** — while the census runs, a logon would start a second independent ESI consumer against one IP. Distinct from all three TradingBotV3 tasks in name, executable and working directory. |
+
+### One defect found, not fixed — the anchor watcher can double-count an event
+
+`config/anchors.jsonl` now holds *Patch Notes - Version 24.01* **twice**, on
+2026-08-19 and 2026-08-20, with the **same** `source` URL. `patchnotes.py`
+dedupes on `(date, label)` and on date-occupancy, but never on the article
+URL, so an article CCP re-dates is appended again as a second candidate for
+what is one real event. The daemon runs this watcher **daily**, so it will
+keep happening.
+
+It is not urgent and it is not silently harmful: candidates are inert until
+`confirmed: true`, and growth is bounded to one row per date. But it lands
+directly in gate C, where the operator confirms anchors by hand — and if both
+rows were confirmed, the signal layer would anchor twice on one patch.
+
+**Left for a decision rather than patched here**, because "what counts as the
+same anchor event" is a plan-level question about a signal-layer input, not a
+janitorial fix. The obvious answer is to add `source` to the dedup key and
+prefer the newest date for a given URL.
+
 ## The consolidated live-validation checklist
 
 ### A. Data honesty (was Phase 0's gate)

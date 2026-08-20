@@ -7,3 +7,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 uv.lock.bak
+
+# Operator-local runtime output (census/daemon console captures)
+logs/

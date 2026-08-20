@@ -129,8 +129,11 @@ def measure_haircuts(
             sell = sell.iloc[0]
         if isinstance(buy, pd.DataFrame):
             buy = buy.iloc[0]
-        best_ask = float(sell.get("best_price") or 0.0)
-        best_bid = float(buy.get("best_price") or 0.0)
+        # R1: the region-wide extrema are routinely at different stations, so
+        # a mid built from them is a price nobody could have traded at. The
+        # haircut is measured against the executable pair or not at all.
+        best_ask = float(sell.get("exec_price") or 0.0)
+        best_bid = float(buy.get("exec_price") or 0.0)
         if best_ask <= 0 or best_bid <= 0:
             continue
         mid = (best_ask + best_bid) / 2.0

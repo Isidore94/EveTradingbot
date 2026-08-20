@@ -1505,7 +1505,11 @@ dependencies. Nothing is delivered yet and the page says so: nothing under
 `gui/` may import an HTTP client, so evaluation and delivery remain §20.5 and
 belong to the daemon.
 
-### §20.3 — TOP PERFORMERS (1w / 1m)
+### §20.3 — TOP PERFORMERS (1w / 1m) — **PAUSED, not cancelled**
+
+Paused 2026-08-20 by operator authorization so the §21 remediation track
+runs first. The scope below is unchanged and resumes when §21 R8 is green.
+
 
 Rank the tracked universe by return over 5 and 20 **completed** bars. Pure
 computation over the existing lake. Becomes a DESK tab. UNKNOWN when fewer
@@ -1527,3 +1531,104 @@ contract of §11. Extending the locked delivery decision is a plan-level edit
 and is recorded here as one. `httpx` already covers the transport; no new
 runtime dependency. Re-arm only after a condition clears.
 
+## §21 — Remediation track (operator-authorized 2026-08-20)
+
+**Why this exists.** An adversarial review of the repository found defects in
+how the order book was reduced and how snapshots were validated. The operator
+authorized this track to take priority over the queued §20.3 work. That
+authorization explicitly does **not** permit weakening a hard invariant,
+rewriting a historical result, changing the frozen AVWAP sigma formula, or
+combining phases.
+
+**Nothing here retracts a measurement.** Every previous result, rule and number
+stays visible where it was recorded. Where corrected methodology changes a
+result, the old result and the old rule remain, the amended method is added
+with its reason, the measurement is regenerated, and the new output is
+provenance-stamped. §17's deviation record is append-only.
+
+**The principal finding.** The existing negative taker conclusion may remain
+directionally correct, but several measurements were not audit-grade. The most
+important defect: the reduction discarded station and buy-order range, then
+treated a region-wide best bid and best ask as an executable round trip.
+Independently, partial snapshots and stale or incomplete bars could enter
+pricing and signal paths. These are correctness issues, not requests to make
+the strategy look better.
+
+**One phase per session, in this order. A later phase is never started because
+it is adjacent.**
+
+| phase | scope | state |
+|---|---|---|
+| **R1** | Executable order-book identity and validated snapshots | **IMPLEMENTED + GREEN** |
+| R2 | Completed-bar enforcement and independent bar freshness | not started |
+| R3 | Backtest price bounds, statistics and friction labels | not started |
+| R4 | Maker analysis and location-specific cost semantics | not started |
+| R5 | Killmail lead-lag hypothesis fidelity | not started |
+| R6 | Learning freshness and eligible-sample handling | not started |
+| R7 | Desk threading, invalidation and worker lifecycle | not started |
+| R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
+
+The consolidated live-validation checklist in `CURRENT_CHECKPOINT.md` is
+untouched by this track and remains owed in full.
+
+### §21 R1 — Executable order-book identity and validated snapshots — **IMPLEMENTED + GREEN**
+
+**The contract repaired.** A spread is only a spread if one character could
+have traded both sides. The old reduction grouped by `(type_id, side)` and kept
+price and volume only, so the region-wide lowest ask — typically Jita 4-4 —
+and the region-wide highest bid, which may rest at another station or inside an
+Upwell structure the operator cannot dock at, were joined and called an
+executable round trip. Maker spreads, screen pricing, paper fills, backtest
+haircuts and cross-region analysis all consumed that reduction.
+
+**What the reduction now preserves.** `location_id` on every order and `range`
+on every buy order, and from them:
+
+* `best_location_id` / `best_range` — where the region-wide extremum rests. The
+  region-wide numbers are kept and relabelled as **diagnostics**, so the
+  correction stays auditable and the two readings can be compared.
+* `exec_location_id` — the one venue a round trip could happen at, chosen by
+  `executable_venue()`.
+* `exec_price` / `exec_volume` / `exec_order_count` — that side's quote **at
+  that venue**.
+* `exec_is_structure` — whether the venue is a player structure, because
+  docking rights are not in the lake.
+
+**The venue is anchored on the asks, deliberately.** A sell order is executable
+only where it rests, so to buy at all the operator must dock where the asks
+are; a bid may reach across the region. §17 measured ~0% of visible ask volume
+in player structures against 8.8-98.3% of bid volume, so anchoring on asks
+lands on a station the operator can almost always dock at. Among ask locations
+the **busiest** wins — deliberately not the widest-spread one, because choosing
+the venue that flatters the number is how a screen talks itself into a trade.
+
+**Range semantics fail closed.** A bid at the venue is reachable whatever its
+range. A remote bid is reachable only when its range is `region`, which needs
+no topology. `solarsystem` and the numeric jump ranges *may* reach, but
+deciding that needs station-to-system-to-jump data the reduction does not have,
+so they are UNKNOWN and **UNKNOWN fails** (§4).
+
+**Partial sweeps are diagnostics, never prices.** `sweep_region` now routes an
+incomplete sweep to `BookLake.write_partial`, under a filename `latest()` does
+not glob. `latest()` additionally returns the newest snapshot that is
+*complete*, scanning back past partial ones — so a failed or partial refresh
+cannot displace the last verified snapshot, and that guarantee is structural
+for every consumer at once rather than a rule each caller must remember.
+
+**One central validated-book contract.** `books.load_validated_book()` returns a
+`BookSnapshot` that decides completeness, executability and staleness once, and
+`snapshot.priceable` is empty unless all three hold. Warning flags were not
+enough: a caller that *could* check `partial_sweep` is a caller that can forget
+to, and the failure mode of forgetting is a confidently priced row.
+
+**Consequence for existing data, stated plainly.** A snapshot written before R1
+genuinely does not know where its quotes rested. It is therefore UNKNOWN and
+prices nothing until the region is swept again — the operator's stored
+35,858-row Forge book included. That is the honest reading of missing data, not
+a regression.
+
+**Owed live gate (R1).** After the next `sweep-books`, confirm against the
+in-game market that `exec_location_id` for a handful of liquid types is the
+station the operator actually trades at, and that a type whose best bid rests
+in a structure is flagged rather than priced. No row produced by this phase has
+been checked against a live client.

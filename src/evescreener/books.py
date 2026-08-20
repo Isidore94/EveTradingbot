@@ -31,12 +31,16 @@ import pandas as pd
 
 from .config import Config
 from .esi.client import ORDERS_FEED, EsiClient
-from .store.lake import BOOK_SUMMARY_COLUMNS, BookLake
-from .timeutil import iso, utcnow
+from .store.lake import BOOK_SUMMARY_COLUMNS, EXECUTABLE_COLUMNS, BookLake
+from .timeutil import iso, parse_iso, utcnow
 
 __all__ = [
+    "BookSnapshot",
     "BookSummaryRow",
     "SweepResult",
+    "executable_venue",
+    "load_validated_book",
+    "reachable_from",
     "depth_walk",
     "is_npc_station",
     "p5_price",
@@ -55,15 +59,45 @@ def is_npc_station(location_id: int) -> bool:
     return int(location_id) < STRUCTURE_ID_FLOOR
 
 
-def _sorted_levels(orders: Sequence[dict], *, is_buy: bool) -> list[tuple[float, float]]:
-    """(price, volume) levels, best-first. Asks ascend; bids descend."""
-    levels = [
-        (float(order["price"]), float(order["volume_remain"]))
+def _live(orders: Sequence[dict]) -> list[dict]:
+    """Orders with a usable price and remaining volume."""
+    return [
+        order
         for order in orders
         if order.get("price") is not None and float(order.get("volume_remain") or 0) > 0
     ]
+
+
+def _sorted_levels(orders: Sequence[dict], *, is_buy: bool) -> list[tuple[float, float]]:
+    """(price, volume) levels, best-first. Asks ascend; bids descend."""
+    levels = [(float(order["price"]), float(order["volume_remain"])) for order in _live(orders)]
     levels.sort(key=lambda level: level[0], reverse=is_buy)
     return levels
+
+
+# EVE buy-order ranges. A sell order has no range: it is executable only at
+# the station it rests in.
+REGION_RANGE = "region"
+
+
+def reachable_from(order: dict, location_id: int | None) -> bool:
+    """Could a character standing at `location_id` trade against this order?
+
+    Same station is inside every range class, so a local order always
+    qualifies. A remote order qualifies only when its range is `region`,
+    which needs no topology to evaluate. `solarsystem` and the numeric jump
+    ranges *may* reach, but deciding that needs station→system→jump data the
+    book reduction does not have — so they are **UNKNOWN, and UNKNOWN fails**
+    (§4). Counting an unresolvable range as reachable would be exactly the
+    optimistic guess this phase exists to remove.
+    """
+    if location_id is None:
+        return False
+    if int(order.get("location_id", -1)) == int(location_id):
+        return True
+    if not order.get("is_buy_order"):
+        return False  # a sell order rests where it rests
+    return str(order.get("range") or "").strip().lower() == REGION_RANGE
 
 
 def p5_price(levels: list[tuple[float, float]]) -> float | None:
@@ -117,6 +151,32 @@ def depth_walk(
     return spent / units, units
 
 
+def executable_venue(orders: Sequence[dict]) -> int | None:
+    """The one location a round trip in this type could actually happen at.
+
+    **Anchored on the asks, deliberately.** A sell order is executable only
+    where it rests, so to buy at all the operator must dock where the asks
+    are; a bid, by contrast, may reach across the region. The 2026-08-20 full
+    Forge sweep measured ~0% of visible ask volume in player structures
+    against 8.8–98.3% of bid volume (plan.md §17), so anchoring on the asks
+    lands on a station the operator can almost always dock at, while anchoring
+    on total volume would keep landing on structures whose access is unknown.
+
+    Among ask locations the busiest wins. That is deliberately *not* the
+    location with the widest spread: choosing the venue that flatters the
+    number is how a screen talks itself into a trade.
+    """
+    volumes: dict[int, float] = {}
+    for order in _live(orders):
+        if order.get("is_buy_order") or order.get("location_id") is None:
+            continue
+        location = int(order["location_id"])
+        volumes[location] = volumes.get(location, 0.0) + float(order["volume_remain"])
+    if not volumes:
+        return None
+    return max(volumes.items(), key=lambda item: (item[1], -item[0]))[0]
+
+
 @dataclass(slots=True)
 class BookSummaryRow:
     type_id: int
@@ -133,6 +193,14 @@ class BookSummaryRow:
     top_order_volume_share: float | None
     station_volume_share: float | None
     partial_sweep: bool
+    # -- R1: executable identity (plan.md §21 R1) --------------------------
+    best_location_id: int | None = None
+    best_range: str | None = None
+    exec_location_id: int | None = None
+    exec_price: float | None = None
+    exec_volume: float | None = None
+    exec_order_count: int | None = None
+    exec_is_structure: bool | None = None
 
     def as_record(self) -> dict:
         record = {
@@ -148,6 +216,13 @@ class BookSummaryRow:
             "top_order_volume_share": self.top_order_volume_share,
             "station_volume_share": self.station_volume_share,
             "partial_sweep": self.partial_sweep,
+            "best_location_id": self.best_location_id,
+            "best_range": self.best_range,
+            "exec_location_id": self.exec_location_id,
+            "exec_price": self.exec_price,
+            "exec_volume": self.exec_volume,
+            "exec_order_count": self.exec_order_count,
+            "exec_is_structure": self.exec_is_structure,
         }
         for index in range(3):
             record[f"depth_fill_price_{index}"] = (
@@ -232,6 +307,7 @@ def reduce_orders(
     seen: set[int] = set()
     duplicates = 0
     buckets: dict[tuple[int, str], list[dict]] = {}
+    by_type: dict[int, list[dict]] = {}
     total_volume_all = 0.0
     structure_volume_all = 0.0
     count = 0
@@ -247,16 +323,33 @@ def reduce_orders(
         side = "buy" if order.get("is_buy_order") else "sell"
         key = (int(order["type_id"]), side)
         buckets.setdefault(key, []).append(order)
+        by_type.setdefault(int(order["type_id"]), []).append(order)
         volume = float(order.get("volume_remain") or 0)
         total_volume_all += volume
         if order.get("location_id") is not None and not is_npc_station(order["location_id"]):
             structure_volume_all += volume
+
+    # One executable venue per type, decided before the per-side rows are
+    # built, because executability is a property of the *pair* and cannot be
+    # seen from one side of the book alone.
+    venues = {type_id: executable_venue(orders) for type_id, orders in by_type.items()}
 
     rows: list[dict] = []
     for (type_id, side), group in buckets.items():
         levels = _sorted_levels(group, is_buy=(side == "buy"))
         if not levels:
             continue
+        venue = venues.get(type_id)
+        best_order = min(
+            _live(group),
+            key=lambda order: -float(order["price"]) if side == "buy" else float(order["price"]),
+            default=None,
+        )
+        executable = [order for order in _live(group) if reachable_from(order, venue)]
+        exec_price = None
+        if executable:
+            prices = [float(order["price"]) for order in executable]
+            exec_price = max(prices) if side == "buy" else min(prices)
         total_volume = sum(volume for _, volume in levels)
         station_volume = sum(
             float(order.get("volume_remain") or 0)
@@ -286,6 +379,25 @@ def reduce_orders(
                 top_order_volume_share=(largest / total_volume) if total_volume else None,
                 station_volume_share=(station_volume / total_volume) if total_volume else None,
                 partial_sweep=partial,
+                best_location_id=(
+                    int(best_order["location_id"])
+                    if best_order is not None and best_order.get("location_id") is not None
+                    else None
+                ),
+                best_range=(
+                    str(best_order.get("range"))
+                    if best_order is not None and best_order.get("range") is not None
+                    else None
+                ),
+                exec_location_id=venue,
+                exec_price=exec_price,
+                exec_volume=(
+                    sum(float(order["volume_remain"]) for order in executable)
+                    if executable
+                    else None
+                ),
+                exec_order_count=len(executable) or None,
+                exec_is_structure=((not is_npc_station(venue)) if venue is not None else None),
             ).as_record()
         )
 
@@ -304,8 +416,22 @@ def reduce_orders(
 
 
 def spread_view(frame: pd.DataFrame) -> pd.DataFrame:
-    """Join the two sides into one row per type: the sweep's spread view."""
+    """Join the two sides into one **executable** row per type (§21 R1).
+
+    `best_ask` and `best_bid` are the quotes available at one named venue, not
+    the region-wide extrema — those are kept alongside as `region_best_ask` /
+    `region_best_bid` so the correction stays auditable, and so a reader can
+    see how far apart the two readings are.
+
+    A type with no executable pair is dropped rather than priced. That is not
+    a filtered-out opportunity; it is a book in which no single character
+    could have traded both sides.
+    """
     if frame.empty:
+        return pd.DataFrame()
+    if any(column not in frame.columns for column in EXECUTABLE_COLUMNS):
+        # A pre-R1 snapshot does not know where its quotes rested, and a
+        # spread it cannot place is not a spread it can price.
         return pd.DataFrame()
     sells = frame[frame["side"] == "sell"].set_index("type_id")
     buys = frame[frame["side"] == "buy"].set_index("type_id")
@@ -313,8 +439,14 @@ def spread_view(frame: pd.DataFrame) -> pd.DataFrame:
     if len(common) == 0:
         return pd.DataFrame()
     view = pd.DataFrame(index=common)
-    view["best_ask"] = sells.loc[common, "best_price"]
-    view["best_bid"] = buys.loc[common, "best_price"]
+    view["best_ask"] = pd.to_numeric(sells.loc[common, "exec_price"], errors="coerce")
+    view["best_bid"] = pd.to_numeric(buys.loc[common, "exec_price"], errors="coerce")
+    view["region_best_ask"] = pd.to_numeric(sells.loc[common, "best_price"], errors="coerce")
+    view["region_best_bid"] = pd.to_numeric(buys.loc[common, "best_price"], errors="coerce")
+    view["exec_location_id"] = sells.loc[common, "exec_location_id"]
+    view["exec_is_structure"] = sells.loc[common, "exec_is_structure"]
+    view["exec_ask_volume"] = pd.to_numeric(sells.loc[common, "exec_volume"], errors="coerce")
+    view["exec_bid_volume"] = pd.to_numeric(buys.loc[common, "exec_volume"], errors="coerce")
     view["ask_p5"] = sells.loc[common, "p5_price"]
     view["bid_p5"] = buys.loc[common, "p5_price"]
     view["sweep_ts"] = sells.loc[common, "sweep_ts"]
@@ -329,7 +461,100 @@ def spread_view(frame: pd.DataFrame) -> pd.DataFrame:
     mid = (view["best_ask"] + view["best_bid"]) / 2.0
     view["mid"] = mid
     view["spread_pct"] = (view["best_ask"] - view["best_bid"]) / mid * 100.0
+    # Both sides must be executable at the same venue, or there is no trade.
+    view = view[view["best_ask"].notna() & view["best_bid"].notna()]
     return view.reset_index().rename(columns={"index": "type_id"})
+
+
+@dataclass(slots=True)
+class BookSnapshot:
+    """The one contract every pricing path reads a book through (§21 R1).
+
+    Warning flags were not enough. A caller that *could* check
+    `partial_sweep`, or *could* compare `sweep_ts` against the staleness
+    budget, is a caller that can forget to — and the failure mode of
+    forgetting is a confidently priced row built on a book that was never
+    fully fetched. So the decision is made once, here, and `priceable` is
+    empty unless every condition holds.
+
+    Tri-state, and UNKNOWN fails (§4): missing, stale, partial or pre-R1 data
+    all resolve to `known is False`, and none of them prices anything.
+    """
+
+    region_id: int
+    frame: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=BOOK_SUMMARY_COLUMNS))
+    sweep_ts: str | None = None
+    age_minutes: float | None = None
+    stale: bool = True
+    complete: bool = False
+    executable: bool = False
+    reason: str = "no book on disk"
+
+    @property
+    def known(self) -> bool:
+        return not self.frame.empty and self.complete and self.executable and not self.stale
+
+    @property
+    def priceable(self) -> pd.DataFrame:
+        """The rows, or nothing at all. There is no partly-priceable book."""
+        if not self.known:
+            return pd.DataFrame(columns=BOOK_SUMMARY_COLUMNS)
+        return self.frame
+
+
+def load_validated_book(
+    config: Config,
+    region_id: int,
+    *,
+    lake: BookLake | None = None,
+    now=None,
+) -> BookSnapshot:
+    """Load one region's book and decide, once, whether it may price anything."""
+    lake = lake or BookLake(config.paths)
+    now = now or utcnow()
+    frame = lake.latest(int(region_id))
+    if frame.empty:
+        return BookSnapshot(
+            region_id=int(region_id),
+            reason=f"no complete book on disk — run: sweep-books --region {int(region_id)}",
+        )
+
+    partial = bool(frame["partial_sweep"].fillna(False).astype(bool).any())
+    missing = [column for column in EXECUTABLE_COLUMNS if column not in frame.columns]
+
+    stamps = frame["sweep_ts"].dropna() if "sweep_ts" in frame else pd.Series(dtype="object")
+    sweep_ts = iso(pd.Timestamp(stamps.max()).to_pydatetime()) if not stamps.empty else None
+    age = None
+    if sweep_ts:
+        swept = parse_iso(sweep_ts)
+        if swept is not None:
+            age = max(0.0, (now - swept).total_seconds() / 60.0)
+    stale = age is None or age > config.costs.book_staleness_minutes
+
+    if missing:
+        reason = (
+            "book predates the executable-quote contract and cannot say where "
+            f"its quotes rested ({', '.join(missing)} absent) — re-run sweep-books"
+        )
+    elif partial:
+        reason = "latest snapshot is a partial sweep"
+    elif stale:
+        reason = (
+            f"book {age:.0f} min old — STALE" if age is not None else "book has no sweep timestamp"
+        )
+    else:
+        reason = ""
+
+    return BookSnapshot(
+        region_id=int(region_id),
+        frame=frame,
+        sweep_ts=sweep_ts,
+        age_minutes=age,
+        stale=stale,
+        complete=not partial,
+        executable=not missing,
+        reason=reason,
+    )
 
 
 async def sweep_region(
@@ -372,5 +597,11 @@ async def sweep_region(
     )
     result.pages_expected = paged.pages_expected
     result.pages_fetched = paged.pages_fetched
-    lake.write(result.frame)
+    if result.complete:
+        lake.write(result.frame)
+    else:
+        # A missing page can hold the true best level, so an incomplete sweep
+        # is kept for diagnosis and never allowed to displace the last
+        # complete snapshot (§21 R1).
+        lake.write_partial(result.frame)
     return result

@@ -5,6 +5,81 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A spread nobody could trade is not a spread (§21 R1)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R1. `uv run pytest -q` →
+**602 passed, 7 deselected**, ruff check + format clean.
+
+First phase of the operator-authorized **§21 remediation track**, which takes
+priority over the queued §20.3 TOP PERFORMERS work (paused, not cancelled).
+Nothing in this track retracts a measurement; §17 stays append-only.
+
+### The defect
+
+The book reduction grouped by `(type_id, side)` and kept price and volume
+only. It discarded `location_id` and the `range` of buy orders. So the
+region-wide lowest ask — typically Jita 4-4 — and the region-wide highest
+bid, which may rest at another station or inside an Upwell structure the
+operator cannot dock at, were joined and called an executable round trip.
+
+Nobody can buy at one and sell at the other without hauling. Maker spreads,
+screen pricing, paper fills, backtest haircuts and cross-region analysis all
+consumed that reduction.
+
+Separately, `sweep_region` wrote partial pagination into the normal lake and
+`BookLake.latest` could promote it ahead of the last complete snapshot — and a
+missing page can hold the true best level.
+
+### What changed
+
+`reduce_orders` now preserves location and buy-order range, and derives:
+
+| column | meaning |
+| --- | --- |
+| `best_location_id`, `best_range` | where the region-wide extremum rests — **diagnostics** |
+| `exec_location_id` | the one venue a round trip could happen at |
+| `exec_price`, `exec_volume`, `exec_order_count` | that side's quote **at that venue** |
+| `exec_is_structure` | venue is a player structure; docking rights are not in the lake |
+
+The region-wide numbers are kept rather than deleted, so the correction stays
+auditable and `spread_view` reports both (`region_best_bid` / `region_best_ask`
+alongside the executable pair).
+
+**The venue is anchored on the asks.** A sell order is executable only where it
+rests, so to buy at all you must dock where the asks are; a bid may reach
+across the region. §17 measured ~0% of ask volume in structures against
+8.8–98.3% of bid volume, so anchoring on asks lands on a station the operator
+can dock at. Among ask locations the busiest wins — deliberately not the
+widest-spread one.
+
+**Range fails closed.** A bid at the venue is reachable whatever its range. A
+remote bid is reachable only when its range is `region`. `solarsystem` and the
+numeric jump ranges need topology the reduction does not have, so they are
+UNKNOWN and UNKNOWN fails.
+
+**Partial sweeps are diagnostics.** `BookLake.write_partial` writes them under
+a filename `latest()` does not glob, and `latest()` returns the newest
+*complete* snapshot, scanning back past partial ones.
+
+**One contract.** `books.load_validated_book()` returns a `BookSnapshot` that
+decides completeness, executability and staleness once; `priceable` is empty
+unless all three hold. `spreads.py` and `backtest.py` now read through it and
+price from `exec_price` rather than the region-wide `best_price`.
+
+### Consequence for existing data
+
+A snapshot written before R1 does not know where its quotes rested, so it is
+UNKNOWN and prices nothing until the region is swept again — **including the
+stored 35,858-row Forge book**. That is the honest reading of missing data, not
+a regression. Re-run `sweep-books`.
+
+### Still owed
+
+No row produced by this phase has been checked against a live client. After
+the next sweep, confirm `exec_location_id` for a handful of liquid types is the
+station actually traded at, and that a structure-resting best bid is flagged
+rather than priced.
+
 ## 2026-08-20 — The spread is revenue when you are the one posting it
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §20.2 and §17 D-31.

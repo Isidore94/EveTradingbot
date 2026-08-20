@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from evescreener.books import reduce_orders
 from evescreener.costs import CostModel
 from evescreener.spreads import (
     DEFAULT_MIN_UNITS,
@@ -16,34 +17,38 @@ from evescreener.spreads import (
     maker_spreads,
 )
 
-BOOK_FIELDS = {
-    "p5_price": 0.0,
-    "depth_fill_price_0": 0.0,
-    "depth_fill_price_1": 0.0,
-    "depth_fill_price_2": 0.0,
-    "depth_fill_qty_0": 500.0,
-    "depth_fill_qty_1": 0.0,
-    "depth_fill_qty_2": 0.0,
-    "top_order_volume_share": 0.1,
-    "station_volume_share": 1.0,
-}
+JITA_44 = 60003760
+TIERS = (250_000_000.0, 1_000_000_000.0, 2_500_000_000.0)
 
 
 def _book(rows) -> pd.DataFrame:
-    """`rows` is (type_id, best_bid, best_ask). Builds both sides of a sweep."""
-    records = []
+    """`rows` is (type_id, best_bid, best_ask).
+
+    Built through the real `reduce_orders` rather than hand-rolled records, so
+    these fixtures carry the executable identity R1 requires and cannot drift
+    away from what a sweep actually produces. Both sides rest at Jita 4-4, so
+    every quote here is executable at one venue by construction; the
+    incompatible-location cases live in `test_books_executable.py`.
+    """
+    orders = []
+    order_id = 0
     for type_id, bid, ask in rows:
-        for side, price in (("buy", bid), ("sell", ask)):
-            records.append(
-                {
+        for side_is_buy, price in ((False, ask), (True, bid)):
+            # Two orders a side so no single order owns the book.
+            for offset, volume in ((0.0, 400.0), (0.01, 100.0)):
+                order_id += 1
+                record = {
+                    "order_id": order_id,
                     "type_id": int(type_id),
-                    "side": side,
-                    "best_price": float(price),
-                    "sweep_ts": "2026-08-20T12:00:00+00:00",
-                    **BOOK_FIELDS,
+                    "price": float(price) + (-offset if side_is_buy else offset),
+                    "volume_remain": volume,
+                    "is_buy_order": side_is_buy,
+                    "location_id": JITA_44,
                 }
-            )
-    return pd.DataFrame(records)
+                if side_is_buy:
+                    record["range"] = "station"
+                orders.append(record)
+    return reduce_orders(orders, region_id=10000002, notional_tiers=TIERS).frame
 
 
 @pytest.fixture
@@ -150,7 +155,7 @@ def test_a_hub_with_no_book_says_so_rather_than_looking_empty(config, tmp_path):
     hub = result[0]
     assert isinstance(hub, HubSpreads)
     assert hub.rows.empty
-    assert "no book on disk" in hub.note
+    assert "no complete book on disk" in hub.note
     assert not hub.known
 
 

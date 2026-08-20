@@ -56,11 +56,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .books import spread_view
+from .books import load_validated_book, spread_view
 from .config import Config
 from .costs import CostModel
 from .store.lake import BookLake
-from .timeutil import parse_iso, utcnow
+from .timeutil import utcnow
 
 __all__ = [
     "COLUMNS",
@@ -135,13 +135,6 @@ class HubSpreads:
     @property
     def known(self) -> bool:
         return not self.rows.empty and not self.stale
-
-
-def _age_minutes(sweep_ts, now) -> float | None:
-    stamp = parse_iso(str(sweep_ts)) if sweep_ts else None
-    if stamp is None:
-        return None
-    return max(0.0, (now - stamp).total_seconds() / 60.0)
 
 
 def _fill_note(median_units, top_share) -> str:
@@ -301,45 +294,30 @@ def maker_spreads(
     for raw in region_ids:
         region_id = int(raw)
         hub = hubs.get(region_id, str(region_id))
-        book = lake.latest(region_id)
-        if book.empty:
-            out.append(
-                HubSpreads(
-                    region_id=region_id,
-                    hub=hub,
-                    note=f"no book on disk — run: sweep-books --region {region_id}",
-                )
-            )
+        # One contract decides completeness, executability and staleness, so
+        # this page cannot forget one of the three (§21 R1).
+        snapshot = load_validated_book(config, region_id, lake=lake, now=now)
+        if snapshot.frame.empty:
+            out.append(HubSpreads(region_id=region_id, hub=hub, note=snapshot.reason))
             continue
-        stamps = book["sweep_ts"].dropna() if "sweep_ts" in book else pd.Series(dtype="object")
-        sweep_ts = str(stamps.max()) if not stamps.empty else None
-        age = _age_minutes(sweep_ts, now)
-        stale = age is None or age > config.costs.book_staleness_minutes
         rows = maker_edge_frame(
-            book,
+            snapshot.frame,
             costs,
             names=names,
             volumes=(volumes_by_region or {}).get(region_id, {}),
             averages=(averages_by_region or {}).get(region_id, {}),
             hub=hub,
-            stale=stale,
+            stale=not snapshot.known,
         )
-        note = ""
-        if stale:
-            note = (
-                f"book {age:.0f} min old — STALE, nothing priced"
-                if age is not None
-                else "book has no sweep timestamp — STALE"
-            )
         out.append(
             HubSpreads(
                 region_id=region_id,
                 hub=hub,
                 rows=rows,
-                sweep_ts=sweep_ts,
-                age_minutes=age,
-                stale=stale,
-                note=note,
+                sweep_ts=snapshot.sweep_ts,
+                age_minutes=snapshot.age_minutes,
+                stale=not snapshot.known,
+                note=snapshot.reason,
             )
         )
     return out

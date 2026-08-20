@@ -36,7 +36,47 @@ Every item on it is an **operator action**. The build cannot self-certify: the
 whole point of the ladder is that a machine's confidence in itself is not
 evidence.
 
-## Active sub-track: plan.md §20 — the daily desk
+## ACTIVE — plan.md §21 remediation track (operator-authorized 2026-08-20)
+
+An adversarial repository review found defects in how the order book was
+reduced and how snapshots were validated. The operator authorized this track
+to take priority over the queued §20.3 work. **§20.3 is paused, not
+cancelled**, and the consolidated live-validation checklist below is untouched
+and still owed in full. Nothing in this track retracts a measurement.
+
+**One phase per session.** A later phase is never started because it is
+adjacent.
+
+| phase | scope | state |
+|---|---|---|
+| **R1** | Executable order-book identity and validated snapshots | **IMPLEMENTED + GREEN** |
+| **R2** | Completed-bar enforcement and independent bar freshness | **NEXT — not started** |
+| R3 | Backtest price bounds, statistics and friction labels | not started |
+| R4 | Maker analysis and location-specific cost semantics | not started |
+| R5 | Killmail lead-lag hypothesis fidelity | not started |
+| R6 | Learning freshness and eligible-sample handling | not started |
+| R7 | Desk threading, invalidation and worker lifecycle | not started |
+| R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
+
+### R1 owed live gate
+
+Nothing R1 produces has been checked against a live client. After the next
+`sweep-books`:
+
+- [ ] Confirm `exec_location_id` for a handful of liquid Forge types is the
+      station the operator actually trades at (expected: Jita 4-4, 60003760).
+- [ ] Confirm a type whose region-wide best bid rests in a structure is
+      flagged `exec_is_structure` or excluded, rather than priced.
+- [ ] Confirm the SPREADS page prices rows again once a complete sweep exists.
+
+### R1 operational consequence — read this before the next run
+
+**The stored Forge book (35,858 rows) now prices nothing.** It predates the
+executable-quote contract and genuinely cannot say where its quotes rested, so
+`load_validated_book` reports it UNKNOWN. This is missing data reported
+honestly, not a regression. `sweep-books` restores pricing.
+
+## Superseded sub-track: plan.md §20 — the daily desk
 
 The operator asked (2026-08-20) for a consolidated daily-review page, alerts
 with ntfy, top performers, region trading and a spreads tab. That is recorded
@@ -64,7 +104,14 @@ which any existing measurement covers.
 
 ## Verification baseline (2026-08-20)
 
-- **Latest — SPREADS and SETTINGS (plan.md §20.2, §17 D-31):**
+- **Latest — §21 R1, executable book identity and validated snapshots:**
+  `uv run pytest -q` → **602 passed, 7 deselected**, ruff check + format clean.
+  The reduction preserves `location_id` and buy-order `range`; a spread is now
+  the pair executable at one named venue, with the region-wide extrema kept
+  visible as diagnostics. Partial sweeps are quarantined and `latest()` returns
+  the newest *complete* snapshot. `load_validated_book()` is the single
+  contract deciding completeness, executability and staleness.
+- **SPREADS and SETTINGS (plan.md §20.2, §17 D-31):**
   `uv run pytest -q` → **583 passed, 7 deselected**, ruff check + format clean.
   The maker read of the book, anchored to the traded average because 39.7% of
   two-sided Forge books have a bid under half of it. 1,590 Forge names carry a

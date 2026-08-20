@@ -52,7 +52,24 @@ BOOK_SUMMARY_COLUMNS = [
     "top_order_volume_share",
     "station_volume_share",
     "partial_sweep",
+    # -- R1: what makes a quote executable (plan.md §21 R1) ----------------
+    # `best_*` are REGION-WIDE extrema and are diagnostics only: the lowest
+    # ask and the highest bid in a region are routinely at different stations
+    # and cannot be traded against each other. `exec_*` is the quote a single
+    # character could actually hit, at one named venue.
+    "best_location_id",
+    "best_range",
+    "exec_location_id",
+    "exec_price",
+    "exec_volume",
+    "exec_order_count",
+    "exec_is_structure",
 ]
+
+#: Columns without which a snapshot cannot be priced at all. A partition
+#: written before R1 lacks them, and genuinely does not know where its quotes
+#: rested — so it is UNKNOWN rather than retro-fitted with a guess.
+EXECUTABLE_COLUMNS = ["exec_location_id", "exec_price", "exec_is_structure"]
 BOOK_KEY = ["type_id", "region_id", "side", "sweep_ts"]
 
 
@@ -179,21 +196,62 @@ class BookLake:
             return pd.DataFrame(columns=BOOK_SUMMARY_COLUMNS)
         return pd.concat(frames, ignore_index=True)
 
-    def latest(self, region_id: int) -> pd.DataFrame:
-        """Most recent sweep in the region, or an empty frame.
+    def write_partial(self, frame: pd.DataFrame) -> int:
+        """Persist an incomplete sweep for diagnostics only.
 
-        Callers must look at `sweep_ts` and decide staleness themselves; this
-        method never pretends an old sweep is current.
+        A partial sweep is missing pages, and a missing page can hold the true
+        best level — so it is not a cheap book, it is an unmeasured one. It is
+        written under a filename `latest()` does not glob, which is what keeps
+        a failed refresh from displacing the last complete snapshot (§21 R1).
         """
+        if frame.empty:
+            return 0
+        frame = frame.copy()
+        frame["sweep_ts"] = pd.to_datetime(frame["sweep_ts"], utc=True)
+        written = 0
+        for (region_id, day), chunk in frame.groupby(
+            [frame["region_id"], frame["sweep_ts"].dt.strftime("%Y-%m-%d")]
+        ):
+            directory = self.paths.books / f"region={int(region_id)}"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"partial-date={day}.parquet"
+            existing = _read_parquet(path)
+            before = len(existing)
+            merged = _merge(existing, chunk, BOOK_KEY)
+            _write_parquet(path, merged)
+            written += max(0, len(merged) - before)
+        return written
+
+    def latest(self, region_id: int) -> pd.DataFrame:
+        """The most recent **complete** sweep in the region, or an empty frame.
+
+        Complete-only is structural rather than advisory. Every consumer that
+        prices anything reaches the book through here, so filtering partial
+        rows at this one point is what makes "a failed or partial refresh
+        never replaces the last verified snapshot" true for all of them at
+        once, instead of a rule each caller has to remember (§21 R1).
+
+        Callers still decide staleness themselves — see `load_validated_book`,
+        which is the contract that decides both.
+        """
+        empty = pd.DataFrame(columns=BOOK_SUMMARY_COLUMNS)
         directory = self.paths.books / f"region={region_id}"
         if not directory.exists():
-            return pd.DataFrame(columns=BOOK_SUMMARY_COLUMNS)
+            return empty
         partitions = sorted(directory.glob("date=*.parquet"))
         if not partitions:
-            return pd.DataFrame(columns=BOOK_SUMMARY_COLUMNS)
-        frame = _read_parquet(partitions[-1])
-        if frame.empty:
-            return frame
-        frame["sweep_ts"] = pd.to_datetime(frame["sweep_ts"], utc=True)
-        newest = frame["sweep_ts"].max()
-        return frame[frame["sweep_ts"] == newest].reset_index(drop=True)
+            return empty
+        # Newest partition first, and within it newest sweep first: return the
+        # newest snapshot that is complete, not merely the newest one.
+        for path in reversed(partitions):
+            frame = _read_parquet(path)
+            if frame.empty:
+                continue
+            frame["sweep_ts"] = pd.to_datetime(frame["sweep_ts"], utc=True)
+            if "partial_sweep" in frame:
+                frame = frame[~frame["partial_sweep"].fillna(False).astype(bool)]
+            if frame.empty:
+                continue
+            newest = frame["sweep_ts"].max()
+            return frame[frame["sweep_ts"] == newest].reset_index(drop=True)
+        return empty

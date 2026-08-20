@@ -118,3 +118,60 @@ def test_lake_read_filters_by_type_and_window(paths):
 
 def test_missing_region_reads_empty_not_error(paths):
     assert BarLake(paths).read(99999999).empty
+
+
+def test_ingest_flushes_catalogue_gaps_as_it_learns_them(config, db, paths):
+    """A crawl killed halfway must not rediscover thousands of 404s tomorrow."""
+    import asyncio
+
+    import httpx
+
+    from evescreener.bars import ingest_history
+    from evescreener.esi.client import EsiClient
+
+    def handler(request):
+        type_id = int(request.url.params["type_id"])
+        if type_id % 2 == 0:
+            return httpx.Response(404, json={"error": "Type not found!"})
+        return httpx.Response(
+            200,
+            json=SAMPLE,
+            headers={"expires": "Fri, 21 Aug 2026 11:05:00 GMT", "etag": f'W/"{type_id}"'},
+        )
+
+    client = EsiClient(
+        config,
+        db,
+        client=httpx.AsyncClient(
+            base_url=config.esi.base_url, transport=httpx.MockTransport(handler)
+        ),
+    )
+    flushed: list[list[int]] = []
+    result = asyncio.run(
+        ingest_history(
+            client,
+            BarLake(paths),
+            list(range(1, 41)),
+            region_id=10000002,
+            on_missing=lambda batch: (
+                flushed.append(list(batch)),
+                db.mark_history_missing(batch, 10000002),
+            ),
+        )
+    )
+    assert result.no_history == 20
+    assert result.failed == 0, "a 404 is a catalogue gap, not an ingest failure"
+    assert flushed, "the gap must be persisted, not only returned"
+    assert db.history_missing(10000002) == {value for value in range(2, 41, 2)}
+    # A second crawl skips them entirely.
+    again = asyncio.run(
+        ingest_history(
+            client,
+            BarLake(paths),
+            list(range(1, 41)),
+            region_id=10000002,
+            skip_type_ids=db.history_missing(10000002),
+        )
+    )
+    assert again.requested == 20
+    assert again.no_history == 0

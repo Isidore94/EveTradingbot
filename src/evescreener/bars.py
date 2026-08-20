@@ -162,6 +162,7 @@ async def ingest_history(
     region_id: int | None = None,
     batch_size: int = 200,
     skip_type_ids: set[int] | None = None,
+    on_missing=None,
     progress=None,
 ) -> HistoryIngestResult:
     """Refresh daily bars for `type_ids` and diff-append them to the lake.
@@ -176,6 +177,8 @@ async def ingest_history(
     skip = skip_type_ids or set()
     ids = [int(value) for value in type_ids if int(value) not in skip]
     result.requested = len(ids)
+    flush_missing_every = 200
+    flushed = 0
 
     for index, type_id in enumerate(ids, start=1):
         try:
@@ -210,10 +213,17 @@ async def ingest_history(
         if len(pending) >= batch_size:
             result.rows_written += lake.write(pd.concat(pending, ignore_index=True))
             pending.clear()
+        if on_missing is not None and len(result.missing_type_ids) >= flush_missing_every:
+            # Persist the catalogue gap as we learn it. A crawl killed halfway
+            # must not have to rediscover thousands of 404s tomorrow.
+            on_missing(result.missing_type_ids[-flush_missing_every:])
+            flushed += flush_missing_every
         if progress is not None and index % 100 == 0:
             progress(index, len(ids), result)
         await asyncio.sleep(0)
 
     if pending:
         result.rows_written += lake.write(pd.concat(pending, ignore_index=True))
+    if on_missing is not None and len(result.missing_type_ids) > flushed:
+        on_missing(result.missing_type_ids[flushed:])
     return result

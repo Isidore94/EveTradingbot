@@ -241,10 +241,10 @@ async def run_census(
             region_id=region,
             batch_size=2500,
             skip_type_ids=known_missing,
+            on_missing=lambda batch: db.mark_history_missing(batch, region),
             progress=progress,
         )
         if ingest.missing_type_ids:
-            db.mark_history_missing(ingest.missing_type_ids, region)
             notes.append(
                 f"{len(ingest.missing_type_ids)} further types 404'd on history and "
                 "were recorded so tomorrow's crawl skips them"

@@ -14,16 +14,18 @@ the denominator for every later "the universe is N" claim in the system.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import pandas as pd
 
 from .bars import HistoryIngestResult, ingest_history
+from .books import spread_view
 from .config import Config
 from .esi.client import EsiClient
 from .paths import atomic_write_text
 from .store.db import Database
-from .store.lake import BarLake
+from .store.lake import BarLake, BookLake
 from .timeutil import iso, utcnow
 from .universe import (
     active_type_ids,
@@ -59,6 +61,11 @@ class CensusResult:
     ingest: dict = field(default_factory=dict)
     turnover_percentiles: dict = field(default_factory=dict)
     order_count_percentiles: dict = field(default_factory=dict)
+    spread_percentiles: dict = field(default_factory=dict)
+    depth_coverage: dict = field(default_factory=dict)
+    spoof_share: float | None = None
+    structure_share: dict = field(default_factory=dict)
+    book_sweep_ts: str | None = None
     floor_grid: list[dict] = field(default_factory=list)
     derived_floor: dict = field(default_factory=dict)
     market_group_breakdown: list[dict] = field(default_factory=list)
@@ -76,6 +83,11 @@ class CensusResult:
             "ingest": self.ingest,
             "turnover_percentiles": self.turnover_percentiles,
             "order_count_percentiles": self.order_count_percentiles,
+            "spread_percentiles": self.spread_percentiles,
+            "depth_coverage": self.depth_coverage,
+            "spoof_share": self.spoof_share,
+            "structure_share": self.structure_share,
+            "book_sweep_ts": self.book_sweep_ts,
             "floor_grid": self.floor_grid,
             "derived_floor": self.derived_floor,
             "market_group_breakdown": self.market_group_breakdown,
@@ -153,6 +165,52 @@ def derive_floor(grid: list[dict], *, target_turnover_share: float = 0.95) -> di
         "types": best["types"],
         "share_of_turnover": best["share_of_turnover"],
     }
+
+
+def _volume_weighted_structure_share(side: pd.DataFrame) -> float | None:
+    """Share of one side's resting volume that sits in player structures."""
+    if side.empty:
+        return None
+    volume = pd.to_numeric(side["total_volume"], errors="coerce").fillna(0.0)
+    station = pd.to_numeric(side["station_volume_share"], errors="coerce").fillna(1.0)
+    total = float(volume.sum())
+    if total <= 0:
+        return None
+    return round(float(((1.0 - station) * volume).sum() / total), 4)
+
+
+def book_statistics(book: pd.DataFrame, tiers: Sequence[float]) -> dict:
+    """Spread and depth distributions from the latest reduced sweep.
+
+    This is the half of the opportunity map that history cannot answer: how
+    wide the book actually is, and **what fraction of types can absorb a real
+    notional at all**. A margin that cannot take 0.25B is not an opportunity,
+    so the coverage numbers here are the honest ceiling on how many of the
+    floored types are ever tradeable (plan.md §9 R5).
+    """
+    if book is None or book.empty:
+        return {"reason": "no book sweep available; spread and depth are UNKNOWN"}
+    view = spread_view(book)
+    sells = book[book["side"] == "sell"]
+    stats: dict = {
+        "sweep_ts": str(book["sweep_ts"].max()),
+        "types_with_two_sided_book": int(len(view)),
+        "spread_percentiles": _percentiles(view["spread_pct"]) if not view.empty else {},
+        "depth_coverage": {
+            f"{float(tier):.0f}": round(float(sells[f"depth_fill_price_{index}"].notna().mean()), 4)
+            for index, tier in enumerate(tiers)
+            if f"depth_fill_price_{index}" in sells.columns
+        },
+        "spoof_flagged_share": round(float((sells["top_order_volume_share"] > 0.5).mean()), 4),
+        # A bid above the ask is a data-quality event, not an arbitrage: the
+        # pages of one sweep are not a perfectly atomic snapshot (§0 check #2).
+        "crossed_books": int((view["spread_pct"] < 0).sum()) if not view.empty else 0,
+        "structure_share": {
+            "ask_volume_weighted": _volume_weighted_structure_share(sells),
+            "bid_volume_weighted": _volume_weighted_structure_share(book[book["side"] == "buy"]),
+        },
+    }
+    return stats
 
 
 def market_group_breakdown(db: Database, table: pd.DataFrame, limit: int = 25) -> list[dict]:
@@ -273,6 +331,11 @@ async def run_census(
         source="census",
     )
 
+    book = BookLake(config.paths).latest(region)
+    book_stats = book_statistics(book, tiers=config.costs.notional_tiers_isk)
+    if "reason" in book_stats:
+        notes.append(book_stats["reason"])
+
     frame = lake.read(region)
     return CensusResult(
         region_id=region,
@@ -286,6 +349,11 @@ async def run_census(
         order_count_percentiles=_percentiles(table["median_order_count"])
         if not table.empty
         else {},
+        spread_percentiles=book_stats.get("spread_percentiles", {}),
+        depth_coverage=book_stats.get("depth_coverage", {}),
+        spoof_share=book_stats.get("spoof_flagged_share"),
+        structure_share=book_stats.get("structure_share", {}),
+        book_sweep_ts=book_stats.get("sweep_ts"),
         floor_grid=grid,
         derived_floor=derived,
         market_group_breakdown=market_group_breakdown(db, scored),
@@ -324,6 +392,43 @@ def render_census(result: CensusResult) -> str:
     lines.append("## Median daily order_count, by percentile")
     for key, value in result.order_count_percentiles.items():
         lines.append(f"- {key}: {value:,.1f}")
+    if result.spread_percentiles or result.depth_coverage:
+        lines.append("")
+        lines.append(f"## Book statistics (sweep {result.book_sweep_ts})")
+        lines.append("")
+        if result.spread_percentiles:
+            lines.append("Spread, best ask vs best bid, by percentile:")
+            for key, value in result.spread_percentiles.items():
+                lines.append(f"- {key}: {value:,.2f}%")
+        if result.depth_coverage:
+            lines.append("")
+            lines.append(
+                "**Depth coverage** — share of sell books that can absorb the notional "
+                "at all. This is the honest ceiling on how many floored types are ever "
+                "tradeable:"
+            )
+            for tier, share in result.depth_coverage.items():
+                lines.append(f"- {float(tier) / 1e9:.2f}B ISK: {share:.1%}")
+        if result.spoof_share is not None:
+            lines.append("")
+            lines.append(
+                f"- Sell books where one order holds >50% of resting volume: "
+                f"**{result.spoof_share:.1%}** (the spoof/thin-book flag)"
+            )
+        if result.structure_share:
+            ask = result.structure_share.get("ask_volume_weighted")
+            bid = result.structure_share.get("bid_volume_weighted")
+            lines.append(
+                "- Volume-weighted share resting in **player structures**: "
+                f"ask side {ask:.1%}, bid side {bid:.1%}. "
+                if ask is not None and bid is not None
+                else "- Structure share UNKNOWN"
+            )
+            lines.append(
+                "  The exposure is on the **exit**: what you can buy is visible in NPC "
+                "stations, but part of what you would sell into may need docking rights "
+                "you do not have."
+            )
     lines.append("")
     lines.append("## Liquidity floor grid")
     lines.append("")

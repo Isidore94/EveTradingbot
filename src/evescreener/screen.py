@@ -267,11 +267,24 @@ def run_screen(
             share = sell_row.get("top_order_volume_share")
             if share is not None and float(share) > config.screen.top_order_share_flag:
                 flags.append(f"one order holds {float(share):.0%} of the ask book")
-            station = sell_row.get("station_volume_share")
-            if station is not None and float(station) < 0.5:
-                flags.append(f"only {float(station):.0%} of ask volume is in NPC stations")
             if bool(sell_row.get("partial_sweep")):
                 flags.append("priced from a partial sweep")
+        if buy_row is not None:
+            # Measured 2026-08-20 on a full Forge sweep: 0% of visible SELL
+            # volume rests in player structures, while a large share of BUY
+            # volume does. So the structure exposure is entirely on the EXIT
+            # side — the bid-walk price is optimistic by however much of that
+            # depth the operator cannot dock at. plan.md §9 R3 assumed the
+            # opposite direction; the measurement corrected it.
+            station = buy_row.get("station_volume_share")
+            if station is not None and float(station) < 0.9:
+                flags.append(
+                    f"{1 - float(station):.0%} of bid depth sits in player structures — "
+                    "exit may be inaccessible without docking rights"
+                )
+            top_bid = buy_row.get("top_order_volume_share")
+            if top_bid is not None and float(top_bid) > config.screen.top_order_share_flag:
+                flags.append(f"one order holds {float(top_bid):.0%} of the bid book")
         if bands.truncated:
             flags.append("anchor predates the lake horizon (truncated)")
 

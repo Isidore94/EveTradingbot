@@ -245,6 +245,21 @@ class PaperLedger:
             now=now,
             stale_after_minutes=self.config.paper.stale_book_minutes,
         )
+        # Measured 2026-08-20: structure-resident depth is entirely on the BID
+        # side in The Forge, so it is the exit that may be inaccessible. Record
+        # the exposure at entry so a later exit can be judged against it.
+        bid_rows = (
+            book[(book["type_id"] == int(type_id)) & (book["side"] == "buy")]
+            if book is not None and not book.empty
+            else None
+        )
+        bid_station_share = (
+            float(bid_rows.iloc[-1]["station_volume_share"])
+            if bid_rows is not None
+            and not bid_rows.empty
+            and bid_rows.iloc[-1]["station_volume_share"] is not None
+            else None
+        )
 
         units = notional_isk / ask.price
         self_impact = bool(
@@ -270,6 +285,7 @@ class PaperLedger:
             "book_sweep_ts": ask.sweep_ts,
             "book_age_minutes": round(ask.age_minutes or 0.0, 2),
             "bid_at_entry": bid.price,
+            "bid_station_volume_share": bid_station_share,
             "stop_price": stop_price,
             "target_price": target_price,
             "maker_exit_advisory_net": maker_exit_advisory,

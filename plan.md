@@ -1042,6 +1042,32 @@ output.
 
 ## 17. Operator directive 2026-08-20 — deviations recorded
 
+### Measured facts that correct this document
+
+The following were measured during the build and **supersede** the estimates
+and expectations written above. Each is cited where it changes a decision.
+
+| Fact | Measured value (2026-08-20, The Forge) |
+|---|---|
+| Types with a live order in the region | **19,152** |
+| Of those, types with daily history | **2,363 fetched before the crawl was still running**; 16,789 return HTTP 404 on `/markets/{region}/history` |
+| Full order-book sweep | **415 pages, 414,152 orders, 19,151 types**, ~83 seconds, 830 tokens of a 6,000 self-cap |
+| Cross-page `order_id` duplicates in one sweep | **10** (0.0024%) |
+| Crossed books (bid above ask) in one sweep | **201 of 16,706** two-sided types (1.2%) |
+| Share of sell books that can absorb 0.25B / 1.0B / 2.5B ISK | **77.1% / 55.8% / 39.6%** |
+| Sell books where one order holds >50% of resting volume | **25.8%** |
+| Median spread across two-sided types | **98.8%** — p5 is 4.2%, p10 is 8.6%. Only ~932 types (5.6%) sit inside a 5% spread, i.e. anywhere near the 3.375% tax floor |
+| Volume-weighted structure share, ask side / bid side | **0.0% / 22.0%** |
+| Rate-limit incidents across 16,590+ requests | **zero 429, zero 420**; error-limit budget bottomed at 42 of 100 |
+
+The spread distribution is the single most important number here for the
+operator's question: **the long tail of EVE's item catalogue is not a market**,
+it is a list of things with a bid and an ask that are nowhere near each other.
+Any claim about "thousands of opportunities" has to survive the fact that only
+~932 Forge types trade inside a 5% spread at all, before costs.
+
+
+
 The operator authorized a single-push build of the complete v1 system,
 overriding the one-phase-per-session rule for this build. Every deviation from
 this document's prior text is recorded here with its reason.
@@ -1056,15 +1082,17 @@ this document's prior text is recorded here with its reason.
 | D-6 | **SDE source changed** from per-file jsonl URLs to the per-build bundle zip (`latest.jsonl` → `eve-online-static-data-{build}-jsonl.zip`). | Measured 2026-08-20: the flat per-file URLs return HTTP 403; the bundle URL serves. The plan's §0 statement that the SDE "includes types and marketGroups" holds — the packaging differs. |
 | D-7 | **Vendored files carry mechanical lint edits** and are marked `diverged` in `VENDORED.md`. | §11 D1 forbids per-file lint exemptions, so excluding `vendored/` was not available. No numerical behaviour changed. |
 | D-8 | **Upstream branch for vendoring is `phase05-integration-blitz`**, not `phase05-r8-weekend-prep`. | Measured 2026-08-20: the r8 branch no longer exists on the remote. The integration-blitz branch carries the same tree. Module paths are under `scripts/`, not the repo root, correcting §0's file:line citations by that prefix. |
-| D-9 | **The `≤15k LOC` budget (§1) may be exceeded** by the added studies. | Operator directive 2026-08-20 authorized this explicitly, requiring the final count be stated. |
+| D-9 | **The `≤15k LOC` budget (§1) may be exceeded** by the added studies. | Operator directive 2026-08-20 authorized this explicitly, requiring the final count be stated. **It was not exceeded: 14,899 LOC** (9,736 product + 1,435 vendored + 3,728 tests). |
+| D-10 | **§3.2's claim that 4xx "should not occur in the steady state" is withdrawn.** | Measured 2026-08-20: `/markets/10000002/types` lists 19,152 type_ids and **16,789 of them 404 on `/markets/10000002/history`**. Catalogue gaps are the normal case, not a bug, and they are recorded in `history_missing` so a daily crawl does not pay the 4xx error budget rediscovering them. |
+| D-11 | **The census floor grid gained looser corners** (a no-floor row, 1M ISK, 0 and 1 order_count). | Measured 2026-08-20: the original grid's loosest corner (10M ISK / 5 orders) captured only 88.2% of median daily turnover, so §8 Phase 1's derive rule could not resolve at its 95% target. The **rule is unchanged**; only its candidate set widened downward. |
 
 ### §0 named checks — status after this build
 
 | Check | Status |
 |---|---|
 | #1 ESI `average` semantics | **OPEN.** Not resolved by this build. The bar contract tolerates either answer (§4) and nothing computed here depends on it, but it belongs in the contract doc and the Fuzzwork cross-check is a Phase-2-gate item still owed. |
-| #2 page-snapshot consistency | **MITIGATED, not resolved.** The sweep reconciles by `order_id` and reports `duplicate_order_ids` as a data-quality counter; the two-sweeps-in-one-window diff is still owed. |
-| #3 structure blind spot | **INSTRUMENTED.** `station_volume_share` is carried per `book_summary` row and the sweep reports the region-wide structure share. The number now exists; reading it against the in-game view is an operator gate item. |
+| #2 page-snapshot consistency | **PARTIALLY ANSWERED 2026-08-20.** A full Forge sweep (415 pages, 414,152 orders) reconciled by `order_id` found **10 duplicates** (0.0024%) and produced **201 crossed books** out of 16,706 two-sided types (1.2%), where the bid printed above the ask. So the pages of one sweep are *not* a perfectly atomic snapshot, but the incoherence is small and bounded. Both are carried as data-quality counters, never as arbitrage. The deliberate two-sweeps-in-one-window diff is still owed. |
+| #3 structure blind spot | **MEASURED 2026-08-20 — and the plan's assumption was backwards.** On a full Forge sweep: **0.0% of visible *ask* volume rests in player structures, and 22.0% of visible *bid* volume does** (verified independently against raw ESI pages: 0 structure sell orders in a 7,000-order sample, ~70% of buy volume in structures on those pages). §9 R3 worried that invisible structure orders would make public books *understate* depth. The measured exposure runs the other way and lands entirely on the **exit**: what the operator can buy is fully visible in NPC stations, but a fifth of the bid depth he would sell into may sit behind docking rights he does not have, so a naive bid-walk exit price is **optimistic**. `screen.py` flags this on the bid row and `paper.py` records `bid_station_volume_share` at entry. What remains owed is the operator checking whether he actually has access to those structures. |
 | #4 outlier prints in `highest`/`lowest` | **MITIGATED, not resolved.** TR winsorization at 8× rolling median clamps and flags them (§6). Whether CCP filters them upstream is still unmeasured. |
 | #5 relist/modify fee formula | **OPEN.** Modelled as `relist_surcharge_multiple` in config, defaulting to 1.0× the broker fee. Only the maker-exit branch depends on it, and that branch is advisory. |
 | #6 sales tax / broker base rates | **OPEN.** 7.5% / 3% are config defaults, not constants; the operator's one-real-fill reconciliation is the gate that closes this. |

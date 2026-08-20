@@ -353,6 +353,12 @@ def _headline(census, backtest, lead_lag, paper) -> str:
             "**The question is not yet answered.** The universe has been measured, but "
             "no backtest has run, so whether the setup class has ever paid is unknown."
         )
+    edge = ""
+    if ((lead_lag or {}).get("outcome") or {}).get("outcome") == "SURVIVES":
+        edge = (
+            " The destruction lead-lag effect also survived its own frozen pass rule, "
+            "which is the one edge here that equity systems cannot have."
+        )
     if "PLAUSIBLE" in verdicts.values():
         horizons = [key for key, value in verdicts.items() if value == "PLAUSIBLE"]
         return (
@@ -360,7 +366,7 @@ def _headline(census, backtest, lead_lag, paper) -> str:
             "on history, at 2x the measured slippage haircut. Plausible is not proven: "
             "the backtest has no historical order books, and the only way to find out "
             "whether it pays *for you* is the paper experiment, which is "
-            f"{paper_verdict or 'not yet started'}."
+            f"{paper_verdict or 'not yet started'}." + edge
         )
     if set(verdicts.values()) == {"UNKNOWN"}:
         return (

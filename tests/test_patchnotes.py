@@ -123,3 +123,41 @@ def test_the_committed_calendar_carries_real_dates_and_no_confirmations(repo_roo
 def test_note_to_anchor_is_never_confirmed():
     note = PatchNote(published=date(2026, 1, 1), title="Patch Notes", link="x")
     assert note.as_anchor().confirmed is False
+
+
+def test_a_rearticled_patch_is_not_appended_twice(tmp_path):
+    """CCP re-dates an article; it is still one event.
+
+    Measured on the operator's desk 2026-08-20: `config/anchors.jsonl` ended up
+    holding *Patch Notes - Version 24.01* on both 08-19 and 08-20 with an
+    identical source URL, because the dedup key was (date, label) only. The
+    watcher runs daily, so the operator would have been asked to confirm one
+    patch twice — and confirming both would anchor twice on one event.
+    """
+    from evescreener.patchnotes import PatchNote, sync_anchor_candidates
+    from evescreener.signals.anchors import load_anchors
+
+    calendar = tmp_path / "anchors.jsonl"
+    url = "https://www.eveonline.com/news/view/patch-notes-version-24-01"
+    first = PatchNote(published=date(2026, 8, 19), title="Patch Notes - Version 24.01", link=url)
+    assert len(sync_anchor_candidates([first], calendar)) == 1
+
+    redated = PatchNote(published=date(2026, 8, 20), title="Patch Notes - Version 24.01", link=url)
+    assert sync_anchor_candidates([redated], calendar) == []
+    assert len(load_anchors(calendar)) == 1
+
+
+def test_a_genuinely_new_article_still_lands(tmp_path):
+    """Guards the guard: dedup must not become a mute."""
+    from evescreener.patchnotes import PatchNote, sync_anchor_candidates
+
+    calendar = tmp_path / "anchors.jsonl"
+    sync_anchor_candidates(
+        [PatchNote(date(2026, 8, 19), "Patch Notes - Version 24.01", "https://x/one")],
+        calendar,
+    )
+    added = sync_anchor_candidates(
+        [PatchNote(date(2026, 9, 2), "Patch Notes - Version 24.02", "https://x/two")],
+        calendar,
+    )
+    assert [note.title for note in added] == ["Patch Notes - Version 24.02"]

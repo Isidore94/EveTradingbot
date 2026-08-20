@@ -38,6 +38,13 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
+- **Latest — FORGE's outlier clamp and the desk's threading contract (plan.md
+  §17 D-22…D-28, §19.2 amended):** `uv run pytest -q` → **544 passed, 7
+  deselected**, ruff check + format clean, `selftest` → **12/12**. FORGE now
+  runs 1,000 → 981 over 415 bars with a 0.34% median daily move and a
+  `power_index` of −3.28; the desk opens in **8.6 s** against 2,947 tracked
+  types and 4,052,335 bars, with a 15 ms timer tick. The digest finds 25
+  candidates where the broken RRS gate had reported an "honest zero".
 - **Latest — deployed to the operator's Windows desk; compatibility-date guard
   salvaged (plan.md §17 D-21):** `uv run pytest -q` → **509 passed, 7
   deselected** on Windows (Python 3.12.13, uv 0.12.3), ruff check + format
@@ -230,58 +237,56 @@ Practical impact today: a near-pinned type can present an arbitrarily large
 RRS and so pass or fail the strength gate on noise. It affects the tail of the
 universe, not the names the screen actually surfaces.
 
-### 4. The desk is not usable on the full universe — BLOCKING
+### 4. The desk blocked its own GUI thread — RESOLVED 2026-08-20
 
-Measured offscreen against the real data directory, 2,947 tracked types and
-4,052,335 bars:
+Fixed under plan.md §19.2 (amended) and §17 **D-24**. Full write-up in
+`CHANGELOG.md`.
 
-| stage | seconds |
-|---|---:|
-| `load_desk()` — the whole local read | **5.6** |
-| MARKET | 0.1 |
-| CHARTS | 0.0 |
-| **BOARD** | **56.5** |
-| FOCUS | 0.2 |
-| **SCANNER** | **145.9** |
-| PAPER | 0.0 |
-| LEARNING | 9.1 |
-| HEALTH | 0.0 |
-| **total to open** | **~217 s (3.6 min)** |
+**Contract now recorded in §19.2: the GUI thread never computes; it paints.**
+Lazy pages, a `compute`/`paint` split on a `QThreadPool` worker,
+last-good-on-failure under a visible stamp, and recomputation keyed on input
+fingerprints rather than on the clock.
 
-Reading the lake is not the problem — that is 5.6 s. The cost is that
-`ScannerPage.repopulate()` calls `run_scan()` over the entire universe, and
-`BoardPage` builds its whole cross-section, both synchronously on the **main
-thread**, inside `build()`.
+**Measured on the real lake, before and after:**
 
-And `DeskPage.refresh()` calls `repopulate()`. `DeskWindow.refresh()` calls
-that for all eight pages. A `QTimer` fires it every **`refresh_seconds = 60`**.
+| | before | after |
+|---|---|---|
+| open to interactive | **217 s** | **8.6 s** |
+| timer tick, unchanged inputs | full 217 s rescan every 60 s | **15 ms** |
+| revisit an already-computed page | full recompute | **0.000 s** |
+| first visit to SCANNER | blocking the window | 162.8 s off-thread, stamped |
+| first visit to BOARD | blocking the window | 63.5 s off-thread, stamped |
 
-So on this universe the desk opens after 3.6 minutes with the UI blocked
-throughout, and is then **permanently behind its own timer** — a refresh
-costing ~217 s fired every 60 s, each one re-running the full scan on the
-thread that draws the window. It never becomes interactive.
+BOARD and SCANNER still cost real time on their first visit — that work is
+genuinely expensive — but it happens on a worker while the window stays
+responsive and the page says what it is doing. That is what the amendment
+permits; what it forbids is paying for it before the operator has asked, and
+paying for it again every sixty seconds.
 
-§19.2's "a UI timer may re-read local data freely" is still *true* about
-safety — nothing here can reach ESI, and that invariant holds. But "freely"
-silently assumed the re-read was cheap, and it is not: it re-runs the scan
-engine.
+Four offscreen tests pin it: `build()` runs no computation (asserted against
+the scan entry point itself), an unchanged input key does not recompute, a
+completed background result lands on the GUI thread and repaints, and the
+stamp renders while work is in flight — plus one that a failed recompute keeps
+the last good result and names the error.
 
-Why the earlier build did not see it: it validated the desk on **2,001**
-tracked types against a **1.85M**-bar lake (§17). This machine's crawl
-measured **2,947** types and **4.05M** bars, so the same code is doing roughly
-twice the work.
+**Still owed, and honest about it:** the 8.6 s open is mostly `load_desk()`
+(5.6 s) plus Qt startup, still on the GUI thread. It is inside the
+"interactive in seconds" the amendment asks for, so it was left alone rather
+than moved to a worker for its own sake.
 
-**Not fixed here.** Raising `refresh_seconds` is a mitigation, not a fix — it
-does nothing about the 3.6-minute open, and the desk would still freeze for
-3.6 minutes on every tick. The real fix is structural and is a §19.2 design
-decision to make deliberately:
+### 5. Four small items — CLOSED 2026-08-20
 
-* build a page the first time it is **shown**, not in `DeskWindow.__init__`;
-* refresh only the visible page;
-* and/or move `run_scan` off the GUI thread.
+- **`verdict_banner` renders UNKNOWN instead of nothing** (§17 D-25). A fresh
+  clone has no stored study, and MARKET and SCANNER were carrying **no banner
+  at all** — indistinguishable from a desk that measured and passed.
+- **The patch-notes watcher dedupes on the article URL** (§17 D-26); the
+  duplicate *Version 24.01* row is gone and seven distinct candidates remain.
+- **`selftest`'s cost-model check derives tax and fee from config** (§17
+  D-27) rather than hardcoding Accounting V.
+- **`universe.seed_watchlist` deleted** (§17 D-28), its test with it. The
+  roster is seeded and operator-owned; an automatic seeder was deliberately
+  not wired in, because a re-seed would resurrect a name the operator removed.
 
-Until then, the CLI surfaces (`board`, `brief`, `scan`, `digest`) are the
-usable read, and they are the same code paths.
 
 ## The consolidated live-validation checklist
 

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
-from .data import load_desk
+from .data import desk_input_key, load_desk
 from .pages import PAGES
 
 __all__ = ["DeskWindow", "launch"]
@@ -78,7 +78,7 @@ class DeskWindow(QMainWindow):
             self.stack.addWidget(page)
             self.rail.addItem(QListWidgetItem(title))
 
-        self.rail.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.rail.currentRowChanged.connect(self._page_selected)
         self.rail.setCurrentRow(0)
         splitter.addWidget(self.rail)
         splitter.addWidget(self.stack)
@@ -97,11 +97,14 @@ class DeskWindow(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.setInterval(max(5, int(config.gui.refresh_seconds)) * 1000)
-        self.timer.timeout.connect(self.refresh)
+        self.timer.timeout.connect(self.tick)
         self.timer.start()
 
         self._apply_banner()
         self._update_status()
+        # Only the page the operator is looking at computes. MARKET is first in
+        # the rail and cheap, so the window is interactive immediately.
+        self._page_selected(self.rail.currentRow())
 
     # -- navigation --------------------------------------------------------
     def show_page(self, title: str) -> None:
@@ -109,6 +112,21 @@ class DeskWindow(QMainWindow):
             if self.rail.item(index).text() == title:
                 self.rail.setCurrentRow(index)
                 return
+
+    def _page_selected(self, index: int) -> None:
+        """Show a page and let it bring itself current.
+
+        This is the lazy half of §19.2's amendment: a page that has never been
+        looked at has never computed, and a page whose inputs have not moved
+        does nothing when it is looked at again.
+        """
+        self.stack.setCurrentIndex(index)
+        page = self.stack.widget(index)
+        if page is not None:
+            page.ensure_current()
+
+    def current_page(self):
+        return self.stack.currentWidget()
 
     def chart_type(self, type_id: int) -> None:
         """Re-point the one chart window and bring it forward."""
@@ -119,13 +137,42 @@ class DeskWindow(QMainWindow):
         self.show_page("CHARTS")
 
     # -- refresh -----------------------------------------------------------
-    def refresh(self) -> None:
-        """Re-read local data. This cannot cause an ESI fetch (see module docstring)."""
+    def tick(self) -> None:
+        """The timer's job: notice whether anything on disk actually moved.
+
+        Cheap by construction. It stats the lake and the operator's config
+        files and compares the key; only if that key moved does it pay for a
+        full `load_desk`. Daily bars change once a day, so on almost every tick
+        this does nothing but restamp the status bar — which is the point, and
+        the reason the old 60-second full rescan was modelling the timer rather
+        than the data.
+        """
+        if desk_input_key(self.config, self.region_id) == self.data.input_key:
+            self._update_status()
+            return
+        self.reload()
+
+    def reload(self) -> None:
+        """Re-read local data and recompute the visible page.
+
+        This cannot cause an ESI fetch (see the module docstring). Pages that
+        are not on screen take the new data and recompute when next looked at.
+        """
         self.data = load_desk(self.config, region_id=self.region_id)
         for page in self.pages.values():
             page.refresh(self.data)
         self._apply_banner()
         self._update_status()
+        page = self.current_page()
+        if page is not None:
+            page.ensure_current()
+
+    def refresh(self) -> None:
+        """Explicit operator refresh (F5): recompute the visible page now."""
+        self.reload()
+        page = self.current_page()
+        if page is not None:
+            page.ensure_current(force=True)
 
     def _backtest_verdict(self) -> dict | None:
         from ..report import _latest, _load

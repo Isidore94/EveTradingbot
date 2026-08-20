@@ -175,11 +175,25 @@ def test_sorting_never_refetches(qtbot, desk, monkeypatch):
     assert calls == [], "a header click is a view operation, never a reload"
 
 
+def settled(qtbot, page, timeout=120_000):
+    """Bring a page current and wait for the worker, if it has one.
+
+    Heavy pages no longer compute in `build()` (§19.2 amended), so a test that
+    constructs one and reads its table is asserting against an empty widget.
+    This is how a test says "now do the work".
+    """
+    page.ensure_current(force=True)
+    if page.heavy:
+        qtbot.waitUntil(lambda: page._running_token is None, timeout=timeout)
+    return page
+
+
 def test_the_board_prints_friction_and_never_hides_a_row(qtbot, desk):
     from evescreener.gui.pages.board import BoardPage
 
     page = BoardPage(desk)
     qtbot.addWidget(page)
+    settled(qtbot, page)
     assert page.table.rowCount() > 0
     assert "friction %" in [
         page.table.horizontalHeaderItem(index).text() for index in range(page.table.columnCount())
@@ -192,6 +206,7 @@ def test_the_thin_badge_reaches_the_board(qtbot, desk):
 
     page = BoardPage(desk)
     qtbot.addWidget(page)
+    settled(qtbot, page)
     badges = set()
     for index in range(page.table.rowCount()):
         payload = page.table.payload(index)
@@ -339,6 +354,7 @@ def test_the_scanner_prints_an_honest_zero_per_setup(qtbot, desk):
     ]
     page = ScannerPage(desk)
     qtbot.addWidget(page)
+    settled(qtbot, page)
     texts = [
         child.text()
         for child in page.blocks.findChildren(type(page.summary))

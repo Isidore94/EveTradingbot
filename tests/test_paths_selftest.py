@@ -225,3 +225,26 @@ def test_checkpoint_truncates_the_wal(paths):
     assert result["busy"] == 0
     assert wal.stat().st_size == 0, "a truncating checkpoint must reclaim the space"
     db.close()
+
+
+def test_the_cost_model_check_follows_the_operator_skills_not_accounting_v(repo_root, tmp_path):
+    """It used to hardcode 3.375%, which asserts a skill level, not arithmetic.
+
+    The operator trained Accounting V and Broker Relations IV, so the pinned
+    value happened to hold — but anyone who has not trained Accounting to V
+    would have seen `selftest` fail on a correct install.
+    """
+    from evescreener.config import load_config
+
+    body = (repo_root / "config.example.toml").read_text()
+    body = body.replace("accounting_level = 5", "accounting_level = 3")
+    body = body.replace("broker_relations_level = 5", "broker_relations_level = 2")
+    body = body.replace('data_dir = "./data"', f'data_dir = "{(tmp_path / "d").as_posix()}"')
+    live = tmp_path / "config.toml"
+    live.write_text(body, encoding="utf-8")
+
+    checks = run_selftest(load_config(live), repo_root=repo_root)
+    cost = next(check for check in checks if check.name == "cost model")
+    assert cost.ok, cost.detail
+    # 7.5 x (1 - 0.11 x 3) = 5.025 ; 3.0 - 0.3 x 2 - 0.5 = 1.9
+    assert "5.0250%" in cost.detail and "1.9000%" in cost.detail

@@ -21,7 +21,6 @@ from evescreener.universe import (
     dropped_type_ids,
     index_eligible_type_ids,
     liquidity_table,
-    seed_watchlist,
     sync_universe,
     thin_type_ids,
     tier_badge,
@@ -271,16 +270,6 @@ def test_watchlist_resolution_names_the_unresolvable(db):
     resolved, unresolved = resolve_watchlist(db, ["Tritanium", "Rifter Mk III"])
     assert resolved == {"Tritanium": 34}
     assert unresolved == ["Rifter Mk III"]
-
-
-def test_watchlist_entries_are_never_auto_removed(db, config):
-    db.replace_types([(34, "Tritanium", 1857, 0.01, 0.01, 1)])
-    resolved, _ = resolve_watchlist(db, list(config.universe.watchlist))
-    seed_watchlist(db, config, resolved)
-    count = db.conn.execute("SELECT COUNT(*) AS n FROM watchlist").fetchone()["n"]
-    assert count == 50, "every operator name is recorded, resolvable or not"
-    seed_watchlist(db, config, {})
-    assert db.conn.execute("SELECT COUNT(*) AS n FROM watchlist").fetchone()["n"] == 50
 
 
 def test_cohort_scope_walks_to_the_nearest_big_enough_ancestor(db):

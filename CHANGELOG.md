@@ -5,6 +5,93 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The desk stops computing on the thread that draws it
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §19.2 (amended) and §17 D-24…D-28.
+`uv run pytest -q` → **544 passed, 7 deselected**, ruff check + format clean,
+selftest **12/12**.
+
+### The measurement that forced it
+
+Against the operator's real universe — 2,947 tracked types, 4,052,335 bars:
+
+| stage | before |
+|---|---:|
+| `load_desk()` | 5.6 s |
+| BOARD `build()` | **56.5 s** |
+| SCANNER `build()` | **145.9 s** |
+| LEARNING `build()` | 9.1 s |
+| **open to interactive** | **217 s** |
+
+Every page was constructed in `DeskWindow.__init__`, and `ScannerPage`
+called the whole scan engine from inside `build()`. `DeskPage.refresh()` then
+called the same code for all eight pages on a **60-second** timer, on the GUI
+thread. The desk opened in 3.6 minutes and was permanently behind its own
+timer afterwards.
+
+The earlier build validated the desk on 2,001 types and a 1.85M-bar lake —
+about half the work — which is why this only appeared on first contact with a
+full census.
+
+### The contract, now recorded in §19.2
+
+**The GUI thread never computes; it paints.**
+
+- **Lazy pages.** `build()` lays out widgets and computes nothing. The window
+  opens on MARKET; BOARD, SCANNER and LEARNING compute on first visit and on
+  explicit refresh. A test asserts the scan entry point is not called during
+  construction.
+- **`compute` / `paint` split.** `heavy = True` pages compute on a
+  `QThreadPool` worker and paint on the GUI thread. A test asserts the two
+  actually run on different threads.
+- **Last-good-on-failure.** A worker exception is *delivered*, not raised: the
+  last completed result stays on screen under `could not compute: … — showing
+  the HH:MM result`. A blanked panel would be worse than a stale one, because
+  a blank reads as "nothing here" (§5).
+- **Cache keyed on inputs, not on the clock.** `desk_input_key` stats the lake
+  and book partitions and the four operator-editable config files. Daily bars
+  change once a day; a 60-second full rescan was modelling the timer rather
+  than the data.
+- **Workers open their own SQLite connection** (`DeskData.thread_local_db`),
+  because sqlite3 connections belong to the thread that opened them.
+- `desk_input_key` lives in `gui/data.py`, which still imports no Qt; only the
+  worker needs Qt and only the worker is in `gui/work.py`.
+
+### Measured after
+
+| | before | after |
+|---|---|---|
+| open to interactive | 217 s | **8.6 s** |
+| timer tick, unchanged inputs | full 217 s rescan | **15 ms** |
+| revisit an already-computed page | full recompute | **0.000 s** |
+| first visit to SCANNER | blocking | 162.8 s, off-thread, stamped |
+| first visit to BOARD | blocking | 63.5 s, off-thread, stamped |
+
+Nothing about §3.2 changes. The desk still has no ESI client and no way to
+acquire one; a background thread cannot make a local read unsafe.
+
+### Four small items closed in the same pass
+
+- **`verdict_banner` no longer returns an empty string when no study is
+  stored** (§17 D-25). `data/` is gitignored, so a fresh clone had **no
+  banner at all** on MARKET and SCANNER — a desk that had never measured
+  anything looked exactly like one that measured and passed. It now says
+  `Backtest verdict UNKNOWN — no study has run on this machine`.
+- **The patch-notes watcher dedupes on the article URL** as well as on
+  (date, label) (§17 D-26). CCP re-dated *Patch Notes - Version 24.01* and it
+  landed twice under one source URL; the watcher runs daily, so the operator
+  would have been asked to confirm one patch twice. The duplicate row is gone
+  and seven distinct candidates remain.
+- **`selftest`'s cost-model check derives tax and fee from config** (§17
+  D-27) instead of hardcoding Accounting V's 3.375%, which asserted a skill
+  level rather than the arithmetic.
+- **`universe.seed_watchlist` is deleted** (§17 D-28). Nothing in `src/` ever
+  called it; the §11 D4 roster was seeded through the documented `watch add`
+  path on 2026-08-20 — 50 names, 50 resolved, 0 unresolved — and those entries
+  are operator-owned and removable only by `watch remove`. An automatic
+  seeder was deliberately not wired in: a re-seed would resurrect a name the
+  operator had deliberately removed.
+
 ## 2026-08-20 — FORGE stops printing other people's typos
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §17 D-22, D-23. `uv run pytest -q`

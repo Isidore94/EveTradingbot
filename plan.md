@@ -1151,6 +1151,11 @@ this document's prior text is recorded here with its reason.
 | D-21 | **`selftest` gained a twelfth check: the `X-Compatibility-Date` pin must be at least one full day past on CCP's UTC-11 clock.** `timeutil.esi_compatibility_today` is the one place that clock is computed. | **Salvaged 2026-08-20 from branch `claude/phase-0-gate-checklist-oucoil` (commit a7f5872)** — a parallel Phase-0 build that ran against live ESI and measured the rejection above. That branch is preserved as tag `archive/phase-0-first-light`. This head pinned `2026-08-18` with **no guard**: the value happens to be sendable today, but nothing stopped the next bump from naming a future date and taking every route down at once. ESI would accept a pin equal to its own UTC-11 date; the check demands a full extra day so a pin cannot clear offline and then fail mid-run as the UTC-11 clock rolls. The §11 D2 *decision* (pinned, never floated) is untouched, and so is the pinned value. |
 | D-22 | **Member daily returns are winsorized before they reach the index**, mirroring the ATR path's TR clamp: each member's return is clipped at `k ×` its own rolling median absolute return (`composite_return_clamp_k` = 8.0, `_window` = 60, `_floor` = 0.20), with clamped-day counts carried in every index's diagnostics. Returns are also computed **explicitly** rather than by `pct_change`, so a member needs a real bar on both `t-1` and `t` to contribute at all. | **Measured 2026-08-20 on the operator's own lake.** FORGE had run **1,000 → 69,243** with single-day prints of **+1,661%** (2026-08-02), +94% and +57%. Decomposition named the cause exactly: on 2026-08-02 a single member — *Vanguard Resonant Cypher*, type 95640 — printed `close 10.07 → 22,450.00`, a **+222,839.4%** return, at a 0.75% live weight, contributing **+1,661.59%** of the +1,661.37% the index moved. All 100 members were priced that day, so no gap or NaN path was involved. **The chain-link was never at fault** — §19.1's churn fixture is correct and stayed green throughout. The poison was upstream: `returns = closes.pct_change()` consumed **raw** closes, and §0 check #4 had already measured that CCP does not filter outlier prints. The ATR path had clamped for that exact reason since Phase 2; the index path never did. A spike does not cancel when it reverts, because an arithmetic weighted-return index can gain 222,839% and can only ever give back 100%. **Consequence for RRS:** `power_index = Δref/ATR_ref` measured **1,478**, which swamped every type's own term and left every printed RRS in a −1,479 band — and, because RRS is one of the four gates, the digest reported an honest zero that was really a broken gate. Post-fix: FORGE runs 1,000 → **981** over 415 bars, median |daily move| **0.34%**, max **2.08%**; `power_index` = **−3.28**; and the digest finds **25** candidates. Fixtures were regenerated first per §11 D5 — including a real-data fixture that reproduces the 2026-08-02 day and a test that disables the clamp to prove the clamp is what fixes it. The existing golden index fixture needed **no** regeneration: on clean data the clamp touches nothing, which is the strongest available evidence that it is surgical. |
 | D-23 | **A composite's `high == low == close` is documented in `composite.py` as a deliberate close-to-close volatility proxy**, not an oversight. | An index level is one number per day and has no intraday range, so `atr.true_range` on a composite reduces to |Δclose|. That is the honest reading and it is what the RRS power index wants — but it is structurally smaller than a ranged instrument's ATR, so `power_index` runs larger against a composite than against SPY upstream. Post-fix it sits at −3.28; a test now fails if it ever reaches the hundreds again. |
+| D-24 | **§19.2 gains a threading contract: the GUI thread never computes, it paints.** Lazy pages, a `compute`/`paint` split on a worker thread, last-good-on-failure with a visible stamp, and recomputation keyed on input fingerprints rather than on a timer. | **Measured on the operator's desk 2026-08-20.** The desk took **217 s** to open against 2,947 tracked types and 4,052,335 bars — `ScannerPage` 145.9 s and `BoardPage` 56.5 s, both synchronous inside `build()` — and a 60 s timer re-ran all of it, so it never became interactive. The earlier build validated the desk on 2,001 types and a 1.85M-bar lake, about half the work, which is why this only appeared now. After: **8.6 s to interactive**, a **15 ms** timer tick, and **0.000 s** to revisit a computed page. Nothing about §3.2 changes — the desk still cannot fetch, and a worker thread cannot make a local read unsafe. |
+| D-25 | **`verdict_banner` renders an explicit UNKNOWN banner when no study is stored**, where it previously returned an empty string. | `data/` is gitignored, so a fresh clone has no `backtest-*.json` and MARKET and SCANNER carried **no warning at all** — a desk that has never measured anything looked exactly like one that measured and passed. UNKNOWN never gets to look like a pass (§4). |
+| D-26 | **The patch-notes watcher dedupes candidates on the article URL as well as on (date, label).** | Measured 2026-08-20: `config/anchors.jsonl` held *Patch Notes - Version 24.01* on both 08-19 and 08-20 under an identical source URL, because CCP re-dated the article. The watcher runs daily, so the operator would have been asked to confirm one patch twice, and confirming both would anchor twice on one event. The duplicate row was removed. |
+| D-27 | **`selftest`'s cost-model check derives the expected tax and fee from config** instead of hardcoding Accounting V's 3.375%. | The pinned constant asserted a *skill level*, not the arithmetic. It happened to hold for this operator (Accounting V, Broker Relations IV) and would have failed anyone who had not trained Accounting to V, on a correct install. |
+| D-28 | **`universe.seed_watchlist` is deleted.** | It read `config.universe.watchlist` and resolved all 50 §11 D4 names, and **nothing in `src/` ever called it** — only the tests did. The roster was seeded through the documented `watch add` path on 2026-08-20 (50 resolved, 0 unresolved) and those entries are operator-owned. Wiring an automatic seeder was deliberately not done: a re-seed would resurrect a name the operator had removed, which is §11 D4's never-auto-removed rule failing in the other direction. |
 
 ### §0 named checks — status after this build
 
@@ -1270,6 +1275,35 @@ way to acquire one, and a test proves no module under `gui/` imports `httpx`,
 `urllib` or anything named `esi`. A UI timer may re-read local data freely;
 nothing on the desk can cause a fetch before `Expires` (§3.2). The desk
 therefore **shows** staleness rather than curing it.
+
+**The GUI thread never computes; it paints** (amended 2026-08-20, §17 D-24).
+The original design built every page in `DeskWindow.__init__` and refreshed
+all eight on a 60-second timer. On the operator's first real universe — 2,947
+tracked types over 4,052,335 bars — that measured **217 seconds to open**,
+145.9 s of it inside `ScannerPage` and 56.5 s inside `BoardPage`, on the
+thread that draws the window; the timer then asked for all of it again every
+60 s. The desk opened in 3.6 minutes and never became interactive. Four rules
+now hold:
+
+* **Pages are lazy.** `build()` lays out widgets and computes nothing. The
+  window opens on MARKET and is interactive in seconds; BOARD, SCANNER and
+  LEARNING compute on first visit and on an explicit refresh.
+* **Heavy work runs off-thread.** A page declaring `heavy = True` splits into
+  `compute(data)` (pure, worker thread, no Qt) and `paint(result)` (GUI
+  thread). While work is in flight the page shows its **last completed
+  result** under a `computing… (showing the HH:MM result)` stamp, and a
+  failure keeps that result and says why — last-good-on-failure, never a
+  blanked panel, because a blank reads as "nothing here".
+* **Recomputation is keyed on inputs**, not on the clock: lake and book file
+  stats plus the mtimes of `setups.jsonl`, `reasons.jsonl`, `sectors.jsonl`
+  and `anchors.jsonl`. **Daily bars change once a day** — a 60-second full
+  rescan was modelling the timer rather than the data. The timer now stats
+  those files (~15 ms) and only pays for a reload when the key moves.
+* **Workers open their own database connection.** sqlite3 connections belong
+  to the thread that opened them.
+
+Measured after: **8.6 s to interactive**, a 15 ms timer tick, and a revisit to
+an already-computed page at **0.000 s**.
 
 **No candlesticks.** The bar contract has no `open` and none is synthesized
 (§4). Price is a line with the measured high/low envelope — the honest

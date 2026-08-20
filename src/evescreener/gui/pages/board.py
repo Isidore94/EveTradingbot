@@ -36,13 +36,15 @@ HEADERS = [
 
 class BoardPage(DeskPage):
     title = "BOARD"
+    heavy = True
 
     def build(self) -> None:
         bar = QWidget()
         row = QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
         self.watch_only = QCheckBox("watchlist only")
-        self.watch_only.toggled.connect(self.repopulate)
+        self._watch_only = False
+        self.watch_only.toggled.connect(self._watch_only_toggled)
         self.buy = QPushButton("Paper buy")
         self.buy.setEnabled(False)
         self.buy.clicked.connect(self._buy)
@@ -65,25 +67,36 @@ class BoardPage(DeskPage):
 
         self.footer = QLabel("")
         self.layout.addWidget(self.footer)
-        self.repopulate()
 
-    def repopulate(self) -> None:
-        data = self.data
+    def _watch_only_toggled(self, checked: bool) -> None:
+        """The filter changes the computation, so it re-runs off-thread.
+
+        The flag is copied to a plain attribute here, on the GUI thread,
+        because `compute` may not touch a Qt object.
+        """
+        self._watch_only = bool(checked)
+        self.ensure_current(force=True)
+
+    def compute(self, data):
         frame = data.bars
-        if self.watch_only.isChecked() and data.watch_ids and not data.all_bars.empty:
+        if self._watch_only and data.watch_ids and not data.all_bars.empty:
             frame = data.all_bars[data.all_bars["type_id"].isin(sorted(data.watch_ids))]
-        board = build_board(
-            data.config,
-            data.db,
-            frame,
-            getattr(data.composite, "frame", None),
-            data.book,
-            watch_ids=data.watch_ids,
-            anchor_dates=data.anchor_dates,
-            region_id=data.region_id,
-            now=data.loaded_at,
-            top=400,
-        )
+        with data.thread_local_db() as db:
+            return build_board(
+                data.config,
+                db,
+                frame,
+                getattr(data.composite, "frame", None),
+                data.book,
+                watch_ids=data.watch_ids,
+                anchor_dates=data.anchor_dates,
+                region_id=data.region_id,
+                now=data.loaded_at,
+                top=400,
+            )
+
+    def paint(self, board) -> None:
+        data = self.data
         rows, payloads = [], []
         for record in board.rows:
             name = record.get("type_name") or f"type {record['type_id']}"

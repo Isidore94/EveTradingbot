@@ -165,6 +165,7 @@ def _cell(value, spec: str):
 
 class ScannerPage(DeskPage):
     title = "SCANNER"
+    heavy = True
 
     def build(self) -> None:
         self.banner = BannerLabel()
@@ -175,13 +176,11 @@ class ScannerPage(DeskPage):
         self.blocks_layout = QVBoxLayout(self.blocks)
         self.layout.addWidget(self.blocks, 1)
         self.result = None
-        self.repopulate()
 
     def set_banner(self, text: str) -> None:
         self.banner.set_banner(text)
 
-    def repopulate(self) -> None:
-        data = self.data
+    def compute(self, data):
         sector_frames = {}
         if data.index_set is not None:
             sector_frames = {
@@ -189,19 +188,23 @@ class ScannerPage(DeskPage):
                 for ticker, composite in data.index_set.sectors.items()
                 if composite.known
             }
-        self.result = run_scan(
-            data.config,
-            data.db,
-            data.bars,
-            getattr(data.composite, "frame", None),
-            data.book,
-            setups=data.setups,
-            sectors=data.sectors,
-            sector_frames=sector_frames,
-            anchor_dates=data.anchor_dates,
-            region_id=data.region_id,
-            now=data.loaded_at,
-        )
+        with data.thread_local_db() as db:
+            return run_scan(
+                data.config,
+                db,
+                data.bars,
+                getattr(data.composite, "frame", None),
+                data.book,
+                setups=data.setups,
+                sectors=data.sectors,
+                sector_frames=sector_frames,
+                anchor_dates=data.anchor_dates,
+                region_id=data.region_id,
+                now=data.loaded_at,
+            )
+
+    def paint(self, result) -> None:
+        self.result = result
         self.summary.setText(
             f"{self.result.evaluated} of {self.result.universe} names had enough bars "
             "to evaluate. Every hit prints its own friction and the age of the book "

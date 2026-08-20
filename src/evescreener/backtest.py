@@ -705,16 +705,27 @@ def verdict_banner(backtest_verdict: dict | None) -> str:
     One function, so the digest, the MARKET page and the SCANNER page carry
     the **same wording**. A banner that is phrased differently in two places
     reads as two different findings.
+
+    **A missing study is UNKNOWN, and UNKNOWN gets a banner.** `data/` is
+    gitignored, so a fresh clone has no stored verdict at all — and this used
+    to return an empty string, which renders as *no warning*. A surface that
+    has never measured anything must not look identical to one that measured
+    and passed; that is the exact invariant failure this system exists to
+    avoid (plan.md §4).
     """
-    if not backtest_verdict:
-        return ""
-    verdicts = {
-        horizon: judgement.get("verdict")
-        for horizon, judgement in backtest_verdict.items()
-        if isinstance(judgement, dict)
-    }
+    verdicts = {}
+    if backtest_verdict:
+        verdicts = {
+            horizon: judgement.get("verdict")
+            for horizon, judgement in backtest_verdict.items()
+            if isinstance(judgement, dict)
+        }
     if not verdicts:
-        return ""
+        return (
+            "⚠ **Backtest verdict UNKNOWN — no study has run on this machine.** "
+            "Run `backtest` to measure it. Nothing below has been checked against "
+            "a historical result, and an absent study is not a passing one."
+        )
     if any(value == "PLAUSIBLE" for value in verdicts.values()):
         return ""
     if all(value == "UNKNOWN" for value in verdicts.values()):

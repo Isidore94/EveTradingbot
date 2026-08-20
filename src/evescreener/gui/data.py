@@ -30,7 +30,46 @@ from ..store.db import Database
 from ..store.lake import BarLake, BookLake
 from ..timeutil import ensure_utc, parse_iso, utcnow
 
-__all__ = ["DeskData", "load_desk"]
+__all__ = ["DeskData", "desk_input_key", "load_desk"]
+
+
+def _stat_key(path: Path) -> tuple:
+    """`(size, mtime_ns)` for a file, or a marker that it is absent.
+
+    Deliberately a stat and not a hash: the lake is hundreds of megabytes and
+    this runs on a timer. A rewritten-but-identical Parquet file would read as
+    changed, which costs one recompute — the failure that matters is the other
+    direction, and stat never misses a real write.
+    """
+    try:
+        info = path.stat()
+    except OSError:
+        return ("absent",)
+    return (int(info.st_size), int(info.st_mtime_ns))
+
+
+def desk_input_key(config, region_id: int, *, root: Path | None = None) -> tuple:
+    """Everything a page's computation depends on, cheaply.
+
+    Bars, the book snapshot, the operator's setups and reason vocabulary, and
+    the newest order-book sweep. No Parquet is parsed and no index is built —
+    this has to be affordable every 60 seconds.
+    """
+    root = root or Path.cwd()
+    paths = config.paths
+    parts: list[tuple] = [("region", int(region_id))]
+
+    for directory, pattern in ((paths.bars, "**/*.parquet"), (paths.books, "**/*.parquet")):
+        try:
+            found = sorted(Path(directory).glob(pattern))
+        except OSError:
+            found = []
+        parts.append(tuple((str(item.name), _stat_key(item)) for item in found))
+
+    for name in ("setups.jsonl", "reasons.jsonl", "sectors.jsonl", "anchors.jsonl"):
+        parts.append((name, _stat_key(root / "config" / name)))
+
+    return tuple(parts)
 
 
 @dataclass(slots=True)
@@ -53,6 +92,21 @@ class DeskData:
     tiers: dict[int, str] = field(default_factory=dict)
     watch_ids: set[int] = field(default_factory=set)
     notes: list[str] = field(default_factory=list)
+
+    #: Cheap fingerprint of everything a page's computation depends on
+    #: (`gui/work.desk_input_key`). Pages recompute only when it moves.
+    input_key: tuple = ()
+
+    # -- threads -----------------------------------------------------------
+    def thread_local_db(self) -> Database:
+        """A fresh connection for a worker thread.
+
+        sqlite3 connections belong to the thread that opened them, so a page
+        computing off the GUI thread opens its own and closes it when done.
+        The work is read-only against a WAL database, and concurrent readers
+        are exactly what WAL is for.
+        """
+        return Database(self.config.paths.db)
 
     # -- names -------------------------------------------------------------
     def type_name(self, type_id: int) -> str:
@@ -204,4 +258,5 @@ def load_desk(
         },
         watch_ids=set(watchlist_type_ids(db)),
         notes=notes,
+        input_key=desk_input_key(config, region, root=root),
     )

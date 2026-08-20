@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .config import Config
 from .esi.client import TYPES_FEED, EsiClient
 from .store.db import Database
 from .store.lake import BarLake
@@ -408,21 +407,6 @@ def dropped_type_ids(db: Database, region_id: int) -> list[int]:
             (region_id,),
         )
     ]
-
-
-def seed_watchlist(db: Database, config: Config, resolved: dict[str, int]) -> None:
-    """Record the operator watchlist. Entries here are NEVER auto-removed."""
-    now = iso(utcnow())
-    with db.transaction() as conn:
-        for name in config.universe.watchlist:
-            type_id = resolved.get(name)
-            conn.execute(
-                "INSERT INTO watchlist(name, type_id, added_at, resolved_at, note)"
-                " VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET"
-                " type_id=COALESCE(excluded.type_id, watchlist.type_id),"
-                " resolved_at=COALESCE(excluded.resolved_at, watchlist.resolved_at)",
-                (name, type_id, now, now if type_id else None, None),
-            )
 
 
 def watchlist_type_ids(db: Database) -> list[int]:

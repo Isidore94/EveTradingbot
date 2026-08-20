@@ -119,22 +119,36 @@ def sync_anchor_candidates(
 ) -> list[PatchNote]:
     """Append genuinely new notes as UNCONFIRMED candidates. Returns what was added.
 
-    A note already present in the calendar on the same date is skipped, so
+    A note already present in the calendar on the same date, or under the
+    same article URL, is skipped, so
     running the watcher daily does not grow the file without bound.
     """
-    existing = {
-        (anchor.anchor_date, anchor.label.strip().lower()) for anchor in load_anchors(calendar)
+    calendar_anchors = load_anchors(calendar)
+    existing = {(anchor.anchor_date, anchor.label.strip().lower()) for anchor in calendar_anchors}
+    existing_dates = {anchor.anchor_date for anchor in calendar_anchors}
+    # The article URL is the identity of the EVENT; the date is only where CCP
+    # last filed it. Without this, an article CCP re-dates is appended a second
+    # time as a candidate for something that happened once — and the watcher
+    # runs daily, so the operator would confirm one patch twice.
+    existing_sources = {
+        source.strip().lower()
+        for source in (getattr(anchor, "source", "") or "" for anchor in calendar_anchors)
+        if source.strip()
     }
-    existing_dates = {anchor.anchor_date for anchor in load_anchors(calendar)}
     added: list[PatchNote] = []
     for note in notes:
         if market_relevant_only and not _INTERESTING.search(note.title):
             continue
         key = (note.published, note.title.strip().lower())
+        source = (note.link or "").strip().lower()
         if key in existing or note.published in existing_dates:
+            continue
+        if source and source in existing_sources:
             continue
         append_candidate(calendar, note.as_anchor())
         existing.add(key)
         existing_dates.add(note.published)
+        if source:
+            existing_sources.add(source)
         added.append(note)
     return added

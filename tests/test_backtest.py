@@ -388,3 +388,36 @@ def test_a_directionless_setup_says_so_plainly():
 
 def test_a_plausible_verdict_needs_no_excuse():
     assert "gross_context" not in verdict(stats())
+
+
+# -- the banner when nothing has been measured ------------------------------
+
+
+def test_a_missing_study_renders_an_explicit_unknown_banner():
+    """`data/` is gitignored, so a fresh clone has no stored verdict.
+
+    This used to return an empty string, which renders as *no warning at all* —
+    a desk that has never measured anything looking exactly like one that
+    measured and passed. UNKNOWN never gets to look like a pass (plan.md §4).
+    """
+    from evescreener.backtest import verdict_banner
+
+    for absent in (None, {}, {"10": "not a dict"}):
+        banner = verdict_banner(absent)
+        assert banner, f"{absent!r} produced no banner"
+        assert "UNKNOWN" in banner
+        assert "no study has run on this machine" in banner
+
+
+def test_a_plausible_verdict_still_silences_the_banner():
+    """Guards the guard: the banner is a warning, not decoration."""
+    from evescreener.backtest import verdict_banner
+
+    assert verdict_banner({"10": {"verdict": "PLAUSIBLE"}}) == ""
+
+
+def test_not_plausible_keeps_its_exact_wording():
+    from evescreener.backtest import verdict_banner
+
+    banner = verdict_banner({"10": {"verdict": "NOT PLAUSIBLE"}})
+    assert "NOT PLAUSIBLE at every horizon" in banner

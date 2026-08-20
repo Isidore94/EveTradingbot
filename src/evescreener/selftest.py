@@ -130,7 +130,22 @@ def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
     from .costs import CostModel
 
     model = CostModel.from_config(config)
-    tax_ok = abs(model.sales_tax_pct - 3.375) < 1e-9
+    # Derived from the operator's own skills, not pinned to Accounting V.
+    # Hardcoding 3.375% meant this check silently asserted a skill level rather
+    # than the arithmetic, and would have failed anyone who has not trained it.
+    costs = config.costs
+    expected_tax = costs.sales_tax_base_pct * (
+        1.0 - costs.sales_tax_per_level_reduction * costs.accounting_level
+    )
+    expected_broker = (
+        costs.broker_fee_base_pct
+        - costs.broker_fee_per_level_pct * costs.broker_relations_level
+        - costs.broker_fee_standings_pct
+    )
+    tax_ok = (
+        abs(model.sales_tax_pct - expected_tax) < 1e-9
+        and abs(model.broker_fee_pct - expected_broker) < 1e-9
+    )
     checks.append(
         Check(
             "cost model",

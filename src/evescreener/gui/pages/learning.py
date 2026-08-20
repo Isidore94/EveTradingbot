@@ -53,6 +53,7 @@ def _num(value, spec="+.2f"):
 
 class LearningPage(DeskPage):
     title = "LEARNING"
+    heavy = True
 
     def build(self) -> None:
         self.headline = QLabel("")
@@ -79,15 +80,13 @@ class LearningPage(DeskPage):
         self.footer = QLabel("")
         self.footer.setWordWrap(True)
         self.layout.addWidget(self.footer)
-        self.repopulate()
 
-    def repopulate(self) -> None:
+    def compute(self, data):
         from ...backtest import measure_haircuts
         from ...paper import PaperLedger
 
-        data = self.data
         ledger = PaperLedger(data.config.paths.paper_ledger, data.config)
-        report = build_learning_report(
+        return build_learning_report(
             data.config,
             ledger,
             bars=data.all_bars,
@@ -96,6 +95,8 @@ class LearningPage(DeskPage):
             vocabulary=data.vocabulary,
             now=data.loaded_at,
         )
+
+    def paint(self, report) -> None:
         self.headline.setText(
             f"{report.closed_trades} closed trade(s), {report.recorded_passes} recorded "
             f"pass(es). A read needs {MIN_SAMPLES_FOR_A_READ}."

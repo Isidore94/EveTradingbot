@@ -1089,6 +1089,8 @@ and expectations written above. Each is cited where it changes a decision.
 | Tracked types whose ATR would be >2× too large without winsorization | **20.5%** (p99 143× too large, worst 2,433×) |
 | Backtest, 10-day horizon, 0.25B tier | gross **+3.08%** (win rate 53.7%) against **~16% friction at 1× haircut / ~29% at 2×** → net **−21.8%**, verdict **NOT PLAUSIBLE** |
 | Lead-lag study, best lag | **ρ=0.052** at 1 day vs participation (p=3e-65, n=108,586); placebo ρ=0.032 — **DOES NOT SURVIVE** |
+| Round-trip taker friction at 0.25B, all fillable types (n=6,672) | min 0.00% · p1 **2.17%** · p5 5.34% · p50 **33.61%**. Types below 1% friction: **27**; below 2%: 55; below 5%: 285 |
+| Round-trip friction among the **tracked** types (n=315) | min **0.062%** · p1 1.21% · p5 2.43% · p50 **9.54%**. Only **2 types (0.63%)** sit under the ~0.78% that the measured 20-day gross edge of 4.15% could absorb after the 3.375% sales tax: *100MN Afterburner II* (0.062%) and *Mexallon* (0.767%) |
 | Cross-region at 0.25B after real PushX freight and tax | **14 routes** clear costs of **151,123** pairs considered; best **+14.44%** net (Electronic Parts, Dodixie→Hek) |
 | Secondary hub sweeps | Domain 181,540 orders / 15,510 types; Sinq Laison 121,872 / 14,249; Metropolis 118,993 / 11,272; Heimatar 72,572 / 10,729 — all complete |
 
@@ -1097,6 +1099,15 @@ operator's question: **the long tail of EVE's item catalogue is not a market**,
 it is a list of things with a bid and an ask that are nowhere near each other.
 Any claim about "thousands of opportunities" has to survive the fact that only
 ~932 Forge types trade inside a 5% spread at all, before costs.
+
+And the friction row above is the sharpest form of the answer. The setup's
+measured 20-day gross edge is **4.15%**; after the 3.375% sales tax it can
+absorb roughly **0.78%** of round-trip spread-and-depth cost. Among the 315
+tracked types with a measurable book at 0.25B, **two** are that tight. The
+open question §13's verdict leaves — "is there a subset where this works?" —
+therefore has a measured scope, and the scope is two names. Two names is not a
+strategy. Any follow-up study should start from that number rather than from
+the hope that the subset is large.
 
 
 

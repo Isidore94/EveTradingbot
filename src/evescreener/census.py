@@ -47,6 +47,11 @@ FLOOR_GRID_ORDERS = (0, 1, 5, 10, 30, 50, 100)
 # discussion actually turns on; the tails are there to show the shape.
 PERCENTILES = (0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
 
+# Round-trip friction thresholds worth counting outright. A strategy's gross
+# edge has to clear its friction plus sales tax, so "how many types are below
+# X%" is the question that scopes every later idea.
+HAIRCUT_THRESHOLDS = (0.5, 1.0, 2.0, 3.0, 5.0, 10.0)
+
 
 @dataclass(slots=True)
 class CensusResult:
@@ -182,10 +187,15 @@ def _haircut_percentiles(book: pd.DataFrame, tiers: Sequence[float]) -> dict:
     )
     if values.empty:
         return {}
+    percent = values * 100.0
     return {
         "tier_isk": smallest,
-        "types_measured": int(len(values)),
-        **{f"p{int(q * 100)}": round(float(values.quantile(q)) * 100.0, 4) for q in PERCENTILES},
+        "types_measured": int(len(percent)),
+        "min": round(float(percent.min()), 4),
+        **{f"p{int(q * 100)}": round(float(percent.quantile(q)), 4) for q in PERCENTILES},
+        "types_below": {
+            f"{threshold}": int((percent < threshold).sum()) for threshold in HAIRCUT_THRESHOLDS
+        },
     }
 
 
@@ -439,8 +449,22 @@ def render_census(result: CensusResult) -> str:
                 "Any strategy's edge has to clear this:"
             )
             for key, value in result.haircut_percentiles.items():
-                if key.startswith("p"):
-                    lines.append(f"- {key}: {value:,.2f}%")
+                if key.startswith("p") or key == "min":
+                    lines.append(f"- {key}: {value:,.3f}%")
+            below = result.haircut_percentiles.get("types_below") or {}
+            if below:
+                lines.append("")
+                lines.append(
+                    "**How many types are tight enough at all.** Any strategy's gross "
+                    "edge must clear its friction *plus* the 3.375% sales tax, so this "
+                    "count is the ceiling on how many names any idea could ever use:"
+                )
+                measured = result.haircut_percentiles.get("types_measured", 0) or 1
+                for threshold, count in below.items():
+                    lines.append(
+                        f"- round-trip friction < {threshold}%: **{count:,}** types "
+                        f"({count / measured:.2%})"
+                    )
         if result.depth_coverage:
             lines.append("")
             lines.append(

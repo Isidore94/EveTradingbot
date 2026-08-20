@@ -25,6 +25,7 @@ from .store.db import Database
 
 TYPES_MEMBER = "types.jsonl"
 MARKET_GROUPS_MEMBER = "marketGroups.jsonl"
+SOLAR_SYSTEMS_MEMBER = "mapSolarSystems.jsonl"
 
 
 class SdeError(RuntimeError):
@@ -36,6 +37,7 @@ class SdeLoadResult:
     build: int
     types: int
     market_groups: int
+    solar_systems: int
     downloaded: bool
     bundle_path: Path
 
@@ -44,6 +46,7 @@ class SdeLoadResult:
             "build": self.build,
             "types": self.types,
             "market_groups": self.market_groups,
+            "solar_systems": self.solar_systems,
             "downloaded": self.downloaded,
             "bundle_path": str(self.bundle_path),
         }
@@ -133,6 +136,20 @@ def parse_market_groups(bundle: Path) -> list[tuple]:
     return rows
 
 
+def parse_solar_systems(bundle: Path) -> list[tuple]:
+    """Solar system -> region. This is what turns a killmail into demand data."""
+    rows: list[tuple] = []
+    with zipfile.ZipFile(bundle) as archive, archive.open(SOLAR_SYSTEMS_MEMBER) as member:
+        for line in member:
+            record = json.loads(line)
+            system_id = record.get("_key")
+            region_id = record.get("regionID")
+            if system_id is None or region_id is None:
+                continue
+            rows.append((int(system_id), int(region_id), _english(record.get("name"))))
+    return rows
+
+
 def load_sde(
     config: Config,
     db: Database,
@@ -159,6 +176,9 @@ def load_sde(
                 market_groups=db.conn.execute(
                     "SELECT COUNT(*) AS n FROM sde_market_groups"
                 ).fetchone()["n"],
+                solar_systems=db.conn.execute(
+                    "SELECT COUNT(*) AS n FROM sde_solar_systems"
+                ).fetchone()["n"],
                 downloaded=False,
                 bundle_path=config.paths.sde / f"sde-{build}-jsonl.zip",
             )
@@ -171,11 +191,13 @@ def load_sde(
         raise SdeError(f"SDE bundle {bundle} yielded no types or no market groups")
     types = db.replace_types(type_rows)
     groups = db.replace_market_groups(group_rows)
+    systems = db.replace_solar_systems(parse_solar_systems(bundle))
     db.set_meta("sde_build", str(build))
     return SdeLoadResult(
         build=build,
         types=types,
         market_groups=groups,
+        solar_systems=systems,
         downloaded=downloaded,
         bundle_path=bundle,
     )

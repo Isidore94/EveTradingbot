@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS sde_types (
 CREATE INDEX IF NOT EXISTS idx_sde_types_name ON sde_types(name);
 CREATE INDEX IF NOT EXISTS idx_sde_types_group ON sde_types(market_group_id);
 
+-- Solar system -> region, so a killmail's system id becomes a market region.
+CREATE TABLE IF NOT EXISTS sde_solar_systems (
+    solar_system_id INTEGER PRIMARY KEY,
+    region_id INTEGER NOT NULL,
+    name TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sde_systems_region ON sde_solar_systems(region_id);
+
 CREATE TABLE IF NOT EXISTS sde_market_groups (
     market_group_id INTEGER PRIMARY KEY,
     parent_group_id INTEGER,
@@ -308,6 +316,21 @@ class Database:
                 rows,
             )
             return conn.execute("SELECT COUNT(*) AS n FROM sde_market_groups").fetchone()["n"]
+
+    def replace_solar_systems(self, rows) -> int:
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM sde_solar_systems")
+            conn.executemany(
+                "INSERT INTO sde_solar_systems(solar_system_id, region_id, name) VALUES(?,?,?)",
+                rows,
+            )
+            return conn.execute("SELECT COUNT(*) AS n FROM sde_solar_systems").fetchone()["n"]
+
+    def system_region_map(self) -> dict[int, int]:
+        return {
+            int(row["solar_system_id"]): int(row["region_id"])
+            for row in self.conn.execute("SELECT solar_system_id, region_id FROM sde_solar_systems")
+        }
 
     def type_by_name(self, name: str) -> sqlite3.Row | None:
         return self.conn.execute(

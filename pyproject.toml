@@ -17,6 +17,13 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "pytest-qt>=4.4",
+]
+# The desk (plan.md §19). Optional on purpose: `daemon`, `digest` and every
+# CLI subcommand must run on a headless box with no Qt installed, and
+# tests/test_headless.py enforces that they never import it.
+gui = [
+    "pyside6>=6.7",
 ]
 
 [build-system]
@@ -41,5 +48,12 @@ testpaths = ["tests"]
 addopts = "-m 'not network'"
 markers = [
     "network: test performs live network calls (run intentionally, never in the default gate)",
+    "gui: test drives the PySide6 desk (needs the `gui` extra; runs offscreen)",
 ]
+qt_api = "pyside6"
 filterwarnings = ["error::DeprecationWarning:evescreener.*"]
+
+[dependency-groups]
+dev = [
+    "pytest-qt>=4.4",
+]

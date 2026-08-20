@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -43,3 +44,8 @@ def db(paths: DataPaths):
     database = Database(paths.db)
     yield database
     database.close()
+
+
+def pytest_configure(config):
+    """The desk is tested offscreen — never against a real display."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

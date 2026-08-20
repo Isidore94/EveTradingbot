@@ -15,11 +15,17 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
-- `uv run pytest -q` → **255 passed, 7 deselected** (network).
-- `uv run pytest -m network -q` → the live smoke path; run it deliberately.
+- `uv run pytest -q` → **317 passed, 7 deselected** (network).
+- `uv run pytest -m network -q` → **7 passed in 139 s** against real endpoints:
+  real history against the frozen bar contract, a second call skipped as
+  still-fresh, a full 415-page Forge sweep inside the token self-cap, the
+  telemetry ledger, a real digest, a real paper open priced off a live book,
+  one real day of EVE Ref killmails, and a live PushX quote.
 - `uv run ruff check .` → clean. `uv run ruff format --check .` → clean.
 - `python -m evescreener selftest` → 7/7 checks passed.
-- **14,899 LOC** (9,736 product + 1,435 vendored + 3,728 tests).
+- **16,580 LOC** (10,561 product + 1,435 vendored + 4,584 tests) — 1,580 over
+  §1's budget, authorized by operator directive 2026-08-20 and recorded in
+  §17 D-9.
 
 ## The consolidated live-validation checklist
 

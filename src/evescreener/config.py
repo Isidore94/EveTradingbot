@@ -167,6 +167,7 @@ class KillmailsConfig:
 @dataclass(frozen=True, slots=True)
 class FreightConfig:
     pushx_quote_url: str
+    hub_systems: tuple[dict, ...]
     quote_cache_minutes: int
     staleness_haircut_pct: float
     collateral_multiple: float
@@ -240,6 +241,8 @@ def _coerce(annotation: Any, value: Any, where: str) -> Any:
         if not isinstance(value, list):
             raise ConfigError(f"{where}: expected an array, got {value!r}")
         inner = text[len("tuple[") : -1].split(",")[0].strip()
+        if inner == "dict":
+            return tuple(dict(item) for item in value)
         return tuple(_coerce(inner, item, where) for item in value)
     return value
 

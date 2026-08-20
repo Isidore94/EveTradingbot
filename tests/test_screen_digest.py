@@ -1,0 +1,310 @@
+"""The screen's honest-zero behaviour and the digest's delivery contract."""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+from datetime import UTC, datetime, timedelta
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from evescreener.digest import (
+    AMBIGUOUS,
+    DELIVERED,
+    RATE_LIMITED,
+    REJECTED,
+    UNCONFIGURED,
+    build_digest,
+    post_digest,
+    split_content,
+)
+from evescreener.screen import run_screen
+from evescreener.signals.composite import build_composite
+
+NOW = datetime(2026, 8, 20, 16, 0, tzinfo=UTC)
+
+
+def bars_for(type_ids, *, bars=200, dip_at=None, seed=9):
+    rng = np.random.default_rng(seed)
+    stamps = pd.date_range("2026-01-01 11:00", periods=bars, freq="D", tz="UTC")
+    rows = []
+    for offset, type_id in enumerate(type_ids):
+        close = 1_000_000 * np.exp(np.cumsum(rng.normal(0.0, 0.01, bars)))
+        if dip_at is not None:
+            close[dip_at:] = close[dip_at:] * 0.75
+        for index, stamp in enumerate(stamps):
+            rows.append(
+                {
+                    "type_id": type_id,
+                    "region_id": 10000002,
+                    "datetime": stamp,
+                    "high": close[index] * 1.01,
+                    "low": close[index] * 0.99,
+                    "close": close[index],
+                    "volume": 100_000.0 + offset,
+                    "order_count": 400,
+                    "isk_value": close[index] * 100_000.0,
+                    "fetched_at": "2026-08-20T00:00:00+00:00",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def book_for(type_ids, *, sweep=NOW, ask=760_000.0, bid=740_000.0):
+    rows = []
+    for type_id in type_ids:
+        for side, fill in (("sell", ask), ("buy", bid)):
+            row = {
+                "type_id": type_id,
+                "region_id": 10000002,
+                "side": side,
+                "sweep_ts": sweep.isoformat(),
+                "expires_ts": None,
+                "best_price": fill,
+                "total_volume": 1e9,
+                "order_count": 40,
+                "p5_price": fill,
+                "top_order_volume_share": 0.05,
+                "station_volume_share": 1.0,
+                "partial_sweep": False,
+            }
+            for index in range(3):
+                row[f"depth_fill_price_{index}"] = fill
+                row[f"depth_fill_qty_{index}"] = 1e6
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def seeded_db(db):
+    db.replace_types([(tid, f"Type {tid}", 1857, 1.0, 1.0, 1) for tid in range(34, 50)])
+    return db
+
+
+# -- the screen -------------------------------------------------------------
+
+
+def test_an_empty_lake_screens_to_an_honest_zero(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    assert result.honest_zero
+    assert "bar lake is empty" in " ".join(result.notes)
+
+
+def test_a_dip_that_clears_costs_becomes_a_candidate(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, book_for(ids), now=NOW)
+    assert result.setups_found > 0
+    if result.candidates:
+        row = result.candidates[0]
+        assert row["net_edge_pct"] > 0
+        assert row["expected_move_pct"] > row["tier_breakevens"][0]["breakeven_move_pct"]
+        assert row["freshness"] == "fresh"
+
+
+def test_a_stale_book_is_unknown_not_priced_off_history(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    stale = book_for(ids, sweep=NOW - timedelta(hours=6))
+    result = run_screen(config, seeded_db, bars, composite, stale, now=NOW)
+    assert result.candidates == []
+    assert result.stale_book > 0
+    assert result.unknown_cost > 0
+
+
+def test_no_book_at_all_is_unknown_not_zero_cost(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, pd.DataFrame(), now=NOW)
+    assert result.candidates == []
+    assert result.unknown_cost > 0
+
+
+def test_a_setup_that_cannot_clear_breakeven_is_not_shown(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    # A 40% spread: nothing can clear this.
+    wide = book_for(ids, ask=1_400_000.0, bid=700_000.0)
+    result = run_screen(config, seeded_db, bars, composite, wide, now=NOW)
+    assert result.candidates == []
+    assert result.below_breakeven > 0 or result.unknown_cost > 0
+
+
+def test_a_spoofed_book_is_flagged(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    book = book_for(ids)
+    book.loc[book["side"] == "sell", "top_order_volume_share"] = 0.9
+    result = run_screen(config, seeded_db, bars, composite, book, now=NOW)
+    if result.candidates:
+        assert any("one order holds" in flag for flag in result.candidates[0]["flags"])
+
+
+# -- the digest -------------------------------------------------------------
+
+
+def test_split_numbers_the_parts_rather_than_truncating():
+    text = "\n".join(f"line {index} " + "x" * 100 for index in range(60))
+    parts = split_content(text, 2000)
+    assert len(parts) > 1
+    assert parts[0].startswith("(1/")
+    assert all(len(part) <= 2000 for part in parts)
+    rejoined = "".join(part.split("\n", 1)[1] for part in parts)
+    assert "line 59" in rejoined
+
+
+def test_a_single_short_message_is_not_numbered():
+    assert split_content("hello", 2000) == ["hello"]
+
+
+def test_an_over_long_line_announces_its_own_split():
+    parts = split_content("z" * 5000, 2000)
+    assert len(parts) > 1
+    assert any("line split" in part for part in parts)
+
+
+def test_honest_zero_digest_explains_itself(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    text = build_digest(config, result)
+    assert "Nothing clears costs today" in text
+    assert "could not be priced" in text
+
+
+def test_digest_warns_when_rejections_are_mostly_unknown(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, pd.DataFrame(), now=NOW)
+    text = build_digest(config, result)
+    if result.unknown_cost:
+        assert "absence of opportunity" in text
+
+
+def test_digest_carries_the_composite_diagnostics_footer(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids)
+    composite = build_composite(bars, members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, book_for(ids), now=NOW)
+    assert "composite:" in build_digest(config, result)
+
+
+def test_digest_never_mentions_everyone(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    text = build_digest(config, result)
+    assert "@everyone" not in text and "@here" not in text
+
+
+def test_an_unsurviving_lead_lag_says_so_in_the_digest(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    text = build_digest(
+        config, result, lead_lag_outcome={"outcome": "DOES NOT SURVIVE", "reason": "weak"}
+    )
+    assert "tested and not supported" in text
+
+
+# -- delivery ---------------------------------------------------------------
+
+
+class FakeResponse:
+    def __init__(self, status=204):
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def getcode(self):
+        return self.status
+
+
+def test_no_webhook_is_unconfigured_not_an_error(config, paths):
+    result = post_digest(config, "hello", archive_path=paths.digests)
+    assert result.kind == UNCONFIGURED
+    assert paths.digests.exists(), "the digest is archived even with nowhere to post it"
+
+
+def test_a_failed_publish_never_destroys_the_archive(config, paths, repo_root):
+    from evescreener.config import config_from_mapping, load_example
+
+    raw = load_example(repo_root)
+    raw["app"]["data_dir"] = str(paths.root)
+    raw["discord"]["webhook_url"] = "https://discord.example/webhook"
+    live = config_from_mapping(raw)
+
+    def opener(request, timeout=None):
+        raise urllib.error.URLError("network down")
+
+    result = post_digest(live, "content", opener=opener, archive_path=paths.digests)
+    assert result.kind == AMBIGUOUS
+    from evescreener.paths import read_jsonl
+
+    assert len(read_jsonl(paths.digests)) == 1
+
+
+def webhook_config(repo_root, paths):
+    from evescreener.config import config_from_mapping, load_example
+
+    raw = load_example(repo_root)
+    raw["app"]["data_dir"] = str(paths.root)
+    raw["discord"]["webhook_url"] = "https://discord.example/webhook"
+    return config_from_mapping(raw)
+
+
+def test_successful_delivery_reports_message_count(repo_root, paths):
+    config = webhook_config(repo_root, paths)
+    posted = []
+
+    def opener(request, timeout=None):
+        posted.append(json.loads(request.data))
+        return FakeResponse(204)
+
+    result = post_digest(config, "a\nb\nc", opener=opener, archive_path=paths.digests)
+    assert result.kind == DELIVERED
+    assert result.messages == 1
+    assert posted[0]["username"] == config.discord.username
+
+
+def test_a_429_is_rate_limited_with_its_retry_after(repo_root, paths):
+    config = webhook_config(repo_root, paths)
+
+    def opener(request, timeout=None):
+        raise urllib.error.HTTPError("url", 429, "Too Many Requests", {"Retry-After": "3.5"}, None)
+
+    result = post_digest(config, "hello", opener=opener)
+    assert result.kind == RATE_LIMITED
+    assert result.retry_after == 3.5
+
+
+def test_a_4xx_is_rejected(repo_root, paths):
+    config = webhook_config(repo_root, paths)
+
+    def opener(request, timeout=None):
+        raise urllib.error.HTTPError("url", 400, "Bad Request", {}, None)
+
+    assert post_digest(config, "hello", opener=opener).kind == REJECTED
+
+
+def test_a_partial_send_reports_how_many_landed(repo_root, paths):
+    config = webhook_config(repo_root, paths)
+    calls = {"n": 0}
+
+    def opener(request, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise urllib.error.HTTPError("url", 500, "Server Error", {}, None)
+        return FakeResponse(204)
+
+    text = "\n".join("x" * 150 for _ in range(40))
+    result = post_digest(config, text, opener=opener)
+    assert result.kind == REJECTED
+    assert result.messages == 1
+    assert "1/" in result.detail

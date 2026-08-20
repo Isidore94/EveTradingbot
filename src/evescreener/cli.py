@@ -1,9 +1,10 @@
 """Command-line surface.
 
 One process model: `daemon` owns every cadence; each other subcommand runs the
-same job once, for manual and backfill use (plan.md §11 D1). Every command
-prints what it did *and what it did not do* — a skipped fetch, an UNKNOWN
-cost, and an honest zero are all first-class outcomes here.
+same job once, for manual and backfill use (plan.md §11 D1, extended by
+operator directive 2026-08-20 §17 D-5). Every command prints what it did *and
+what it did not do* — a skipped fetch, an UNKNOWN cost and an honest zero are
+all first-class outcomes here.
 """
 
 from __future__ import annotations
@@ -33,16 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("selftest", help="offline installation health check")
 
-    sde = sub.add_parser("sde", help="refresh the static-data tables (types, market groups)")
+    sde = sub.add_parser("sde", help="refresh the static-data tables")
     sde.add_argument("--force", action="store_true", help="reload even if the build is unchanged")
     sde.add_argument("--bundle", help="use a local SDE jsonl zip instead of downloading")
 
     census = sub.add_parser("census", help="universe census: discover, crawl, measure the map")
-    census.add_argument(
-        "--no-crawl",
-        action="store_true",
-        help="measure the existing lake without the full history crawl",
-    )
+    census.add_argument("--no-crawl", action="store_true", help="measure the existing lake only")
     census.add_argument("--max-types", type=int, help="cap the crawl (safety valve, not a target)")
 
     ingest = sub.add_parser("ingest-history", help="refresh daily bars for the tracked universe")
@@ -52,7 +49,53 @@ def build_parser() -> argparse.ArgumentParser:
         default="tracked",
         help="which types to refresh (default: the tracked universe)",
     )
-    ingest.add_argument("--type-id", type=int, action="append", help="refresh one type; repeatable")
+    ingest.add_argument("--type-id", type=int, action="append", help="one type; repeatable")
+
+    sweep = sub.add_parser("sweep-books", help="one governed order-book sweep, reduced on write")
+    sweep.add_argument("--secondary", action="store_true", help="sweep the WARM secondary hubs too")
+    sweep.add_argument("--debug-raw", help="persist a raw page sample here (fixture-building only)")
+
+    digest = sub.add_parser("digest", help="build and post the daily digest")
+    digest.add_argument("--dry-run", action="store_true", help="print it, do not post it")
+
+    backtest = sub.add_parser("backtest", help="the historical viability study (plan.md §13)")
+    backtest.add_argument("--max-types", type=int, help="cap the types scanned")
+
+    killmails = sub.add_parser("killmails", help="destruction backfill, live poll, or the study")
+    killmails.add_argument(
+        "--backfill", type=int, metavar="DAYS", help="backfill N days of archives"
+    )
+    killmails.add_argument("--poll", action="store_true", help="poll R2Z2 once")
+    killmails.add_argument("--study", action="store_true", help="run the lead-lag study (§14)")
+
+    cross = sub.add_parser("cross-region", help="hub-to-hub scan with real freight netting")
+    cross.add_argument("--tier", type=int, default=0, help="notional tier index (default: 0)")
+
+    paper = sub.add_parser("paper", help="the paper trading experiment (plan.md §12)")
+    paper_sub = paper.add_subparsers(dest="paper_command", required=True)
+    paper_open = paper_sub.add_parser("open", help="price and record a taker entry")
+    paper_open.add_argument("--type-id", type=int, required=True)
+    paper_open.add_argument("--notional", type=float, help="ISK notional (default: config)")
+    paper_open.add_argument("--thesis", required=True, help="why — one sentence you can argue with")
+    paper_open.add_argument("--stop", type=float, help="stop price, for R sizing")
+    paper_open.add_argument("--target", type=float, help="target price, for planned R")
+    paper_close = paper_sub.add_parser("close", help="price and record a taker exit")
+    paper_close.add_argument("--position-id", required=True)
+    paper_close.add_argument("--note", default="")
+    paper_sub.add_parser("mark", help="daily mark-to-market with staleness stamps")
+    paper_sub.add_parser("report", help="the §12.4 report and verdict")
+    paper_fill = paper_sub.add_parser(
+        "real-fill", help="record an actual fill (the SMALL-REAL rung)"
+    )
+    paper_fill.add_argument("--position-id", required=True)
+    paper_fill.add_argument("--side", choices=("buy", "sell"), required=True)
+    paper_fill.add_argument("--price", type=float, required=True)
+    paper_fill.add_argument("--units", type=float, required=True)
+
+    sub.add_parser("report", help="regenerate the viability report (plan.md §16)")
+
+    daemon = sub.add_parser("daemon", help="run all cadences in one asyncio process")
+    daemon.add_argument("--ticks", type=int, help="stop after N scheduler ticks (testing)")
 
     return parser
 
@@ -64,10 +107,52 @@ def resolve_config(args: argparse.Namespace) -> Config:
 
 
 def _region(config: Config, args: argparse.Namespace) -> int:
-    return args.region or config.esi.home_region_id
+    return getattr(args, "region", None) or config.esi.home_region_id
 
 
-def _cmd_selftest(config: Config, args: argparse.Namespace) -> int:
+def _open_db(config: Config):
+    from .store.db import Database
+
+    return Database(config.paths.ensure().db)
+
+
+def _latest_book(config: Config, region: int):
+    from .store.lake import BookLake
+
+    return BookLake(config.paths).latest(region)
+
+
+def _composite_and_bars(config: Config, db, region: int):
+    """Load the lake, build the benchmark, and return both."""
+    from .signals.composite import build_composite
+    from .store.lake import BarLake
+    from .universe import tracked_type_ids
+
+    bars = BarLake(config.paths).read(region)
+    tracked = tracked_type_ids(db, region)
+    if tracked and not bars.empty:
+        bars = bars[bars["type_id"].isin(tracked)]
+    composite = build_composite(
+        bars,
+        members=config.signals.composite_members,
+        single_cap=config.signals.composite_single_weight_cap,
+        rebalance_days=config.signals.composite_rebalance_days,
+    )
+    return bars, composite
+
+
+def _anchor_dates(config: Config) -> list[str]:
+    """Only CONFIRMED anchors reach a computation (plan.md §11 D7)."""
+    from .signals.anchors import load_anchors
+
+    path = Path.cwd() / "config" / "anchors.jsonl"
+    return [anchor.anchor_date.isoformat() for anchor in load_anchors(path) if anchor.confirmed]
+
+
+# -- commands ---------------------------------------------------------------
+
+
+def _cmd_selftest(config: Config, args) -> int:
     from .selftest import run_selftest, selftest_report
 
     checks = run_selftest(config, repo_root=Path.cwd())
@@ -75,35 +160,31 @@ def _cmd_selftest(config: Config, args: argparse.Namespace) -> int:
     return 0 if all(check.ok for check in checks) else 1
 
 
-def _cmd_sde(config: Config, args: argparse.Namespace) -> int:
+def _cmd_sde(config: Config, args) -> int:
     from .sde import load_sde
-    from .store.db import Database
 
-    with Database(config.paths.ensure().db) as db:
+    with _open_db(config) as db:
         result = load_sde(
-            config,
-            db,
-            force=args.force,
-            bundle_path=Path(args.bundle) if args.bundle else None,
+            config, db, force=args.force, bundle_path=Path(args.bundle) if args.bundle else None
         )
     print(json.dumps(result.as_dict(), indent=2))
     return 0
 
 
-def _cmd_census(config: Config, args: argparse.Namespace) -> int:
+def _cmd_census(config: Config, args) -> int:
     from .census import render_census, run_census, write_census
     from .esi.client import EsiClient
-    from .store.db import Database
 
-    def progress(index: int, total: int, result) -> None:
+    def progress(index, total, result):
         print(
-            f"  ... {index}/{total} types "
-            f"(fetched {result.fetched}, fresh {result.skipped_fresh}, failed {result.failed})",
+            f"  ... {index}/{total} types (fetched {result.fetched}, "
+            f"fresh {result.skipped_fresh}, no-history {result.no_history}, "
+            f"failed {result.failed})",
             flush=True,
         )
 
     async def run() -> int:
-        with Database(config.paths.ensure().db) as db:
+        with _open_db(config) as db:
             client = EsiClient(config, db)
             try:
                 result = await run_census(
@@ -125,17 +206,16 @@ def _cmd_census(config: Config, args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
-def _cmd_ingest_history(config: Config, args: argparse.Namespace) -> int:
+def _cmd_ingest_history(config: Config, args) -> int:
     from .bars import ingest_history
     from .esi.client import EsiClient
-    from .store.db import Database
     from .store.lake import BarLake
     from .universe import tracked_type_ids, watchlist_type_ids
 
     region = _region(config, args)
 
     async def run() -> int:
-        with Database(config.paths.ensure().db) as db:
+        with _open_db(config) as db:
             if args.type_id:
                 ids = list(args.type_id)
             elif args.scope == "watchlist":
@@ -144,7 +224,8 @@ def _cmd_ingest_history(config: Config, args: argparse.Namespace) -> int:
                 ids = [
                     int(row["type_id"])
                     for row in db.conn.execute(
-                        "SELECT type_id FROM universe WHERE region_id=? ORDER BY type_id", (region,)
+                        "SELECT type_id FROM universe WHERE region_id=? ORDER BY type_id",
+                        (region,),
                     )
                 ]
             else:
@@ -154,10 +235,373 @@ def _cmd_ingest_history(config: Config, args: argparse.Namespace) -> int:
                 return 0
             client = EsiClient(config, db)
             try:
-                result = await ingest_history(client, BarLake(config.paths), ids, region_id=region)
+                result = await ingest_history(
+                    client,
+                    BarLake(config.paths),
+                    ids,
+                    region_id=region,
+                    skip_type_ids=db.history_missing(region),
+                )
             finally:
                 await client.aclose()
+            if result.missing_type_ids:
+                db.mark_history_missing(result.missing_type_ids, region)
         print(json.dumps(result.as_dict(), indent=2))
+        return 0
+
+    return asyncio.run(run())
+
+
+def _cmd_sweep_books(config: Config, args) -> int:
+    from .books import sweep_region
+    from .esi.client import EsiClient
+    from .store.lake import BookLake
+
+    async def run() -> int:
+        regions = [_region(config, args)]
+        if args.secondary:
+            regions.extend(config.esi.secondary_region_ids)
+        outcomes = []
+        with _open_db(config) as db:
+            client = EsiClient(config, db)
+            lake = BookLake(config.paths.ensure())
+            try:
+                for region in regions:
+                    result = await sweep_region(
+                        config,
+                        client,
+                        lake,
+                        region,
+                        persist_raw_to=Path(args.debug_raw) if args.debug_raw else None,
+                    )
+                    outcomes.append(result.as_dict())
+            finally:
+                await client.aclose()
+        print(json.dumps(outcomes, indent=2))
+        return 0
+
+    return asyncio.run(run())
+
+
+def _build_screen(config: Config, db, region: int):
+    from .killmails import destruction_frame, destruction_z
+    from .screen import run_screen
+
+    bars, composite = _composite_and_bars(config, db, region)
+    destruction = destruction_z(
+        destruction_frame(db),
+        recent_days=config.killmails.destruction_recent_days,
+        baseline_days=config.killmails.destruction_baseline_days,
+    )
+    return run_screen(
+        config,
+        db,
+        bars,
+        composite,
+        _latest_book(config, region),
+        destruction=destruction,
+        anchor_dates=_anchor_dates(config),
+        region_id=region,
+    )
+
+
+def _cmd_digest(config: Config, args) -> int:
+    from .digest import build_digest, post_digest
+    from .paper import PaperLedger
+    from .report import _latest, _load
+
+    region = _region(config, args)
+    with _open_db(config) as db:
+        screen = _build_screen(config, db, region)
+        paper = PaperLedger(config.paths.ensure().paper_ledger, config).report()
+        reports = config.paths.reports
+        backtest = _load(_latest(reports, "backtest")) or {}
+        lead_lag = _load(_latest(reports, "leadlag")) or {}
+        cross = _load(_latest(reports, "crossregion"))
+        content = build_digest(
+            config,
+            screen,
+            paper_report=paper,
+            cross_region=_ScanView(cross) if cross else None,
+            backtest_verdict=backtest.get("verdicts"),
+            lead_lag_outcome=lead_lag.get("outcome"),
+        )
+    if args.dry_run:
+        print(content)
+        return 0
+    result = post_digest(config, content, archive_path=config.paths.digests)
+    print(content)
+    print(f"\ndelivery: {json.dumps(result.as_dict())}")
+    return 0 if result.kind in {"delivered", "unconfigured"} else 1
+
+
+class _ScanView:
+    """Adapt a stored cross-region JSON payload to the digest's expectations."""
+
+    def __init__(self, payload: dict) -> None:
+        self.rows = payload.get("rows") or []
+        self.dropped_no_freight = payload.get("dropped_no_freight", 0)
+
+
+def _cmd_backtest(config: Config, args) -> int:
+    from .backtest import render_backtest, run_backtest, write_backtest
+
+    region = _region(config, args)
+
+    def progress(index, total, found):
+        print(f"  ... {index}/{total} types scanned, {found} instances", flush=True)
+
+    with _open_db(config) as db:
+        bars, composite = _composite_and_bars(config, db, region)
+        if args.max_types and not bars.empty:
+            keep = sorted(bars["type_id"].unique())[: args.max_types]
+            bars = bars[bars["type_id"].isin(keep)]
+        result = run_backtest(
+            config,
+            bars,
+            composite.frame,
+            _latest_book(config, region),
+            db=db,
+            region_id=region,
+            anchor_dates=_anchor_dates(config),
+            progress=progress,
+        )
+        json_path, md_path = write_backtest(config, result)
+    print(render_backtest(result))
+    print(f"\nwritten: {json_path}\n         {md_path}")
+    return 0
+
+
+def _cmd_killmails(config: Config, args) -> int:
+    from .killmails import (
+        backfill_archives,
+        destruction_frame,
+        destruction_z,
+        poll_r2z2,
+        render_lead_lag,
+        run_lead_lag_study,
+    )
+    from .paths import atomic_write_text
+
+    region = _region(config, args)
+    with _open_db(config) as db:
+        if args.backfill:
+
+            def progress(index, total, result):
+                print(f"  ... {index}/{total} days, {result.killmails:,} killmails", flush=True)
+
+            print(
+                json.dumps(
+                    backfill_archives(config, db, days=args.backfill, progress=progress).as_dict(),
+                    indent=2,
+                )
+            )
+        if args.poll:
+            print(json.dumps(poll_r2z2(config, db).as_dict(), indent=2))
+        if args.study:
+            bars, _ = _composite_and_bars(config, db, region)
+            scores = destruction_z(
+                destruction_frame(db),
+                recent_days=config.killmails.destruction_recent_days,
+                baseline_days=config.killmails.destruction_baseline_days,
+            )
+            result = run_lead_lag_study(config, bars, scores)
+            stem = f"leadlag-{result.generated_at[:10]}"
+            paths = config.paths.ensure()
+            atomic_write_text(
+                paths.reports / f"{stem}.json",
+                json.dumps(result.as_dict(), indent=2, sort_keys=True, default=str),
+            )
+            atomic_write_text(paths.reports / f"{stem}.md", render_lead_lag(result))
+            print(render_lead_lag(result))
+            print(f"\nwritten: {paths.reports / stem}.json / .md")
+    return 0
+
+
+def _cmd_cross_region(config: Config, args) -> int:
+    from .crossregion import render_cross_region, scan_cross_region
+    from .paths import atomic_write_text
+    from .store.lake import BookLake
+
+    lake = BookLake(config.paths.ensure())
+    regions = [config.esi.home_region_id, *config.esi.secondary_region_ids]
+    books = {region: lake.latest(region) for region in regions}
+    with _open_db(config) as db:
+        scan = scan_cross_region(config, db, books, tier_index=args.tier)
+    stem = f"crossregion-{scan.generated_at[:10]}"
+    paths = config.paths.ensure()
+    atomic_write_text(
+        paths.reports / f"{stem}.json", json.dumps(scan.as_dict(), indent=2, sort_keys=True)
+    )
+    atomic_write_text(paths.reports / f"{stem}.md", render_cross_region(scan))
+    print(render_cross_region(scan))
+    return 0
+
+
+def _cmd_paper(config: Config, args) -> int:
+    from .paper import PaperLedger, Refusal, render_report
+    from .store.lake import BarLake
+    from .universe import liquidity_table
+
+    region = _region(config, args)
+    paths = config.paths.ensure()
+    ledger = PaperLedger(paths.paper_ledger, config)
+    book = _latest_book(config, region)
+
+    with _open_db(config) as db:
+        try:
+            if args.paper_command == "open":
+                turnover = liquidity_table(
+                    BarLake(config.paths),
+                    region,
+                    lookback_days=config.universe.liquidity_lookback_days,
+                )
+                median = None
+                if not turnover.empty:
+                    match = turnover[turnover["type_id"] == args.type_id]
+                    if not match.empty:
+                        median = float(match.iloc[0]["median_isk_value"])
+                type_row = db.type_by_id(args.type_id)
+                record = ledger.open_position(
+                    type_id=args.type_id,
+                    type_name=type_row["name"] if type_row else None,
+                    notional_isk=args.notional or config.paper.default_notional_isk,
+                    book=book,
+                    thesis=args.thesis,
+                    stop_price=args.stop,
+                    target_price=args.target,
+                    median_daily_turnover=median,
+                )
+                print(json.dumps(record, indent=2, default=str))
+            elif args.paper_command == "close":
+                print(
+                    json.dumps(
+                        ledger.close_position(
+                            position_id=args.position_id, book=book, note=args.note
+                        ),
+                        indent=2,
+                        default=str,
+                    )
+                )
+            elif args.paper_command == "mark":
+                print(json.dumps(ledger.mark(book=book), indent=2, default=str))
+            elif args.paper_command == "real-fill":
+                print(
+                    json.dumps(
+                        ledger.record_real_fill(
+                            position_id=args.position_id,
+                            side=args.side,
+                            actual_price=args.price,
+                            actual_units=args.units,
+                        ),
+                        indent=2,
+                        default=str,
+                    )
+                )
+            else:
+                print(render_report(ledger.report()))
+        except Refusal as refusal:
+            print(f"REFUSED: {refusal}", file=sys.stderr)
+            print("The refusal is recorded in the ledger; it is a result, not a crash.")
+            return 3
+    return 0
+
+
+def _cmd_report(config: Config, args) -> int:
+    from .paper import PaperLedger
+    from .report import build_viability_report, render_viability, write_viability
+
+    paths = config.paths.ensure()
+    paper = PaperLedger(paths.paper_ledger, config).report().as_dict()
+    report = build_viability_report(config, paper=paper)
+    json_path, md_path = write_viability(config, report)
+    print(render_viability(report))
+    print(f"\nwritten: {json_path}\n         {md_path}")
+    return 0
+
+
+def _cmd_daemon(config: Config, args) -> int:
+    from .bars import ingest_history
+    from .books import sweep_region
+    from .digest import build_digest, post_digest
+    from .esi.client import EsiClient
+    from .killmails import poll_r2z2
+    from .paper import PaperLedger
+    from .store.lake import BarLake, BookLake
+    from .universe import tracked_type_ids
+
+    region = _region(config, args)
+
+    async def run() -> int:
+        from .daemon import run_daemon
+
+        with _open_db(config) as db:
+            client = EsiClient(config, db)
+            bar_lake = BarLake(config.paths.ensure())
+            book_lake = BookLake(config.paths)
+
+            async def history():
+                ids = tracked_type_ids(db, region)
+                if not ids:
+                    return {"skipped": "no tracked universe yet"}
+                result = await ingest_history(
+                    client,
+                    bar_lake,
+                    ids,
+                    region_id=region,
+                    skip_type_ids=db.history_missing(region),
+                )
+                if result.missing_type_ids:
+                    db.mark_history_missing(result.missing_type_ids, region)
+                return result.as_dict()
+
+            async def books_home():
+                return (await sweep_region(config, client, book_lake, region)).as_dict()
+
+            async def books_secondary():
+                out = []
+                for secondary in config.esi.secondary_region_ids:
+                    out.append((await sweep_region(config, client, book_lake, secondary)).as_dict())
+                return out
+
+            async def universe():
+                from .census import run_census
+
+                return (
+                    await run_census(config, db, client, region_id=region, crawl=False)
+                ).as_dict()
+
+            def digest():
+                screen = _build_screen(config, db, region)
+                paper = PaperLedger(config.paths.paper_ledger, config)
+                paper.mark(book=book_lake.latest(region))
+                content = build_digest(config, screen, paper_report=paper.report())
+                return post_digest(config, content, archive_path=config.paths.digests).as_dict()
+
+            def killmails():
+                return poll_r2z2(config, db).as_dict()
+
+            def on_tick(outcomes, scheduler):
+                for outcome in outcomes:
+                    print(json.dumps(outcome, default=str), flush=True)
+
+            try:
+                scheduler = await run_daemon(
+                    config,
+                    {
+                        "history": history,
+                        "books_home": books_home,
+                        "books_secondary": books_secondary,
+                        "universe": universe,
+                        "digest": digest,
+                        "killmails": killmails,
+                    },
+                    stop_after=args.ticks,
+                    on_tick=on_tick,
+                )
+            finally:
+                await client.aclose()
+            print(json.dumps(scheduler.status(), indent=2))
         return 0
 
     return asyncio.run(run())
@@ -168,6 +612,14 @@ HANDLERS = {
     "sde": _cmd_sde,
     "census": _cmd_census,
     "ingest-history": _cmd_ingest_history,
+    "sweep-books": _cmd_sweep_books,
+    "digest": _cmd_digest,
+    "backtest": _cmd_backtest,
+    "killmails": _cmd_killmails,
+    "cross-region": _cmd_cross_region,
+    "paper": _cmd_paper,
+    "report": _cmd_report,
+    "daemon": _cmd_daemon,
 }
 
 

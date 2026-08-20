@@ -96,8 +96,8 @@ class UniverseConfig:
 
 @dataclass(frozen=True, slots=True)
 class SdeConfig:
-    types_url: str
-    market_groups_url: str
+    latest_url: str
+    bundle_url_template: str
     refresh_days: int
 
 

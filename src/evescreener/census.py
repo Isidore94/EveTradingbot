@@ -1,0 +1,358 @@
+"""The universe census — plan.md §8 Phase 1.
+
+The one-time full-catalog crawl: `/markets/{region}/types` for the active
+universe, then history for every one of them (~20k types at the 150/min
+self-cap ≈ 2 h 13 m). Run once, diff-append forever after.
+
+Its deliverable is not "a job ran". It is the **measured opportunity map**:
+how many types clear each candidate liquidity floor, what the turnover,
+`order_count` and spread distributions actually look like, and the
+empirically-derived floor that replaces the planning estimate. This census is
+the denominator for every later "the universe is N" claim in the system.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from .bars import HistoryIngestResult, ingest_history
+from .config import Config
+from .esi.client import EsiClient
+from .paths import atomic_write_text
+from .store.db import Database
+from .store.lake import BarLake
+from .timeutil import iso, utcnow
+from .universe import (
+    active_type_ids,
+    apply_floor,
+    liquidity_table,
+    sync_universe,
+)
+
+# Candidate floors the census scores, so the chosen floor is a measurement and
+# not a preference. ISK turnover x order_count, spanning three decades each.
+FLOOR_GRID_ISK = (10e6, 50e6, 100e6, 250e6, 500e6, 1e9, 5e9)
+FLOOR_GRID_ORDERS = (5, 10, 30, 50, 100)
+
+# Percentiles reported for every distribution. p50 and p90 are what the floor
+# discussion actually turns on; the tails are there to show the shape.
+PERCENTILES = (0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
+
+
+@dataclass(slots=True)
+class CensusResult:
+    """The census as data, not prose. `report_path` renders it for humans."""
+
+    region_id: int
+    generated_at: str
+    active_types: int
+    types_with_bars: int
+    total_bars: int
+    lookback_days: int
+    ingest: dict = field(default_factory=dict)
+    turnover_percentiles: dict = field(default_factory=dict)
+    order_count_percentiles: dict = field(default_factory=dict)
+    floor_grid: list[dict] = field(default_factory=list)
+    derived_floor: dict = field(default_factory=dict)
+    market_group_breakdown: list[dict] = field(default_factory=list)
+    quality: dict = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "region_id": self.region_id,
+            "generated_at": self.generated_at,
+            "active_types": self.active_types,
+            "types_with_bars": self.types_with_bars,
+            "total_bars": self.total_bars,
+            "lookback_days": self.lookback_days,
+            "ingest": self.ingest,
+            "turnover_percentiles": self.turnover_percentiles,
+            "order_count_percentiles": self.order_count_percentiles,
+            "floor_grid": self.floor_grid,
+            "derived_floor": self.derived_floor,
+            "market_group_breakdown": self.market_group_breakdown,
+            "quality": self.quality,
+            "notes": self.notes,
+        }
+
+
+def _percentiles(series: pd.Series) -> dict[str, float]:
+    if series.empty:
+        return {}
+    values = series.dropna()
+    if values.empty:
+        return {}
+    return {f"p{int(q * 100)}": float(values.quantile(q)) for q in PERCENTILES}
+
+
+def score_floor_grid(table: pd.DataFrame) -> list[dict]:
+    """How many types survive each candidate floor, and what they carry.
+
+    The floor is chosen from this grid by the rule in `derive_floor`, stated
+    before the numbers are looked at.
+    """
+    rows: list[dict] = []
+    if table.empty:
+        return rows
+    total_turnover = float(table["median_isk_value"].sum())
+    for isk_floor in FLOOR_GRID_ISK:
+        for order_floor in FLOOR_GRID_ORDERS:
+            survivors = table[
+                (table["median_isk_value"] >= isk_floor)
+                & (table["median_order_count"] >= order_floor)
+            ]
+            captured = float(survivors["median_isk_value"].sum())
+            rows.append(
+                {
+                    "min_median_isk_value": isk_floor,
+                    "min_median_order_count": order_floor,
+                    "types": int(len(survivors)),
+                    "share_of_types": round(len(survivors) / max(1, len(table)), 4),
+                    "captured_daily_isk": captured,
+                    "share_of_turnover": round(captured / total_turnover, 4)
+                    if total_turnover
+                    else 0.0,
+                }
+            )
+    return rows
+
+
+def derive_floor(grid: list[dict], *, target_turnover_share: float = 0.95) -> dict:
+    """Pick the floor from the measurement, by a rule stated before the data.
+
+    **Rule (frozen):** among the candidate floors that still capture at least
+    `target_turnover_share` of the region's median daily ISK turnover, take the
+    one that admits the *fewest* types. Rationale: the floor exists to remove
+    series that cannot absorb a real notional, not to shrink the universe for
+    its own sake — so we keep essentially all the money and drop as many
+    un-tradeable names as that allows.
+    """
+    eligible = [row for row in grid if row["share_of_turnover"] >= target_turnover_share]
+    if not eligible:
+        return {
+            "rule": "fewest types while capturing >= "
+            f"{target_turnover_share:.0%} of median daily ISK turnover",
+            "resolved": False,
+            "reason": "no candidate floor captured the target turnover share",
+        }
+    best = min(eligible, key=lambda row: (row["types"], -row["share_of_turnover"]))
+    return {
+        "rule": "fewest types while capturing >= "
+        f"{target_turnover_share:.0%} of median daily ISK turnover",
+        "resolved": True,
+        "min_median_isk_value": best["min_median_isk_value"],
+        "min_median_order_count": best["min_median_order_count"],
+        "types": best["types"],
+        "share_of_turnover": best["share_of_turnover"],
+    }
+
+
+def market_group_breakdown(db: Database, table: pd.DataFrame, limit: int = 25) -> list[dict]:
+    """Tracked-type counts and turnover by top-level market group."""
+    if table.empty:
+        return []
+    rows: list[dict] = []
+    for record in table.itertuples():
+        type_row = db.type_by_id(int(record.type_id))
+        if type_row is None or type_row["market_group_id"] is None:
+            root_name = "(no market group)"
+        else:
+            chain = db.market_group_chain(int(type_row["market_group_id"]))
+            root = chain[-1] if chain else None
+            group = (
+                db.conn.execute(
+                    "SELECT name FROM sde_market_groups WHERE market_group_id=?", (root,)
+                ).fetchone()
+                if root is not None
+                else None
+            )
+            root_name = group["name"] if group else "(unknown group)"
+        rows.append(
+            {
+                "group": root_name,
+                "isk": float(record.median_isk_value or 0.0),
+                "tracked": bool(getattr(record, "tracked", False)),
+            }
+        )
+    frame = pd.DataFrame(rows)
+    grouped = (
+        frame.groupby("group")
+        .agg(types=("isk", "size"), tracked=("tracked", "sum"), daily_isk=("isk", "sum"))
+        .reset_index()
+        .sort_values("daily_isk", ascending=False)
+        .head(limit)
+    )
+    return grouped.to_dict("records")
+
+
+async def run_census(
+    config: Config,
+    db: Database,
+    client: EsiClient,
+    *,
+    region_id: int | None = None,
+    crawl: bool = True,
+    max_types: int | None = None,
+    progress=None,
+) -> CensusResult:
+    """Discover the active universe, crawl its history, and measure the map."""
+    region = region_id or config.esi.home_region_id
+    lake = BarLake(config.paths.ensure())
+    notes: list[str] = []
+
+    ids, fetched = await active_type_ids(client, region)
+    if not fetched:
+        ids = [
+            int(row["type_id"])
+            for row in db.conn.execute("SELECT type_id FROM universe WHERE region_id=?", (region,))
+        ]
+        notes.append(
+            "/markets/types was still inside its cache window; reused the stored "
+            "universe rather than fetching early"
+        )
+    cap = max_types if max_types is not None else config.universe.census_max_types
+    if len(ids) > cap:
+        notes.append(f"census capped at {cap} of {len(ids)} active types by config")
+        ids = ids[:cap]
+
+    ingest = HistoryIngestResult()
+    if crawl:
+        # A large write batch matters at census scale: every flush rewrites the
+        # whole year partition, so 20k types must not become 100 rewrites.
+        ingest = await ingest_history(
+            client, lake, ids, region_id=region, batch_size=2500, progress=progress
+        )
+    else:
+        notes.append("history crawl skipped by request; measurements use the existing lake")
+
+    table = liquidity_table(lake, region, lookback_days=config.universe.liquidity_lookback_days)
+    grid = score_floor_grid(table)
+    derived = derive_floor(grid)
+    if derived.get("resolved"):
+        min_isk = float(derived["min_median_isk_value"])
+        min_orders = float(derived["min_median_order_count"])
+    else:
+        min_isk = config.universe.min_median_isk_value
+        min_orders = config.universe.min_median_order_count
+        notes.append("derived floor unresolved; fell back to the configured floor")
+    scored = apply_floor(table, min_isk_value=min_isk, min_order_count=min_orders)
+    sync_universe(
+        db,
+        region,
+        ids,
+        table,
+        min_isk_value=min_isk,
+        min_order_count=min_orders,
+        source="census",
+    )
+
+    frame = lake.read(region)
+    return CensusResult(
+        region_id=region,
+        generated_at=iso(utcnow()),
+        active_types=len(ids),
+        types_with_bars=int(frame["type_id"].nunique()) if not frame.empty else 0,
+        total_bars=int(len(frame)),
+        lookback_days=config.universe.liquidity_lookback_days,
+        ingest=ingest.as_dict(),
+        turnover_percentiles=_percentiles(table["median_isk_value"]) if not table.empty else {},
+        order_count_percentiles=_percentiles(table["median_order_count"])
+        if not table.empty
+        else {},
+        floor_grid=grid,
+        derived_floor=derived,
+        market_group_breakdown=market_group_breakdown(db, scored),
+        quality=ingest.quality,
+        notes=notes,
+    )
+
+
+def render_census(result: CensusResult) -> str:
+    """Human-readable census. Every number here is a measurement, not an estimate."""
+    lines = [
+        f"# Universe census — region {result.region_id}",
+        "",
+        f"Generated {result.generated_at}. This table is the denominator for every",
+        '"the universe is N" claim the system makes.',
+        "",
+        f"- Active types (live orders in region): **{result.active_types}**",
+        f"- Types with daily bars in the lake: **{result.types_with_bars}**",
+        f"- Total bars stored: **{result.total_bars}**",
+        f"- Liquidity window: {result.lookback_days} days",
+        "",
+        "## Ingest",
+        f"- requested {result.ingest.get('requested', 0)}, "
+        f"fetched {result.ingest.get('fetched', 0)}, "
+        f"skipped-fresh {result.ingest.get('skipped_fresh', 0)}, "
+        f"304 {result.ingest.get('not_modified', 0)}, "
+        f"failed {result.ingest.get('failed', 0)}",
+        f"- rows written: {result.ingest.get('rows_written', 0)}",
+        "",
+        "## Median daily ISK turnover, by percentile",
+    ]
+    for key, value in result.turnover_percentiles.items():
+        lines.append(f"- {key}: {value:,.0f} ISK")
+    lines.append("")
+    lines.append("## Median daily order_count, by percentile")
+    for key, value in result.order_count_percentiles.items():
+        lines.append(f"- {key}: {value:,.1f}")
+    lines.append("")
+    lines.append("## Liquidity floor grid")
+    lines.append("")
+    lines.append("| min ISK/day | min order_count | types | % of types | % of turnover |")
+    lines.append("|---:|---:|---:|---:|---:|")
+    for row in result.floor_grid:
+        lines.append(
+            f"| {row['min_median_isk_value']:,.0f} | {row['min_median_order_count']:,.0f} "
+            f"| {row['types']} | {row['share_of_types']:.1%} | {row['share_of_turnover']:.1%} |"
+        )
+    lines.append("")
+    lines.append("## Derived floor")
+    derived = result.derived_floor
+    lines.append(f"Rule (stated before measurement): {derived.get('rule')}")
+    if derived.get("resolved"):
+        lines.append(f"- **min median daily ISK turnover: {derived['min_median_isk_value']:,.0f}**")
+        lines.append(f"- **min median order_count: {derived['min_median_order_count']:,.0f}**")
+        lines.append(
+            f"- admits {derived['types']} types carrying "
+            f"{derived['share_of_turnover']:.1%} of median daily turnover"
+        )
+    else:
+        lines.append(f"- UNRESOLVED: {derived.get('reason')}")
+    if result.market_group_breakdown:
+        lines.append("")
+        lines.append("## Top market groups by daily ISK turnover")
+        lines.append("")
+        lines.append("| market group | types | tracked | daily ISK |")
+        lines.append("|---|---:|---:|---:|")
+        for row in result.market_group_breakdown:
+            lines.append(
+                f"| {row['group']} | {row['types']} | {int(row['tracked'])} "
+                f"| {row['daily_isk']:,.0f} |"
+            )
+    if result.quality:
+        lines.append("")
+        lines.append("## Data quality counters")
+        for key, value in result.quality.items():
+            lines.append(f"- {key}: {value}")
+    if result.notes:
+        lines.append("")
+        lines.append("## Notes")
+        for note in result.notes:
+            lines.append(f"- {note}")
+    return "\n".join(lines) + "\n"
+
+
+def write_census(config: Config, result: CensusResult) -> tuple[str, str]:
+    """Persist the census as JSON (machine) and Markdown (operator)."""
+    paths = config.paths.ensure()
+    stem = f"census-{result.region_id}-{result.generated_at[:10]}"
+    json_path = paths.reports / f"{stem}.json"
+    md_path = paths.reports / f"{stem}.md"
+    atomic_write_text(json_path, json.dumps(result.as_dict(), indent=2, sort_keys=True))
+    atomic_write_text(md_path, render_census(result))
+    return str(json_path), str(md_path)

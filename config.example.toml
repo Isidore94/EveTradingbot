@@ -104,9 +104,11 @@ watchlist = [
 ]
 
 [sde]
-# Official reworked static data. Fuzzwork's SQLite conversion is the fallback.
-types_url = "https://developers.eveonline.com/static-data/tranquility/types.jsonl"
-market_groups_url = "https://developers.eveonline.com/static-data/tranquility/marketGroups.jsonl"
+# Official reworked static data. `latest_url` names the current build number;
+# the bundle URL is that number formatted into `bundle_url_template`. Only
+# `types.jsonl` and `marketGroups.jsonl` are read out of the ~99 MB zip.
+latest_url = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl"
+bundle_url_template = "https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-{build}-jsonl.zip"
 refresh_days = 30
 
 [signals]

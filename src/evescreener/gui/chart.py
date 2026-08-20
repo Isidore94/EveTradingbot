@@ -5,16 +5,31 @@ desk aims this window at that type. A pile of chart windows is how a desk
 becomes unusable, and it is also how you end up comparing two names against
 two different anchor sets without noticing.
 
-**HLC bars, not candlesticks.** The EVE bar contract is
+**Range candles.** The EVE bar contract is
 `["datetime","high","low","close","volume","order_count"]` with `close ← ESI
-average`; there is no `open` and none is ever synthesized (§4). So price is
-drawn the way price has always been drawn when there is no open: a vertical
-high–low range per bar with a close tick on its right, coloured against the
-previous close. That reads at a glance like a candle chart and every mark on
-it is measured. A candle *body* would be a fabrication with a very convincing
-shape — the one thing the eye trusts most on such a chart is the part the data
-cannot supply — so there is no body, and the space where one would sit stays
-empty rather than filled with a guess.
+average`; there is no `open` and none is ever synthesized (§4).
+
+The obvious rescue — EVE trades 24/7, so yesterday's close *is* today's open,
+no session gap — is right about the market and wrong about this data, and it
+was measured rather than argued. `close` is not a last trade, it is the day's
+**mean transaction price**, and yesterday's mean lands *outside* today's
+measured `[low, high]` on **55.7%** of all 4,034,697 bars — **69.0%** of
+tier-OK bars and **58.1%** of watchlist bars. A prev-close body would hang off
+the end of its own wick on the majority of bars: not merely dishonest, visibly
+broken. See plan.md §17 D-30.
+
+So the body is the part that *is* measured. Each candle is a filled body
+spanning the day's **low→high**, crossed by a notch at the **average**, and
+coloured against the previous average. Body height is the day's true range,
+notch height is where the volume actually transacted inside it, and colour is
+a comparison between two real numbers. Nothing is invented, and a fat body
+reads at a glance where a one-pixel line did not.
+
+What it deliberately cannot show is intraday direction. ESI records no
+sequence within a day — no open, no last, no ticks — so no chart drawn from
+this lake can tell you whether the day rose or fell inside itself, at any
+price. The notch is the honest replacement: high in the range means the
+trading happened high in the range.
 
 What is drawn, all of it from the frozen or already-computed layers:
 
@@ -33,7 +48,7 @@ trading floor renders with its badge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -41,6 +56,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
@@ -58,9 +74,10 @@ __all__ = ["ChartPanel", "ChartSeries", "bar_colours", "build_series"]
 
 PRICE_COLOUR = QColor(220, 224, 232)
 ENVELOPE_COLOUR = QColor(90, 100, 120, 70)
-UP_COLOUR = QColor(110, 210, 150)
-DOWN_COLOUR = QColor(235, 110, 110)
-FLAT_COLOUR = QColor(180, 186, 196)
+UP_COLOUR = QColor(56, 200, 120)
+DOWN_COLOUR = QColor(232, 88, 88)
+FLAT_COLOUR = QColor(146, 152, 164)
+AVERAGE_COLOUR = QColor(246, 248, 252)
 VWAP_COLOUR = QColor(120, 190, 255)
 SIGMA_COLOURS = (
     QColor(120, 190, 255, 150),
@@ -85,10 +102,12 @@ GRID_COLOUR = QColor(70, 74, 82)
 TEXT_COLOUR = QColor(190, 195, 205)
 BACKGROUND = QColor(24, 26, 30)
 
-# Below BAR_MIN_SLOT pixels per bar the vertical ranges merge into a block, and
-# below BAR_TICK_SLOT the close tick is narrower than the pen that draws it.
-BAR_MIN_SLOT = 1.5
-BAR_TICK_SLOT = 4.0
+# Pixels per bar, and what survives at each width. Below CANDLE_MIN_SLOT the
+# bodies merge into a solid block that would read as more data than it is.
+CANDLE_MIN_SLOT = 1.2  # under this: shaded envelope and a close line
+CANDLE_BODY_SLOT = 2.5  # under this: a one-pixel coloured range, no body
+CANDLE_NOTCH_SLOT = 4.0  # under this: no average notch, it would not resolve
+DEFAULT_VISIBLE_BARS = 120
 
 
 def bar_colours(close: np.ndarray) -> list[QColor]:
@@ -146,6 +165,35 @@ class ChartSeries:
     @property
     def known(self) -> bool:
         return self.close is not None and len(self.close) > 1
+
+    def tail(self, count: int) -> ChartSeries:
+        """The last `count` bars, with every parallel array sliced together.
+
+        Zooming is a view, not a reload: the series is built once and the
+        canvas asks for a window of it. Slicing every array in one place is
+        what keeps an overlay from drifting a bar out of step with price.
+        """
+        if self.close is None or count <= 0 or count >= len(self.close):
+            return self
+        cut = slice(-count, None)
+
+        def sliced(array):
+            return None if array is None else array[cut]
+
+        return replace(
+            self,
+            stamps=list(self.stamps[cut]),
+            close=sliced(self.close),
+            high=sliced(self.high),
+            low=sliced(self.low),
+            volume=sliced(self.volume),
+            participation=sliced(self.participation),
+            vwap=sliced(self.vwap),
+            sigma=sliced(self.sigma),
+            setups=sliced(self.setups),
+            moving={name: values[cut] for name, values in self.moving.items()},
+            cloud=None if self.cloud is None else (self.cloud[0][cut], self.cloud[1][cut]),
+        )
 
 
 def build_series(data, type_id: int, *, positions=None) -> ChartSeries:
@@ -254,6 +302,7 @@ class ChartCanvas(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(360)
         self.series: ChartSeries | None = None
+        self.visible = DEFAULT_VISIBLE_BARS
         self.show_bands = True
         self.show_moving = True
         self.show_cloud = True
@@ -285,6 +334,7 @@ class ChartCanvas(QWidget):
             painter.drawText(QRectF(self.rect()), Qt.AlignCenter, message)
             painter.end()
             return
+        series = series.tail(self.visible)
         price_pane, volume_pane, thrust_pane = self._panes()
         low, high = self._price_range(series)
         self._draw_grid(painter, price_pane, low, high)
@@ -294,7 +344,7 @@ class ChartCanvas(QWidget):
             self._draw_cloud(painter, price_pane, series, low, high)
         if self.show_levels:
             self._draw_levels(painter, price_pane, series, low, high)
-        self._draw_bars(painter, price_pane, series, low, high)
+        self._draw_candles(painter, price_pane, series, low, high)
         if self.show_moving:
             self._draw_moving(painter, price_pane, series, low, high)
         self._draw_positions(painter, price_pane, series, low, high)
@@ -428,41 +478,53 @@ class ChartCanvas(QWidget):
         painter.setPen(QPen(PRICE_COLOUR, 1.8))
         painter.drawPolyline(self._polyline(pane, series.close, low, high))
 
-    def _draw_bars(self, painter, pane, series, low, high) -> None:
-        """One HLC bar per day: the measured range, ticked at the close.
+    def _draw_candles(self, painter, pane, series, low, high) -> None:
+        """One candle per day: body = the measured range, notch = the average.
 
-        Colour compares this close with the one before it, which is a
-        comparison between two numbers that both exist. It is deliberately not
-        a body: with no `open`, a body could only be drawn by inventing one.
+        The body is the day's low→high because that is the interval the data
+        actually establishes. There is no `open` to anchor a conventional body
+        to, and the nearest substitute — yesterday's close — is outside today's
+        measured range on 55.7% of the lake, so a conventional body would hang
+        off its own wick more often than not (plan.md §17 D-30).
 
-        Density decides how much of the bar survives. A 400-bar window on a
-        narrow pane cannot resolve a tick, so the form degrades — tick, then
-        bare range, then the shaded envelope with a close line — rather than
-        smearing into a solid block that would read as more data than it is.
+        Colour compares this average with the previous one. The notch says
+        where inside the range the trading actually happened: near the top is
+        a day that transacted high in its range, which is the closest thing to
+        intraday direction that a daily average can honestly support.
+
+        Density decides how much survives — body and notch, then bare range,
+        then the shaded envelope with a close line — rather than smearing into
+        a mass that would read as more data than it is.
         """
         count = len(series.close)
-        slot = pane.width() / max(count - 1, 1)
-        if slot < BAR_MIN_SLOT:
+        slot = pane.width() / max(count, 1)
+        if slot < CANDLE_MIN_SLOT:
             self._draw_envelope(painter, pane, series, low, high)
             self._draw_price(painter, pane, series, low, high)
             return
-        ticked = slot >= BAR_TICK_SLOT
-        tick = min(slot * 0.4, 6.0) if ticked else 0.0
-        width = 1.6 if ticked else 1.0
         colours = bar_colours(series.close)
+        solid = slot >= CANDLE_BODY_SLOT
+        notched = slot >= CANDLE_NOTCH_SLOT
+        width = max(1.0, min(slot * 0.72, 16.0))
         for index in range(count):
-            close = series.close[index]
             top, bottom = series.high[index], series.low[index]
+            close = series.close[index]
             x = self._x(pane, index, count)
-            painter.setPen(QPen(colours[index], width))
             if np.isfinite(top) and np.isfinite(bottom):
-                painter.drawLine(
-                    QPointF(x, self._y(pane, top, low, high)),
-                    QPointF(x, self._y(pane, bottom, low, high)),
-                )
-            if tick and np.isfinite(close):
+                y_top = self._y(pane, top, low, high)
+                y_bottom = self._y(pane, bottom, low, high)
+                if solid:
+                    painter.fillRect(
+                        QRectF(x - width / 2, y_top, width, max(y_bottom - y_top, 1.0)),
+                        QBrush(colours[index]),
+                    )
+                else:
+                    painter.setPen(QPen(colours[index], 1.0))
+                    painter.drawLine(QPointF(x, y_top), QPointF(x, y_bottom))
+            if notched and np.isfinite(close):
                 y = self._y(pane, close, low, high)
-                painter.drawLine(QPointF(x, y), QPointF(min(x + tick, pane.right()), y))
+                painter.setPen(QPen(AVERAGE_COLOUR, 1.2))
+                painter.drawLine(QPointF(x - width / 2, y), QPointF(x + width / 2, y))
 
     def _draw_moving(self, painter, pane, series, low, high) -> None:
         for index, (name, values) in enumerate(series.moving.items()):
@@ -557,8 +619,20 @@ class ChartPanel(QWidget):
             toggles.addWidget(box)
             self._boxes[key] = box
         toggles.addStretch(1)
+        toggles.addWidget(QLabel("bars"))
+        self.zoom = QComboBox()
+        for label, value in (("60", 60), ("120", 120), ("250", 250), ("all", 0)):
+            self.zoom.addItem(label, value)
+        self.zoom.setCurrentIndex(1)
+        self.zoom.currentIndexChanged.connect(self._zoom)
+        toggles.addWidget(self.zoom)
         layout.addLayout(toggles)
         layout.addWidget(self.canvas, 1)
+
+    def _zoom(self) -> None:
+        """Fewer bars, wider candles. A 400-bar window cannot resolve a body."""
+        self.canvas.visible = int(self.zoom.currentData())
+        self.canvas.update()
 
     def _toggle(self, name: str, state: bool) -> None:
         setattr(self.canvas, name, bool(state))

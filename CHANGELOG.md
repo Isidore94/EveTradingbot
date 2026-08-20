@@ -5,6 +5,55 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The body is the range, because the range is what was measured
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §19.2 and §17 D-30.
+`uv run pytest -q` → **560 passed, 7 deselected**, ruff check + format clean.
+
+### The ask, and the measurement that answered it
+
+The operator — a day trader — could not read the HLC bars and asked for
+conventional candlesticks, reasoning that EVE trades 24/7, so there is no
+session gap and yesterday's close is today's open.
+
+Right about the market, wrong about this data, and settled by measuring it
+rather than arguing it. `close` is the ESI daily **mean transaction price**,
+not a last trade, so yesterday's mean is not where today opened. Across
+**4,034,697 bars**, yesterday's close falls **outside** today's measured
+`[low, high]`:
+
+| population | open outside the day's range |
+| --- | --- |
+| all bars | **55.70%** |
+| excluding `high == low` days | 46.10% |
+| **tier OK** — what the desk charts | **68.97%** |
+| tier THIN | 66.40% |
+| watchlist | 58.07% |
+
+A conventional body would hang off the end of its own wick on the *majority*
+of bars. Not merely a fabrication — a visibly broken one. Clamping it into the
+range would make over half the chart's bodies artefacts of the clamp.
+
+### What landed
+
+Range candles: a filled body spanning the day's **low→high**, crossed by a
+notch at the **average**, coloured against the previous average. Body, notch
+and colour are each a measured number or a comparison between two of them, and
+§4's no-synthesized-`open` invariant is untouched.
+
+Intraday direction is simply not in this lake — ESI records no sequence within
+a day — so no chart drawn from it can say whether price rose or fell inside
+the day. The notch's height inside the body is the honest substitute: high in
+the range means the trading happened high in the range.
+
+### Readability, which was the actual complaint
+
+The 400-bar default gave ~3.5 px per bar on a desk pane. The chart now opens
+at **120 bars** with a 60/120/250/all selector, and `ChartSeries.tail()`
+slices every overlay array in one place so nothing drifts a bar out of step
+with price. The form still degrades by measured slot width — body and notch,
+then bare range, then the shaded envelope and close line.
+
 ## 2026-08-20 — Bars, because the eye reads a body as a fact
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §19.2. `uv run pytest -q` →

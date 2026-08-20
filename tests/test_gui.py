@@ -247,20 +247,20 @@ def test_charting_from_the_board_reaches_the_chart_page(qtbot, desk, config):
     assert window.rail.currentItem().text() == "CHARTS"
 
 
-def test_the_chart_draws_no_candle_bodies_because_there_is_no_open(qtbot, desk):
-    """Price is HLC bars; the bar contract has no open and none is invented (§4)."""
+def test_the_chart_draws_no_synthesized_open(qtbot, desk):
+    """The body is the measured range; the bar contract has no open (§4)."""
     from evescreener.gui.chart import build_series
 
     series = build_series(desk, 601)
     assert series.known
     assert not hasattr(series, "open")
     assert series.high is not None and series.low is not None
-    # An HLC bar is range plus close. Both are measured; nothing else is drawn.
+    # Body = low..high, notch = close (the ESI average). All three are measured.
     assert len(series.high) == len(series.low) == len(series.close)
 
 
-def test_hlc_bars_colour_against_the_previous_close_not_an_open():
-    """Up/down is a comparison between two closes, both of which exist."""
+def test_candles_colour_against_the_previous_average_not_an_open():
+    """Up/down compares two averages, both of which are measured numbers."""
     import numpy as np
 
     from evescreener.gui.chart import DOWN_COLOUR, FLAT_COLOUR, UP_COLOUR, bar_colours
@@ -269,27 +269,67 @@ def test_hlc_bars_colour_against_the_previous_close_not_an_open():
     assert bar_colours(close) == [
         FLAT_COLOUR,  # nothing behind the first bar: no direction to report
         UP_COLOUR,
-        FLAT_COLOUR,  # unchanged close is not a direction either
+        FLAT_COLOUR,  # unchanged average is not a direction either
         DOWN_COLOUR,
-        FLAT_COLOUR,  # a missing close is uncertainty, never a colour
-        UP_COLOUR,  # ... and the next bar compares against the last real close
+        FLAT_COLOUR,  # a missing average is uncertainty, never a colour
+        UP_COLOUR,  # ... and the next bar compares against the last real one
     ]
     assert bar_colours(np.array([], dtype="float64")) == []
 
 
+def test_zooming_slices_every_overlay_with_price(qtbot, desk):
+    """A window is a view. Any array left unsliced would drift out of step."""
+    from evescreener.gui.chart import build_series
+
+    series = build_series(desk, 601)
+    window = series.tail(5)
+    assert len(window.close) == 5
+    for array in (window.high, window.low, window.volume):
+        assert array is not None and len(array) == 5
+    for values in window.moving.values():
+        assert len(values) == 5
+    assert len(window.stamps) == 5
+    if window.cloud is not None:
+        assert len(window.cloud[0]) == len(window.cloud[1]) == 5
+    # The last bar of a window is still the last bar of the series.
+    assert window.close[-1] == series.close[-1]
+    # Asking for more than exists, or for nothing, returns the series itself.
+    assert series.tail(10_000) is series and series.tail(0) is series
+
+
 def test_dense_windows_fall_back_rather_than_smear_into_a_block(qtbot, desk):
-    """Below a resolvable slot width the bars degrade; they never render as a mass."""
+    """Below a resolvable slot width the candle degrades; it never renders as a mass."""
     from PySide6.QtCore import QSize
 
-    from evescreener.gui.chart import BAR_MIN_SLOT, BAR_TICK_SLOT, ChartCanvas, build_series
+    from evescreener.gui.chart import (
+        CANDLE_BODY_SLOT,
+        CANDLE_MIN_SLOT,
+        CANDLE_NOTCH_SLOT,
+        ChartCanvas,
+        build_series,
+    )
 
-    assert 0 < BAR_MIN_SLOT < BAR_TICK_SLOT
+    assert 0 < CANDLE_MIN_SLOT < CANDLE_BODY_SLOT < CANDLE_NOTCH_SLOT
     canvas = ChartCanvas()
     qtbot.addWidget(canvas)
     canvas.set_series(build_series(desk, 601))
-    for size in (QSize(240, 400), QSize(1600, 900)):
-        canvas.resize(size)
-        canvas.grab()  # paints through every density regime without raising
+    for visible in (0, 60, 250):
+        canvas.visible = visible
+        for size in (QSize(240, 400), QSize(1600, 900)):
+            canvas.resize(size)
+            canvas.grab()  # paints through every density regime without raising
+
+
+def test_the_chart_opens_zoomed_in_enough_to_read(qtbot, desk):
+    """400 bars on a desk pane cannot resolve a body; the default must not try."""
+    from evescreener.gui.chart import DEFAULT_VISIBLE_BARS, ChartPanel, build_series
+
+    panel = ChartPanel()
+    qtbot.addWidget(panel)
+    assert panel.canvas.visible == DEFAULT_VISIBLE_BARS <= 150
+    panel.show_series(build_series(desk, 601))
+    panel.zoom.setCurrentIndex(panel.zoom.count() - 1)  # "all"
+    assert panel.canvas.visible == 0
 
 
 def test_the_chart_draws_the_levels_that_were_already_computed(qtbot, desk):

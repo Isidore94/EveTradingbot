@@ -38,12 +38,16 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
-- **Latest — the chart draws HLC bars (plan.md §19.2):** `uv run pytest -q` →
-  **558 passed, 7 deselected**, ruff check + format clean. Price is a high–low
-  range with a close tick, coloured against the previous close; no `open` is
-  synthesized and there is no candle body. Presentation only — no detector,
-  formula or verdict rule moved, so nothing on the live-validation checklist
-  below changes state.
+- **Latest — the chart draws range candles (plan.md §19.2, §17 D-30):**
+  `uv run pytest -q` → **560 passed, 7 deselected**, ruff check + format clean.
+  Body = the day's measured low→high, notch = the average, colour = the move
+  against the previous average; no `open` is synthesized. A conventional
+  open→close body was refused **on measurement**: yesterday's close falls
+  outside today's range on **55.7%** of 4,034,697 bars and **69.0%** of
+  tier-OK bars, so it would hang off its own wick on most bars. The chart now
+  opens at 120 bars with a 60/120/250/all selector. Presentation only — no
+  detector, formula or verdict rule moved, so nothing on the live-validation
+  checklist below changes state.
 - **The relative measurable gate (plan.md §13.2 amended, §17 D-29):**
   `uv run pytest -q` → **556 passed, 7 deselected**, ruff check + format clean.
   39 types (1.33%) now read UNKNOWN rather than carrying a float-noise risk

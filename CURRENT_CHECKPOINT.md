@@ -214,6 +214,59 @@ operator sign-off with them. What it needs is a fixture that reproduces the
 This is gate I's "eyeball FORGE against Adam4EVE — it must not disagree in
 **shape**" item, answered before it was walked. It disagrees in shape.
 
+### 4. The desk is not usable on the full universe — BLOCKING
+
+Measured offscreen against the real data directory, 2,947 tracked types and
+4,052,335 bars:
+
+| stage | seconds |
+|---|---:|
+| `load_desk()` — the whole local read | **5.6** |
+| MARKET | 0.1 |
+| CHARTS | 0.0 |
+| **BOARD** | **56.5** |
+| FOCUS | 0.2 |
+| **SCANNER** | **145.9** |
+| PAPER | 0.0 |
+| LEARNING | 9.1 |
+| HEALTH | 0.0 |
+| **total to open** | **~217 s (3.6 min)** |
+
+Reading the lake is not the problem — that is 5.6 s. The cost is that
+`ScannerPage.repopulate()` calls `run_scan()` over the entire universe, and
+`BoardPage` builds its whole cross-section, both synchronously on the **main
+thread**, inside `build()`.
+
+And `DeskPage.refresh()` calls `repopulate()`. `DeskWindow.refresh()` calls
+that for all eight pages. A `QTimer` fires it every **`refresh_seconds = 60`**.
+
+So on this universe the desk opens after 3.6 minutes with the UI blocked
+throughout, and is then **permanently behind its own timer** — a refresh
+costing ~217 s fired every 60 s, each one re-running the full scan on the
+thread that draws the window. It never becomes interactive.
+
+§19.2's "a UI timer may re-read local data freely" is still *true* about
+safety — nothing here can reach ESI, and that invariant holds. But "freely"
+silently assumed the re-read was cheap, and it is not: it re-runs the scan
+engine.
+
+Why the earlier build did not see it: it validated the desk on **2,001**
+tracked types against a **1.85M**-bar lake (§17). This machine's crawl
+measured **2,947** types and **4.05M** bars, so the same code is doing roughly
+twice the work.
+
+**Not fixed here.** Raising `refresh_seconds` is a mitigation, not a fix — it
+does nothing about the 3.6-minute open, and the desk would still freeze for
+3.6 minutes on every tick. The real fix is structural and is a §19.2 design
+decision to make deliberately:
+
+* build a page the first time it is **shown**, not in `DeskWindow.__init__`;
+* refresh only the visible page;
+* and/or move `run_scan` off the GUI thread.
+
+Until then, the CLI surfaces (`board`, `brief`, `scan`, `digest`) are the
+usable read, and they are the same code paths.
+
 ## The consolidated live-validation checklist
 
 ### A. Data honesty (was Phase 0's gate)

@@ -347,9 +347,22 @@ class PaperLedger:
         return marks
 
     def close_position(
-        self, *, position_id: str, book: pd.DataFrame, now: datetime | None = None, note: str = ""
+        self,
+        *,
+        position_id: str,
+        book: pd.DataFrame,
+        now: datetime | None = None,
+        note: str = "",
+        actual_price: float | None = None,
     ) -> dict:
-        """Bid-walk taker exit net of tax, or a refusal. Never off history."""
+        """Bid-walk taker exit net of tax, or a refusal. Never off history.
+
+        `actual_price` records a close the operator **really made**, at a gross
+        unit price he actually received. That is the only way to close a
+        position whose book can no longer price it — and it is real evidence,
+        not a substitute for a missing measurement. Sales tax still applies;
+        the operator supplies the price, not the arithmetic.
+        """
         now = ensure_utc(now or utcnow())
         positions = self.positions()
         position = positions.get(position_id)
@@ -358,14 +371,26 @@ class PaperLedger:
             self._refuse(f"unknown position {position_id!r}", context)
         if position.get("close"):
             self._refuse(f"position {position_id!r} is already closed", context)
-        bid = book_quote(
-            book,
-            type_id=position["type_id"],
-            side="buy",
-            tier_index=position["tier_index"],
-            now=now,
-            stale_after_minutes=self.config.paper.stale_book_minutes,
-        )
+        if actual_price is not None:
+            if actual_price <= 0:
+                self._refuse("an actual close price must be positive", context)
+            bid = BookQuote(
+                price=float(actual_price),
+                quantity=position["entry_units"],
+                sweep_ts=None,
+                age_minutes=None,
+                stale=False,
+                reason=None,
+            )
+        else:
+            bid = book_quote(
+                book,
+                type_id=position["type_id"],
+                side="buy",
+                tier_index=position["tier_index"],
+                now=now,
+                stale_after_minutes=self.config.paper.stale_book_minutes,
+            )
         if bid.price is None:
             self._refuse(bid.reason or "no bid-walk price", {**context, "sweep_ts": bid.sweep_ts})
         exit_net = self.costs.sell_proceeds(bid.price, maker=False)
@@ -393,6 +418,7 @@ class PaperLedger:
             ),
             "book_sweep_ts": bid.sweep_ts,
             "book_age_minutes": round(bid.age_minutes or 0.0, 2),
+            "priced_from": "operator_actual_fill" if actual_price is not None else "book_walk",
             "note": note,
         }
         return self._append(record)

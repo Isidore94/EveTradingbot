@@ -363,3 +363,46 @@ def test_an_empty_ledger_reports_honestly(ledger):
     assert report.closed == []
     assert report.verdict["verdict"] == "TOO_EARLY"
     assert "no read is offered" in render_report(report)
+
+
+def test_a_position_whose_book_vanished_can_still_be_closed_at_a_real_fill(ledger):
+    """Otherwise a position is stuck open forever with no honest way out."""
+    opened = ledger.open_position(
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+    )
+    gone = book(sweep=NOW + timedelta(days=3))
+    gone = gone[gone["side"] == "sell"]  # the bid side has disappeared
+    with pytest.raises(Refusal, match="no buy side"):
+        ledger.close_position(
+            position_id=opened["position_id"], book=gone, now=NOW + timedelta(days=3)
+        )
+    closed = ledger.close_position(
+        position_id=opened["position_id"],
+        book=gone,
+        now=NOW + timedelta(days=3),
+        actual_price=130.0,
+        note="sold it for real",
+    )
+    assert closed["priced_from"] == "operator_actual_fill"
+    assert closed["exit_walk_price"] == 130.0
+    # Tax still applies; the operator supplies the price, not the arithmetic.
+    assert closed["exit_effective_price"] == pytest.approx(130.0 * (1 - 0.03375))
+    assert closed["net_isk"] > 0
+
+
+def test_a_book_priced_close_is_labelled_as_such(ledger):
+    opened = ledger.open_position(
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+    )
+    closed = ledger.close_position(position_id=opened["position_id"], book=book(), now=NOW)
+    assert closed["priced_from"] == "book_walk"
+
+
+def test_a_nonsense_actual_price_is_refused(ledger):
+    opened = ledger.open_position(
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+    )
+    with pytest.raises(Refusal, match="must be positive"):
+        ledger.close_position(
+            position_id=opened["position_id"], book=book(), now=NOW, actual_price=0.0
+        )

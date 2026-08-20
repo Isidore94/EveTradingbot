@@ -83,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     paper_close = paper_sub.add_parser("close", help="price and record a taker exit")
     paper_close.add_argument("--position-id", required=True)
     paper_close.add_argument("--note", default="")
+    paper_close.add_argument(
+        "--actual-price",
+        type=float,
+        help="gross unit price you REALLY sold at; the only way to close a "
+        "position whose book can no longer price it",
+    )
     paper_sub.add_parser("mark", help="daily mark-to-market with staleness stamps")
     paper_sub.add_parser("report", help="the §12.4 report and verdict")
     paper_fill = paper_sub.add_parser(

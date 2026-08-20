@@ -57,8 +57,15 @@ def test_breakeven_win_rate_is_the_payoff_ratio():
     assert breakeven_win_rate(returns) == pytest.approx(1 / 3)
 
 
-def test_breakeven_is_unknown_without_both_sides():
-    assert breakeven_win_rate(np.array([1.0, 2.0])) is None
+def test_breakeven_takes_its_limits_when_one_side_is_empty():
+    """No losses -> 0 is required; no wins -> 1 is required. Not None.
+
+    Small-sample skepticism lives in the Wilson bound on the win rate, not in
+    refusing to state the payoff ratio.
+    """
+    assert breakeven_win_rate(np.array([1.0, 2.0])) == 0.0
+    assert breakeven_win_rate(np.array([-1.0, -2.0])) == 1.0
+    assert breakeven_win_rate(np.array([])) is None
 
 
 def test_max_drawdown_compounds_the_trade_sequence():

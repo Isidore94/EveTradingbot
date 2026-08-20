@@ -72,11 +72,22 @@ def wilson_lower_bound(wins: int, samples: int, z: float = 1.96) -> float | None
 
 
 def breakeven_win_rate(returns: np.ndarray) -> float | None:
-    """The win rate the observed payoff ratio requires: |L| / (W + |L|)."""
+    """The win rate the observed payoff ratio requires: |L| / (W + |L|).
+
+    The degenerate cases take their limits rather than returning None: a sample
+    with no losses needs a win rate of 0 to break even, and one with no wins
+    needs 1. Small-sample skepticism is carried by the Wilson lower bound on
+    the win rate, which is where it belongs — not by refusing to state the
+    payoff ratio.
+    """
+    if returns.size == 0:
+        return None
     wins = returns[returns > 0]
     losses = returns[returns <= 0]
-    if wins.size == 0 or losses.size == 0:
-        return None
+    if losses.size == 0:
+        return 0.0
+    if wins.size == 0:
+        return 1.0
     mean_win = float(wins.mean())
     mean_loss = abs(float(losses.mean()))
     if mean_win + mean_loss <= 0:

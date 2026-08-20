@@ -65,7 +65,8 @@ Python ≥3.12, uv-managed (`pyproject.toml` + `uv.lock`). Runtime deps:
 `config.toml` (gitignored) mirrored by a committed `config.example.toml`;
 `EVESCREENER_DATA_DIR` is the only env override. Storage: Parquet lake +
 SQLite `state.db` + JSONL streams under `./data/`. Entry:
-`python -m evescreener <daemon|ingest-history|sweep-books|census|digest|selftest>`.
+`python -m evescreener <selftest|sde|census|ingest-history|sweep-books|anchors|
+digest|backtest|killmails|cross-region|paper|report|daemon>`.
 All timestamps tz-aware UTC.
 
 ## Commands (gate before every commit)
@@ -75,9 +76,33 @@ All timestamps tz-aware UTC.
 - `uv run ruff check . && uv run ruff format --check .` — clean.
 - Commit small and green; push after each commit.
 
+## Measured facts that override the plan's estimates
+
+`plan.md` §17 carries a measured-facts table from the 2026-08-20 build. Read it
+before trusting any estimate in §0–§11. The ones that changed a decision:
+
+- `/markets/{region}/types` lists **19,152** Forge types; **16,789 of them 404
+  on `/markets/{region}/history`**. §3.2's "4xx should not occur" is withdrawn;
+  gaps are recorded in `history_missing` and a 404 never trips a breaker.
+- **Structure exposure is on the EXIT, not the entry.** Across all five hubs,
+  0.0% of visible ask volume is in player structures and 8.8–98.3% of bid
+  volume is. §9 R3 assumed the opposite direction.
+- **CCP does not filter outlier prints.** Without TR winsorization, 20.5% of
+  tracked types would carry a risk unit more than twice too large.
+- The **median spread** across two-sided Forge types is **98.8%**, and only
+  **2 of 315** tracked types have friction low enough for the measured gross
+  edge to survive costs.
+- A year of killmails is **15.7M rows / 1.3 GB** — §7's "trivial next to the
+  market lake" was wrong by ~30×.
+
 ## Where to read more
 
-- `plan.md` §0 — verified ESI facts and the six open named checks.
+- `plan.md` §17 — the measured facts, the deviation record, and the status of
+  the six named checks (#3 and #4 are now ANSWERED).
+- `plan.md` §12.4, §13.6, §14.3 — the frozen verdict rules. They were written
+  before the studies ran and are **never** retrofitted; a change is a
+  plan-level edit with the old rule left visible.
+- `plan.md` §0 — verified ESI facts and the named checks.
 - `plan.md` §11 — every locked default (cadences, tiers, floors, watchlist,
   Discord contract, anchor calendar, governance).
 - `VENDORED.md` — provenance of code vendored from TradingBotV3 (once created).

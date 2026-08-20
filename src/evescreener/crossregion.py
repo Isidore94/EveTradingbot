@@ -29,7 +29,24 @@ from .costs import CostModel
 from .store.db import Database
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
 
+LIMITATIONS = (
+    "Both legs are priced from a SIMULTANEOUS snapshot of two books, but the "
+    "haul is not simultaneous — PushX quotes 3 days for a highsec contract, plus "
+    "the sell queue. The margin shown is what you would get if the destination "
+    "bid held still, and it will not. This scan overstates realizable margin by "
+    "exactly as much as the destination price moves while the freight is in "
+    "flight, and that direction is unknowable at scan time.",
+    "The destination depth is today's. Selling into it days later competes with "
+    "whoever else read the same spread.",
+    "Freight is quoted, not invoiced. A cached quote additionally carries a "
+    "staleness haircut; a live one does not, and neither is a contract.",
+    "The capital is escrowed for the whole haul. That cost is charged as "
+    "capital-days only if `costs.annual_capital_cost_pct` is set — it defaults "
+    "to zero, so by default the ISK is modelled as free while it is in transit.",
+)
+
 __all__ = [
+    "LIMITATIONS",
     "CrossRegionRow",
     "CrossRegionScan",
     "FreightQuote",
@@ -468,6 +485,9 @@ def render_cross_region(scan: CrossRegionScan) -> str:
                 f"| {row['net_isk']:,.0f} | {row['net_pct']:.2f}% "
                 f"| {'; '.join(row.get('flags') or []) or '—'} |"
             )
+    lines.extend(["", "## What this scan cannot tell you", ""])
+    for index, limitation in enumerate(LIMITATIONS, start=1):
+        lines.append(f"{index}. {limitation}")
     if scan.notes:
         lines.extend(["", "## Notes"])
         for note in dict.fromkeys(scan.notes):

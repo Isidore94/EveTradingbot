@@ -329,3 +329,25 @@ def test_a_cached_freight_quote_is_flagged_in_the_row(config, seeded_db):
     scan = scan_cross_region(config, seeded_db, books, now=NOW, quote_fn=cached_quote)
     assert any("cached" in flag for flag in scan.rows[0]["flags"])
     assert scan.rows[0]["freight_isk"] == pytest.approx(1_100_000), "haircut applied"
+
+
+def test_the_scan_states_that_it_prices_a_non_simultaneous_haul_simultaneously(config, seeded_db):
+    from evescreener.crossregion import LIMITATIONS
+
+    books = {
+        10000002: book(10000002, ask_fill=100.0, bid_fill=99.0),
+        10000043: book(10000043, ask_fill=140.0, bid_fill=138.0),
+    }
+    text = render_cross_region(
+        scan_cross_region(config, seeded_db, books, now=NOW, quote_fn=quoted(1_000_000))
+    )
+    assert "What this scan cannot tell you" in text
+    assert "the haul is not simultaneous" in text
+    assert len(LIMITATIONS) == 4
+
+
+def test_the_zero_case_also_states_its_limitations(config, seeded_db):
+    text = render_cross_region(
+        scan_cross_region(config, seeded_db, {10000002: book(10000002)}, now=NOW)
+    )
+    assert "What this scan cannot tell you" in text

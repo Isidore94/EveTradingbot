@@ -282,6 +282,15 @@ def _cross_region_section(payload: dict | None) -> Section:
                 f"median {sorted(margins)[len(margins) // 2]:.2f}%, worst {min(margins):.2f}%",
             ]
         )
+    body.extend(
+        [
+            "",
+            "**Read this as a snapshot, not an edge.** Both legs are priced from a "
+            "simultaneous view of two books, but the haul takes days — PushX quotes "
+            "3 days for a highsec contract, plus the sell queue. The margin shown is "
+            "what you would get if the destination bid held still, and it will not.",
+        ]
+    )
     return Section(
         "4. Cross-region margins after freight",
         "data/reports/crossregion-*.json (`python -m evescreener cross-region`)",

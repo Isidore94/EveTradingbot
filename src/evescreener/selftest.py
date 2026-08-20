@@ -1,0 +1,127 @@
+"""`python -m evescreener selftest` — the offline health check.
+
+It answers one question honestly: *is this installation coherent?* Config and
+example parity, data-dir writability, schema creation, the frozen bar
+contract, and the cost model's arithmetic. It never touches the network.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from .config import Config, key_set, load_example
+from .store.db import Database
+from .store.lake import EVE_DAILY_BAR_COLUMNS
+
+
+@dataclass(slots=True)
+class Check:
+    name: str
+    ok: bool
+    detail: str
+
+    def render(self) -> str:
+        return f"[{'PASS' if self.ok else 'FAIL'}] {self.name}: {self.detail}"
+
+
+def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
+    checks: list[Check] = []
+    root = repo_root or Path.cwd()
+
+    # 1. config/example key parity — the secret-bearing file stays honest.
+    try:
+        example_keys = key_set(load_example(root))
+        if config.source_path is None:
+            checks.append(
+                Check("config parity", True, "running from the committed example; parity trivial")
+            )
+        else:
+            import tomllib
+
+            with config.source_path.open("rb") as stream:
+                live_keys = key_set(tomllib.load(stream))
+            missing = sorted(example_keys - live_keys)
+            extra = sorted(live_keys - example_keys)
+            ok = not missing and not extra
+            detail = "identical key sets" if ok else f"missing={missing} extra={extra}"
+            checks.append(Check("config parity", ok, detail))
+    except Exception as exc:  # noqa: BLE001 - selftest reports, never raises
+        checks.append(Check("config parity", False, f"{type(exc).__name__}: {exc}"))
+
+    # 2. User-Agent must be descriptive with contact info (plan.md §3.1).
+    agent = config.app.user_agent
+    ua_ok = "@" in agent and agent.startswith("EveTradingbot/") and len(agent) > 30
+    checks.append(Check("user agent", ua_ok, agent))
+
+    # 3. No secret may reach the committed example.
+    example = load_example(root)
+    leaked = bool(example.get("discord", {}).get("webhook_url"))
+    checks.append(
+        Check("example has no secrets", not leaked, "webhook_url empty in config.example.toml")
+    )
+
+    # 4. Data dir writable + schema creates.
+    try:
+        paths = config.paths.ensure()
+        with Database(paths.db) as db:
+            version = db.get_meta("schema_version")
+        checks.append(Check("state.db", True, f"schema v{version} at {paths.db}"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check("state.db", False, f"{type(exc).__name__}: {exc}"))
+
+    # 5. The bar contract is frozen and has no `open`.
+    contract_ok = EVE_DAILY_BAR_COLUMNS == [
+        "datetime",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "order_count",
+    ]
+    checks.append(
+        Check(
+            "bar contract",
+            contract_ok and "open" not in EVE_DAILY_BAR_COLUMNS,
+            ", ".join(EVE_DAILY_BAR_COLUMNS),
+        )
+    )
+
+    # 6. Cost model arithmetic reproduces the documented rates.
+    from .costs import CostModel
+
+    model = CostModel.from_config(config)
+    tax_ok = abs(model.sales_tax_pct - 3.375) < 1e-9
+    checks.append(
+        Check(
+            "cost model",
+            tax_ok,
+            f"sales tax {model.sales_tax_pct:.4f}% / broker {model.broker_fee_pct:.4f}% "
+            f"at Accounting {config.costs.accounting_level} / "
+            f"Broker Relations {config.costs.broker_relations_level}",
+        )
+    )
+
+    # 7. Budget self-caps are actually below the hard limits.
+    caps_ok = (
+        config.budget.orders_token_self_cap < config.budget.orders_token_limit
+        and config.budget.history_requests_per_minute <= 150
+    )
+    checks.append(
+        Check(
+            "self-caps",
+            caps_ok,
+            f"orders {config.budget.orders_token_self_cap}/{config.budget.orders_token_limit} "
+            f"tokens per {config.budget.orders_window_minutes} min; "
+            f"history {config.budget.history_requests_per_minute}/min",
+        )
+    )
+
+    return checks
+
+
+def selftest_report(checks: list[Check]) -> str:
+    lines = [check.render() for check in checks]
+    failures = sum(1 for check in checks if not check.ok)
+    lines.append(f"{len(checks) - failures}/{len(checks)} checks passed")
+    return "\n".join(lines)

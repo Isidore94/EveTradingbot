@@ -1,0 +1,187 @@
+# EveTradingbot configuration template.
+#
+# Copy to `config.toml` (gitignored) and fill in. `selftest` FAILS if the key
+# sets of this file and `config.toml` diverge, so every key here must exist
+# there and vice versa (plan.md §11 D2).
+
+[app]
+# Descriptive User-Agent contact per CCP best practice. A default library UA
+# is a bannable-adjacent offence; this string is never optional.
+contact = "aaron.siano@gmail.com"
+project_url = "https://github.com/Isidore94/EveTradingbot"
+# Pinned deliberately, never floated (plan.md §11 D2).
+compatibility_date = "2026-08-18"
+# Data dir for the lake, state.db and JSONL streams. `EVESCREENER_DATA_DIR`
+# overrides this and is the only env override in v1.
+data_dir = "./data"
+
+[esi]
+base_url = "https://esi.evetech.net"
+# The Forge. v1's heartland; Jita 4-4 is an NPC station (plan.md §9 R3).
+home_region_id = 10000002
+# Domain, Sinq Laison, Heimatar, Metropolis — WARM tier, hourly.
+secondary_region_ids = [10000043, 10000032, 10000030, 10000042]
+timeout_seconds = 30.0
+# Bounded retries on 5xx / transport errors ONLY. 4xx is never retried.
+max_retries = 3
+retry_base_seconds = 2.0
+# Per-feed circuit breaker (plan.md §3.3).
+circuit_breaker_failures = 5
+circuit_breaker_cooldown_minutes = 15
+# Jitter added after `Expires` so refreshes never land on the boundary.
+expiry_jitter_seconds = 8.0
+
+[budget]
+# market-order group: 12,000 tokens / 15-min floating window (verified).
+orders_token_limit = 12000
+orders_window_minutes = 15
+# Self-cap: hard stop at 50% so a bug can never spend to the cap (§11 D3).
+orders_token_self_cap = 6000
+# History is outside the token regime: CCP-stated 300 req/min/IP. Self-cap 50%.
+history_requests_per_minute = 150
+# Legacy error limit: 100 non-2xx/3xx per minute -> HTTP 420 on all routes.
+error_limit_stop_seconds = 60
+
+[cadence]
+# All times UTC. EVE time IS UTC and the digest displays UTC only.
+digest_utc = "16:00"
+history_job_utc = "11:20"
+book_hot_start_utc = "15:00"
+book_hot_end_utc = "17:00"
+# Outside the HOT window the Forge book is swept hourly.
+book_cold_interval_minutes = 60
+secondary_hub_interval_minutes = 60
+universe_refresh_utc = "11:00"
+killmail_poll_interval_seconds = 300
+
+[costs]
+# Skills are config, never constants (plan.md §5).
+accounting_level = 5
+broker_relations_level = 5
+sales_tax_base_pct = 7.5
+# 7.5% x (1 - 0.11 x Accounting) -> 3.375% at V.
+sales_tax_per_level_reduction = 0.11
+broker_fee_base_pct = 3.0
+# Broker Relations reduces the base by 0.3 percentage points per level; the
+# remainder comes from standings (plan.md §5, open check #5/#6).
+broker_fee_per_level_pct = 0.3
+broker_fee_standings_pct = 0.5
+# Additional charge when modifying/relisting a resting order (open check #5).
+relist_surcharge_multiple = 1.0
+# ISK notional tiers the depth walk prices (plan.md §11 D3).
+notional_tiers_isk = [250000000.0, 1000000000.0, 2500000000.0]
+# A book sweep older than this renders depth cost UNKNOWN, never priced off
+# history (plan.md §5).
+book_staleness_minutes = 60
+# Capital cost of escrowed ISK, used to charge holding time in R terms.
+annual_capital_cost_pct = 0.0
+
+[universe]
+# Pre-census floor; Phase 1's census re-derives these and writes the measured
+# values back into plan.md §11 D3.
+min_median_isk_value = 100000000.0
+min_median_order_count = 30
+liquidity_lookback_days = 30
+# One-time full-catalog crawl cap (safety valve, not a target).
+census_max_types = 25000
+# Seed watchlist (plan.md §11 D4). An unresolvable name is a LOUD ERROR.
+watchlist = [
+  "Tritanium", "Pyerite", "Mexallon", "Isogen", "Nocxium", "Zydrine",
+  "Megacyte", "Morphite",
+  "Nitrogen Fuel Block", "Oxygen Fuel Block", "Helium Fuel Block",
+  "Hydrogen Fuel Block", "Nitrogen Isotopes", "Helium Isotopes",
+  "PLEX", "Large Skill Injector", "Skill Extractor",
+  "Nanite Repair Paste", "Antimatter Charge M", "Antimatter Charge L",
+  "Scourge Light Missile", "Scourge Heavy Missile", "Inferno Heavy Missile",
+  "Hobgoblin II", "Hammerhead II", "Ogre II",
+  "Damage Control II", "Large Shield Extender II",
+  "Ballistic Control System II", "Gyrostabilizer II", "Heat Sink II",
+  "Magnetic Field Stabilizer II", "Drone Damage Amplifier II",
+  "10MN Afterburner II", "50MN Microwarpdrive II", "Warp Disruptor II",
+  "Warp Scrambler II", "Stasis Webifier II",
+  "Caracal", "Vexor", "Drake", "Ferox", "Hurricane", "Myrmidon", "Gila",
+  "Ishtar", "Praxis", "Dominix", "Raven", "Megathron",
+]
+
+[sde]
+# Official reworked static data. Fuzzwork's SQLite conversion is the fallback.
+types_url = "https://developers.eveonline.com/static-data/tranquility/types.jsonl"
+market_groups_url = "https://developers.eveonline.com/static-data/tranquility/marketGroups.jsonl"
+refresh_days = 30
+
+[signals]
+atr_length = 20
+# TR winsorization: clamp TR at k x rolling median TR and flag the bar
+# (plan.md §6, open check #4). Never let one 10,000% print own the risk unit.
+atr_winsor_k = 8.0
+atr_winsor_window = 60
+rrs_length = 20
+# Forge Composite: turnover-weighted, chain-linked monthly, 10% single-type cap.
+composite_members = 100
+composite_single_weight_cap = 0.10
+composite_rebalance_days = 30
+# Cohort scope: nearest marketGroup ancestor with at least this many members.
+cohort_min_members = 8
+# Round-number ISK level family (1M / 100M / 1B are player anchors).
+round_number_levels_isk = [1000000.0, 100000000.0, 1000000000.0]
+# Anchors older than the history horizon are marked truncated, never dropped.
+anchor_fresh_days = 10
+
+[screen]
+max_candidates = 25
+# A setup must clear breakeven at the SMALLEST tier or it is not opportunity.
+min_net_edge_pct = 0.0
+# Participation: order_count vs its own 20-day baseline.
+participation_window = 20
+# Spoof flag: largest single order / total resting volume.
+top_order_share_flag = 0.5
+
+[discord]
+# Webhook URL. Never committed. Empty string = `unconfigured` (not an error).
+webhook_url = ""
+max_content_chars = 2000
+# No @here/@everyone in v1 — nothing in a D1 screener is urgent.
+username = "EveTradingbot"
+
+[paper]
+# Fill realism is non-negotiable (plan.md §12).
+stale_book_minutes = 60
+# notional > this share of 30d median daily ISK turnover -> self-impact flag.
+self_impact_turnover_share = 0.10
+# Predicted vs actual effective price tolerance, stated now not retrofitted.
+fill_tolerance_pct_of_notional = 0.5
+# Frozen verdict tracker thresholds (plan.md §12.4).
+verdict_first_read_closed = 20
+verdict_falsify_negative_closed = 40
+default_notional_isk = 250000000.0
+
+[backtest]
+# Frozen study parameters (plan.md §13). Changing these after a run is a
+# plan-level edit with a stated reason, never a session convenience.
+horizons_days = [5, 10, 20]
+anchor_lookback_days = 90
+entry_band_sigma = 1.0
+min_bars = 120
+min_rrs = -0.5
+participation_floor = 0.7
+haircut_multipliers = [1.0, 2.0, 3.0]
+wilson_z = 1.96
+max_concurrent_positions = 0
+
+[killmails]
+everef_base_url = "https://data.everef.net/killmails"
+r2z2_base_url = "https://r2z2.zkillboard.com/ephemeral"
+backfill_days = 365
+destruction_recent_days = 7
+destruction_baseline_days = 90
+# Frozen lead-lag hypothesis window (plan.md §14).
+lead_lag_max_lag_days = 5
+
+[freight]
+pushx_quote_url = "https://api.pushx.net/api/quote/json/"
+# Quote staleness haircut applied to freight cost when the quote is cached.
+quote_cache_minutes = 720
+staleness_haircut_pct = 10.0
+collateral_multiple = 1.0
+# No freight quote -> no cross-region row, ever.
+enabled = true

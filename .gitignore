@@ -1,0 +1,9 @@
+# Operator secrets and local state
+config.toml
+data/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+uv.lock.bak

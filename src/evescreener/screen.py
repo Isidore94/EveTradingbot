@@ -7,8 +7,10 @@ notional**, never a gross margin.
 
 The two rules that shape every row:
 
-* a setup whose expected move does not clear `breakeven_move_pct` at the
-  **smallest** tier is not opportunity and is not shown;
+* a setup whose **net edge at the smallest notional tier** is not positive is
+  not opportunity and is not shown. The net edge prices the actual round trip
+  — ask-walk in, bid-walk out, tax inside — rather than subtracting two
+  percentages measured against different references (see `_net_edge_pct`);
 * a stale book renders the cost UNKNOWN and the row is flagged, never silently
   priced off history.
 

@@ -172,7 +172,7 @@ def test_committed_calendar_parses_and_ships_unconfirmed():
     anchors = load_anchors(REPO_ANCHORS)
     assert anchors, "the committed anchor calendar must parse"
     assert all(not anchor.confirmed for anchor in anchors), (
-        "seeded placeholder dates must not be treated as verified anchors"
+        "a feed-derived date is a candidate until the operator confirms it"
     )
 
 

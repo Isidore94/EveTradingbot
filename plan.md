@@ -921,7 +921,14 @@ cohort**, at each horizon and each notional tier:
 - **net expectancy per trade** (mean `net_return_pct`);
 - the strategy equity curve's **maximum drawdown**;
 - **sensitivity**: every metric at 1×, 2× and 3× the measured haircut;
-- the `haircut_unknown` exclusion count.
+- the `haircut_unknown` exclusion count;
+- **added 2026-08-20, after the first run:** the **gross** expectancy and win
+  rate of the same instances, and the measured round-trip friction. This does
+  not change the verdict rule — it makes a negative verdict *readable*. "The
+  setup has no edge" and "the setup has an edge that EVE's frictions eat" are
+  different answers with different next steps, and without the gross figure the
+  report cannot tell them apart. Reporting more is never a retrofit; the
+  **rule** in §13.6 is untouched.
 
 ### 13.6 The verdict rule — FROZEN before measurement
 
@@ -958,6 +965,14 @@ carries these, verbatim, in its own body:
    per instance, not per ISK-day of a real portfolio.
 6. **The haircut is measured, not the spread paid.** It assumes the operator
    crosses the spread exactly as the depth walk describes, at one moment.
+7. **Instances overlap** (added 2026-08-20 after the first run exposed it). The
+   setup fires on *every* qualifying bar, so one sustained dip contributes many
+   instances sharing most of their forward window. That inflates `n` and makes
+   the Wilson bound tighter than the independent-sample reading it resembles.
+   It does **not** bias the expectancy, which is what §13.6's verdict actually
+   turns on — but any conclusion resting on the interval rather than the mean
+   should be read as weaker than its `n` suggests. A non-overlapping variant is
+   a **separate study with its own pre-stated rule**, not a re-run of this one.
 
 ---
 

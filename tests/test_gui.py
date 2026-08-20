@@ -16,7 +16,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytest.importorskip("PySide6")
+# QtWidgets, not the bare package: a PySide6 whose shared libraries cannot
+# load (a headless box without GL) must SKIP here, never crash collection.
+pytest.importorskip("PySide6.QtWidgets")
+pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.gui
 
 from evescreener.gui.data import DeskData  # noqa: E402

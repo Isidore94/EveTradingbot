@@ -174,6 +174,9 @@ class HorizonStats:
     expectancy_pct: float | None
     median_pct: float | None
     max_drawdown_pct: float | None
+    gross_expectancy_pct: float | None = None
+    gross_win_rate: float | None = None
+    round_trip_haircut_pct: float | None = None
     first_half_wilson_lb: float | None = None
     first_half_breakeven: float | None = None
     second_half_wilson_lb: float | None = None
@@ -191,6 +194,9 @@ class HorizonStats:
             "breakeven_win_rate": self.breakeven_win_rate,
             "expectancy_pct": self.expectancy_pct,
             "median_pct": self.median_pct,
+            "gross_expectancy_pct": self.gross_expectancy_pct,
+            "gross_win_rate": self.gross_win_rate,
+            "round_trip_haircut_pct": self.round_trip_haircut_pct,
             "max_drawdown_pct": self.max_drawdown_pct,
             "first_half_wilson_lb": self.first_half_wilson_lb,
             "first_half_breakeven": self.first_half_breakeven,
@@ -211,6 +217,20 @@ def _stats(
     samples = int(returns.size)
     if samples == 0:
         return HorizonStats(horizon, tier, multiple, 0, 0, None, None, None, None, None, None)
+    # The gross figure is reported alongside every net one. Without it a
+    # negative verdict cannot be read: "the setup has no edge" and "the setup
+    # has an edge that EVE's frictions eat" are very different answers, and only
+    # the second one tells the operator where to look next.
+    gross = ((instances["exit_close"] / instances["entry_close"] - 1.0) * 100.0).to_numpy(
+        dtype="float64"
+    )
+    if {"entry_effective", "exit_effective"} <= set(instances.columns):
+        haircut = (
+            (instances["entry_effective"] / instances["entry_close"] - 1.0)
+            + (1.0 - instances["exit_effective"] / instances["exit_close"])
+        ).mean() * 100.0
+    else:
+        haircut = None
     wins = int((returns > 0).sum())
     ordered = instances.sort_values("datetime")
     # §13.6 says "both halves of the sample PERIOD", so the split is by date,
@@ -231,6 +251,9 @@ def _stats(
         breakeven_win_rate=breakeven_win_rate(returns),
         expectancy_pct=float(returns.mean()),
         median_pct=float(np.median(returns)),
+        gross_expectancy_pct=float(gross.mean()),
+        gross_win_rate=float((gross > 0).mean()),
+        round_trip_haircut_pct=float(haircut) if haircut is not None else None,
         max_drawdown_pct=max_drawdown(ordered["net_return_pct"].to_numpy(dtype="float64")),
         first_half_wilson_lb=wilson_lower_bound(int((first > 0).sum()), first.size, wilson_z)
         if first.size
@@ -287,12 +310,30 @@ def verdict(stats: HorizonStats | None) -> dict:
         elif lb <= breakeven:
             failures.append(f"{label}: Wilson LB {lb:.3f} <= breakeven {breakeven:.3f}")
     if failures:
-        return {
+        result = {
             "rule": rule,
             "verdict": "NOT PLAUSIBLE",
             "reason": "; ".join(failures),
             "samples": stats.samples,
         }
+        if stats.gross_expectancy_pct is not None:
+            # A negative verdict is unreadable without this. "The setup has no
+            # edge" and "the setup has an edge that EVE's frictions eat" are
+            # very different answers, and only the second tells the operator
+            # where to look next.
+            result["gross_context"] = (
+                f"before costs the same instances returned "
+                f"{stats.gross_expectancy_pct:+.2f}% on average "
+                f"(win rate {stats.gross_win_rate:.1%}); the measured round-trip "
+                f"friction at this tier and multiple is "
+                f"{stats.round_trip_haircut_pct:.2f}%. The setup is not "
+                "directionless — the frictions are larger than the edge."
+                if stats.gross_expectancy_pct > 0
+                else f"before costs the same instances returned "
+                f"{stats.gross_expectancy_pct:+.2f}% on average, so there is no "
+                "pre-cost edge to lose."
+            )
+        return result
     return {
         "rule": rule,
         "verdict": "PLAUSIBLE",
@@ -323,6 +364,13 @@ LIMITATIONS = (
     "The haircut is measured, not the spread actually paid. It assumes the "
     "operator crosses the spread exactly as the depth walk describes, at one "
     "moment in time.",
+    "Instances OVERLAP. The setup fires on every qualifying bar, so a single "
+    "sustained dip contributes many instances that share most of their forward "
+    "window. That inflates the sample count and makes the Wilson bound tighter "
+    "than the independent-sample reading it looks like. It does NOT bias the "
+    "expectancy, which is what this study's verdict actually turns on — but any "
+    "conclusion resting on the confidence interval rather than the mean should "
+    "be treated as weaker than its n suggests.",
 )
 
 
@@ -660,6 +708,9 @@ def render_backtest(result: BacktestResult) -> str:
         lines.append(f"### {horizon}-day horizon: **{judgement['verdict']}**")
         lines.append("")
         lines.append(f"{judgement.get('reason', '')}")
+        if judgement.get("gross_context"):
+            lines.append("")
+            lines.append(f"**Context:** {judgement['gross_context']}")
         lines.append("")
     if result.verdicts:
         first = next(iter(result.verdicts.values()))
@@ -670,10 +721,10 @@ def render_backtest(result: BacktestResult) -> str:
         lines.append("## Results by horizon, tier and haircut sensitivity")
         lines.append("")
         lines.append(
-            "| horizon | notional | haircut | n | win rate | Wilson LB | breakeven WR "
-            "| expectancy % | median % | max DD % |"
+            "| horizon | notional | haircut | n | gross % | friction % | win rate "
+            "| Wilson LB | breakeven WR | net expectancy % | median % | max DD % |"
         )
-        lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for cell in result.cells:
 
             def fmt(value, digits=3):
@@ -682,6 +733,8 @@ def render_backtest(result: BacktestResult) -> str:
             lines.append(
                 f"| {cell['horizon_days']}d | {cell['notional_isk'] / 1e9:.2f}B "
                 f"| {cell['haircut_multiple']:.0f}x | {cell['samples']} "
+                f"| {fmt(cell.get('gross_expectancy_pct'), 2)} "
+                f"| {fmt(cell.get('round_trip_haircut_pct'), 2)} "
                 f"| {fmt(cell['win_rate'])} | {fmt(cell['wilson_lb'])} "
                 f"| {fmt(cell['breakeven_win_rate'])} | {fmt(cell['expectancy_pct'])} "
                 f"| {fmt(cell['median_pct'])} | {fmt(cell['max_drawdown_pct'], 2)} |"

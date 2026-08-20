@@ -317,7 +317,7 @@ def test_report_always_states_its_own_limitations(config):
     report = render_backtest(result)
     assert "Limitations of this study" in report
     assert "No historical order books exist" in report
-    assert len(LIMITATIONS) == 6
+    assert len(LIMITATIONS) == 7
 
 
 def test_report_states_the_frozen_hypothesis(config):
@@ -342,6 +342,8 @@ def test_halves_split_by_date_not_by_instance_count():
         {
             "datetime": dates,
             "net_return_pct": [5.0] * 100 + [-5.0] * 4,
+            "entry_close": [100.0] * 104,
+            "exit_close": [105.0] * 100 + [95.0] * 4,
         }
     )
     stats = _stats(frame, horizon=10, tier=250e6, multiple=1.0, wilson_z=1.96)
@@ -349,3 +351,40 @@ def test_halves_split_by_date_not_by_instance_count():
     assert stats.first_half_wilson_lb > 0.9
     assert stats.second_half_wilson_lb == 0.0
     assert stats.second_half_breakeven == 1.0
+
+
+def test_a_negative_verdict_reports_the_gross_edge_that_frictions_ate():
+    """A negative verdict is unreadable without the pre-cost number.
+
+    "The setup has no edge" and "the setup has an edge that EVE's frictions
+    eat" are very different answers to the operator's question, and only the
+    second one tells him where to look next.
+    """
+    result = verdict(
+        stats(
+            expectancy_pct=-21.8,
+            gross_expectancy_pct=3.08,
+            gross_win_rate=0.537,
+            round_trip_haircut_pct=28.79,
+        )
+    )
+    assert result["verdict"] == "NOT PLAUSIBLE"
+    assert "not directionless" in result["gross_context"]
+    assert "+3.08%" in result["gross_context"]
+    assert "28.79%" in result["gross_context"]
+
+
+def test_a_directionless_setup_says_so_plainly():
+    result = verdict(
+        stats(
+            expectancy_pct=-5.0,
+            gross_expectancy_pct=-1.2,
+            gross_win_rate=0.41,
+            round_trip_haircut_pct=4.0,
+        )
+    )
+    assert "no pre-cost edge to lose" in result["gross_context"]
+
+
+def test_a_plausible_verdict_needs_no_excuse():
+    assert "gross_context" not in verdict(stats())

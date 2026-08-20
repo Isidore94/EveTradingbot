@@ -212,7 +212,14 @@ def test_backtest_metrics_match_the_golden_fixture():
         priced, excluded = price_instances(
             instances, haircuts, tier=250e6, multiple=multiple, sales_tax_pct=3.375
         )
-        stats = _stats(priced, horizon=10, tier=250e6, multiple=multiple, wilson_z=1.96)
+        stats = _stats(
+            priced,
+            horizon=10,
+            tier=250e6,
+            multiple=multiple,
+            wilson_z=1.96,
+            sales_tax_pct=3.375,
+        )
         assert excluded == expected["excluded_haircut_unknown"]
         assert stats.samples == expected["samples"]
         for field in (
@@ -221,7 +228,11 @@ def test_backtest_metrics_match_the_golden_fixture():
             "breakeven_win_rate",
             "expectancy_pct",
             "median_pct",
-            "max_drawdown_pct",
+            "effective_samples",
+            "wilson_lb_clustered",
+            "book_haircut_pct",
+            "sales_tax_pct",
+            "total_friction_pct",
             "gross_expectancy_pct",
             "gross_win_rate",
             "round_trip_haircut_pct",

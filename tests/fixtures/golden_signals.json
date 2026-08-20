@@ -4,13 +4,13 @@
     "generator": "tests/generate_golden.py",
     "note": "regenerate FIRST when a detector changes, review the diff, then freeze"
   },
-  "atr20_last": 29739.966551626025,
+  "atr20_last": 29739.966551626032,
   "atr20_tail": [
-    29219.318323642703,
-    28904.82199633894,
+    29219.318323642707,
+    28904.821996338946,
     28760.357747747632,
-    29336.945536150226,
-    29739.966551626025
+    29336.94553615023,
+    29739.966551626032
   ],
   "avwap": {
     "0": {
@@ -64,7 +64,9 @@
   },
   "backtest": {
     "1x": {
+      "book_haircut_pct": 3.4999999999999925,
       "breakeven_win_rate": 0.6416463909319432,
+      "effective_samples": 343,
       "excluded_haircut_unknown": 0,
       "expectancy_pct": -5.6514551599596805,
       "first_half_breakeven": 0.6667453413444876,
@@ -73,20 +75,24 @@
       "gross_win_rate": 0.5575,
       "haircut_multiple": 1.0,
       "horizon_days": 10,
-      "max_drawdown_pct": -99.99999999727139,
       "median_pct": -5.926576633392427,
       "notional_isk": 250000000.0,
       "round_trip_haircut_pct": 6.807499999999987,
+      "sales_tax_pct": 3.375,
       "samples": 400,
       "second_half_breakeven": 0.6140104111034348,
       "second_half_wilson_lb": 0.1329455066253411,
+      "total_friction_pct": 6.756874999999985,
       "verdict": "NOT PLAUSIBLE",
       "wilson_lb": 0.16144205642368673,
+      "wilson_lb_clustered": 0.15950175957834292,
       "win_rate": 0.1975,
       "wins": 79
     },
     "2x": {
+      "book_haircut_pct": 7.000000000000004,
       "breakeven_win_rate": 0.7044878479596668,
+      "effective_samples": 343,
       "excluded_haircut_unknown": 0,
       "expectancy_pct": -8.922902623206582,
       "first_half_breakeven": 0.705470110658006,
@@ -95,20 +101,24 @@
       "gross_win_rate": 0.5575,
       "haircut_multiple": 2.0,
       "horizon_days": 10,
-      "max_drawdown_pct": -100.0,
-      "median_pct": -9.188484517116695,
+      "median_pct": -9.188484517116692,
       "notional_isk": 250000000.0,
-      "round_trip_haircut_pct": 10.24,
+      "round_trip_haircut_pct": 10.240000000000002,
+      "sales_tax_pct": 3.375,
       "samples": 400,
       "second_half_breakeven": 0.7039277051506706,
       "second_half_wilson_lb": 0.0616626136498636,
+      "total_friction_pct": 10.138749999999996,
       "verdict": "NOT PLAUSIBLE",
       "wilson_lb": 0.06571691296712198,
+      "wilson_lb_clustered": 0.06440128540105199,
       "win_rate": 0.09,
       "wins": 36
     },
     "3x": {
+      "book_haircut_pct": 10.5,
       "breakeven_win_rate": 0.8194818751535724,
+      "effective_samples": 343,
       "excluded_haircut_unknown": 0,
       "expectancy_pct": -12.100432934398533,
       "first_half_breakeven": 0.8568319987940884,
@@ -117,18 +127,33 @@
       "gross_win_rate": 0.5575,
       "haircut_multiple": 3.0,
       "horizon_days": 10,
-      "max_drawdown_pct": -100.0,
       "median_pct": -12.356749112312965,
       "notional_isk": 250000000.0,
       "round_trip_haircut_pct": 13.672499999999992,
+      "sales_tax_pct": 3.375,
       "samples": 400,
       "second_half_breakeven": 0.7817663843974035,
       "second_half_wilson_lb": 0.02385227172470417,
+      "total_friction_pct": 13.520624999999997,
       "verdict": "NOT PLAUSIBLE",
       "wilson_lb": 0.03061683210766865,
+      "wilson_lb_clustered": 0.02891387124517107,
       "win_rate": 0.0475,
       "wins": 19
     }
+  },
+  "backtest_withdrawn_pre_r3": {
+    "1x": {
+      "max_drawdown_pct": -99.99999999727139
+    },
+    "2x": {
+      "max_drawdown_pct": -100.0
+    },
+    "3x": {
+      "max_drawdown_pct": -100.0
+    },
+    "_reason": "max_drawdown_pct was sequential compounding of OVERLAPPING trades in date order, with no portfolio or capital-allocation model behind it. It was not a drawdown. The -100% readings at 2x and 3x are the artefact that gives it away.",
+    "_withdrawn_on": "2026-08-20"
   },
   "indices": {
     "churn_final_members": 9,
@@ -151,11 +176,11 @@
       1000
     ],
     "forge_ew_tail": [
-      1125.7785112573094,
-      1113.0455942351134,
-      1110.7922569663028,
-      1103.7911089792792,
-      1099.657321914606
+      1125.7785112573106,
+      1113.0455942351145,
+      1110.7922569663037,
+      1103.7911089792801,
+      1099.6573219146069
     ],
     "forge_ew_top_weight": 0.08333333333333333,
     "forge_members": [
@@ -173,11 +198,11 @@
       1000
     ],
     "forge_tail": [
-      1160.1696589640937,
-      1143.0784142140092,
-      1139.6701681250527,
-      1132.2832218492597,
-      1125.99199566019
+      1160.169658964093,
+      1143.0784142140085,
+      1139.670168125052,
+      1132.283221849259,
+      1125.9919956601893
     ],
     "forge_top_weight": 0.1
   },
@@ -216,7 +241,7 @@
   "moving": {
     "cloud_9_21": {
       "close": 937620.8809821022,
-      "fast": 966099.4326344252,
+      "fast": 966099.4326344253,
       "position": "below",
       "slope": "falling",
       "slow": 975777.3545887378
@@ -234,23 +259,23 @@
     "ema9_tail": [
       974820.9921477645,
       979409.5115480276,
-      978610.1304386023,
-      973219.070547506,
-      966099.4326344252
+      978610.1304386024,
+      973219.0705475061,
+      966099.4326344253
     ],
     "sma20_tail": [
       980969.0457842611,
       983338.6226995578,
       984569.7916899726,
       983639.9107479214,
-      981890.5244585214
+      981890.5244585216
     ],
     "sma50_tail": [
       1007459.3024355909,
       1006723.2650175196,
       1005157.7149682787,
       1003438.7930921895,
-      1001801.9426922795
+      1001801.9426922797
     ]
   },
   "true_range_clamped_bars": 1,

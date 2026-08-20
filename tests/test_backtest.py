@@ -10,7 +10,6 @@ from evescreener.backtest import (
     LIMITATIONS,
     HorizonStats,
     breakeven_win_rate,
-    max_drawdown,
     measure_haircuts,
     price_instances,
     render_backtest,
@@ -33,7 +32,6 @@ def stats(**overrides) -> HorizonStats:
         breakeven_win_rate=0.45,
         expectancy_pct=1.2,
         median_pct=0.8,
-        max_drawdown_pct=-12.0,
         first_half_wilson_lb=0.55,
         first_half_breakeven=0.45,
         second_half_wilson_lb=0.54,
@@ -68,9 +66,23 @@ def test_breakeven_takes_its_limits_when_one_side_is_empty():
     assert breakeven_win_rate(np.array([])) is None
 
 
-def test_max_drawdown_compounds_the_trade_sequence():
-    assert max_drawdown(np.array([10.0, -20.0, 5.0])) == pytest.approx(-20.0, abs=1e-9)
-    assert max_drawdown(np.array([])) is None
+def test_max_drawdown_is_withdrawn_not_merely_unused():
+    """§21 R3: compounding overlapping trades in date order is not an equity
+    curve, and there is no portfolio model behind it. The metric is gone from
+    the code; its last measured values are preserved in the golden fixture
+    under `backtest_withdrawn_pre_r3` so no historical number is erased."""
+    import json
+    from pathlib import Path
+
+    from evescreener import backtest
+
+    assert not hasattr(backtest, "max_drawdown")
+    golden = json.loads(
+        (Path(__file__).parent / "fixtures" / "golden_signals.json").read_text(encoding="utf-8")
+    )
+    withdrawn = golden["backtest_withdrawn_pre_r3"]
+    assert "_reason" in withdrawn
+    assert withdrawn["2x"]["max_drawdown_pct"] == -100.0
 
 
 # -- the frozen verdict rule ------------------------------------------------

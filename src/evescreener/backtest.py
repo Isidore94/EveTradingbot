@@ -45,7 +45,11 @@ __all__ = [
     "render_backtest",
     "run_backtest",
     "verdict",
+    "effective_samples",
+    "friction_breakdown",
+    "stress_factors",
     "wilson_lower_bound",
+    "wilson_one_sided_confidence",
     "write_backtest",
 ]
 
@@ -96,14 +100,108 @@ def breakeven_win_rate(returns: np.ndarray) -> float | None:
     return mean_loss / (mean_win + mean_loss)
 
 
-def max_drawdown(returns: np.ndarray) -> float | None:
-    """Max drawdown of the equity curve formed by compounding each trade."""
-    if returns.size == 0:
-        return None
-    equity = np.cumprod(1.0 + returns / 100.0)
-    peak = np.maximum.accumulate(equity)
-    drawdown = equity / peak - 1.0
-    return float(drawdown.min() * 100.0)
+def wilson_one_sided_confidence(z: float) -> float:
+    """The one-sided confidence a given z actually buys (§21 R3).
+
+    `z = 1.96` is the **two-sided** 95% critical value, so as a one-sided lower
+    bound it is a **97.5%** bound. The code used 1.96 and the prose called it
+    "95% one-sided". The number is left alone — changing it would move a frozen
+    verdict — and the label is corrected instead. The error was in the
+    conservative direction: a 97.5% bound is stricter than a 95% one, so a NOT
+    PLAUSIBLE verdict reached under it cannot have been flattered by it.
+    """
+    return float(0.5 * (1.0 + math.erf(z / math.sqrt(2.0))))
+
+
+def stress_factors(
+    *, entry_haircut: float, exit_haircut: float, multiple: float
+) -> tuple[float, float]:
+    """Price multipliers for one stress level, bounded to the possible (§21 R3).
+
+    The exit factor was `1 - haircut * multiple`, which goes **negative** for a
+    wide book at 2x or 3x. With bid 1, ask 99 and mid 50 the exit haircut is
+    about 0.98, so 2x stress produced a factor of −0.96: a sale realising
+    negative ISK, and an unlevered long returning worse than −100%.
+
+    A haircut is the fraction of the price the book takes, so it saturates at
+    **all of it**. Clamping the stressed haircut to 1.0 represents that
+    explicitly: the exit realises nothing, the position is a total loss, and
+    the arithmetic stays inside what can physically happen. The entry needs no
+    ceiling — paying more is always possible — but it does need a floor at the
+    unstressed price, which a non-negative haircut already gives.
+    """
+    entry = 1.0 + max(0.0, float(entry_haircut)) * float(multiple)
+    exit_bite = min(1.0, max(0.0, float(exit_haircut)) * float(multiple))
+    return entry, 1.0 - exit_bite
+
+
+def friction_breakdown(
+    *,
+    entry_close: float,
+    entry_effective: float,
+    exit_close: float,
+    exit_effective: float,
+    sales_tax_pct: float,
+) -> dict[str, float]:
+    """Book haircut, tax, and the true total — reported apart (§21 R3).
+
+    One number was reported and described two ways: the round-trip haircut
+    already contained sales tax, while the control text called 14.7% friction
+    "before tax". They are different costs with different causes — one is the
+    shape of the book, the other is a fixed rate on the sale — and a reader who
+    cannot separate them cannot tell which one to attack.
+
+    **They compound; they do not add.** Tax is levied on what the book already
+    left, so the total is `1 - (1 - book)(1 - tax)`, which is slightly *less*
+    than the sum. Reporting the sum as the total would overstate friction, and
+    overstating the cost of a strategy already judged NOT PLAUSIBLE is exactly
+    the direction of error that would go unquestioned.
+    """
+    entry_cost = (entry_effective / entry_close - 1.0) * 100.0 if entry_close else 0.0
+    # Undo the tax to isolate the book's own bite on the way out.
+    tax_factor = 1.0 - float(sales_tax_pct) / 100.0
+    pre_tax_exit = exit_effective / tax_factor if tax_factor else exit_effective
+    exit_cost = (1.0 - pre_tax_exit / exit_close) * 100.0 if exit_close else 0.0
+    book = entry_cost + exit_cost
+    total = (1.0 - (1.0 - book / 100.0) * tax_factor) * 100.0
+    return {
+        "book_haircut_pct": float(book),
+        "sales_tax_pct": float(sales_tax_pct),
+        "total_friction_pct": float(total),
+    }
+
+
+def effective_samples(instances: pd.DataFrame, horizon: int) -> int:
+    """How many *independent* observations the instance table really holds.
+
+    An `h`-day forward return sampled every day on one type shares `h-1` days
+    of bars with its neighbour, so 100 daily instances of a 10-day return are
+    nearer 10 observations than 100. Treating them as 100 shrinks every
+    confidence interval by roughly sqrt(h) and makes a weak result look
+    established.
+
+    The correction is deliberately the crudest defensible one — non-overlapping
+    blocks of `horizon` days, counted per type, because two types are two
+    series — rather than an estimated correlation structure. A cruder
+    correction that can be checked by hand is worth more here than a tighter
+    one that cannot.
+    """
+    if instances is None or instances.empty:
+        return 0
+    horizon = max(1, int(horizon))
+    if "datetime" not in instances.columns:
+        return int(len(instances))
+    stamps = pd.to_datetime(instances["datetime"], utc=True, errors="coerce")
+    usable = instances[stamps.notna()].copy()
+    if usable.empty:
+        return 0
+    stamps = stamps.dropna()
+    origin = stamps.min()
+    block = ((stamps - origin).dt.days // horizon).astype("int64")
+    types = usable["type_id"] if "type_id" in usable.columns else 0
+    return int(
+        pd.DataFrame({"type_id": types, "block": block.to_numpy()}).drop_duplicates().shape[0]
+    )
 
 
 def measure_haircuts(
@@ -177,7 +275,15 @@ class HorizonStats:
     breakeven_win_rate: float | None
     expectancy_pct: float | None
     median_pct: float | None
-    max_drawdown_pct: float | None
+    #: Independent observations after de-overlapping (§21 R3). `samples` counts
+    #: rows; overlapping forward windows on one type are not that many facts.
+    effective_samples: int | None = None
+    #: The same Wilson bound computed on `effective_samples`. Reported beside
+    #: the naive one rather than replacing it, so no old number disappears.
+    wilson_lb_clustered: float | None = None
+    book_haircut_pct: float | None = None
+    sales_tax_pct: float | None = None
+    total_friction_pct: float | None = None
     gross_expectancy_pct: float | None = None
     gross_win_rate: float | None = None
     round_trip_haircut_pct: float | None = None
@@ -198,10 +304,14 @@ class HorizonStats:
             "breakeven_win_rate": self.breakeven_win_rate,
             "expectancy_pct": self.expectancy_pct,
             "median_pct": self.median_pct,
+            "effective_samples": self.effective_samples,
+            "wilson_lb_clustered": self.wilson_lb_clustered,
+            "book_haircut_pct": self.book_haircut_pct,
+            "sales_tax_pct": self.sales_tax_pct,
+            "total_friction_pct": self.total_friction_pct,
             "gross_expectancy_pct": self.gross_expectancy_pct,
             "gross_win_rate": self.gross_win_rate,
             "round_trip_haircut_pct": self.round_trip_haircut_pct,
-            "max_drawdown_pct": self.max_drawdown_pct,
             "first_half_wilson_lb": self.first_half_wilson_lb,
             "first_half_breakeven": self.first_half_breakeven,
             "second_half_wilson_lb": self.second_half_wilson_lb,
@@ -216,11 +326,12 @@ def _stats(
     tier: float,
     multiple: float,
     wilson_z: float,
+    sales_tax_pct: float = 0.0,
 ) -> HorizonStats:
     returns = instances["net_return_pct"].to_numpy(dtype="float64")
     samples = int(returns.size)
     if samples == 0:
-        return HorizonStats(horizon, tier, multiple, 0, 0, None, None, None, None, None, None)
+        return HorizonStats(horizon, tier, multiple, 0, 0, None, None, None, None, None)
     # The gross figure is reported alongside every net one. Without it a
     # negative verdict cannot be read: "the setup has no edge" and "the setup
     # has an edge that EVE's frictions eat" are very different answers, and only
@@ -236,6 +347,29 @@ def _stats(
     else:
         haircut = None
     wins = int((returns > 0).sum())
+    # Overlapping forward windows are not independent facts (§21 R3). Both
+    # bounds are reported: the naive one because it is what every prior result
+    # used, the clustered one because it is what the sample supports.
+    n_eff = effective_samples(instances, horizon)
+    wins_eff = int(round((wins / samples) * n_eff)) if samples and n_eff else 0
+    parts = None
+    if {"entry_effective", "exit_effective"} <= set(instances.columns):
+        # Averaged the same way `round_trip_haircut_pct` is — per row, then
+        # meaned — so the parts always sum to a number the total agrees with.
+        tax_factor = 1.0 - float(sales_tax_pct) / 100.0
+        entry_cost = (instances["entry_effective"] / instances["entry_close"] - 1.0) * 100.0
+        pre_tax_exit = (
+            instances["exit_effective"] / tax_factor if tax_factor else instances["exit_effective"]
+        )
+        exit_cost = (1.0 - pre_tax_exit / instances["exit_close"]) * 100.0
+        book = float((entry_cost + exit_cost).mean())
+        # Tax is levied on what the book already left, so the two compound.
+        total = (1.0 - (1.0 - book / 100.0) * tax_factor) * 100.0
+        parts = {
+            "book_haircut_pct": book,
+            "sales_tax_pct": float(sales_tax_pct),
+            "total_friction_pct": float(total),
+        }
     ordered = instances.sort_values("datetime")
     # §13.6 says "both halves of the sample PERIOD", so the split is by date,
     # not by instance count — a burst of instances in one month must not
@@ -258,7 +392,11 @@ def _stats(
         gross_expectancy_pct=float(gross.mean()),
         gross_win_rate=float((gross > 0).mean()),
         round_trip_haircut_pct=float(haircut) if haircut is not None else None,
-        max_drawdown_pct=max_drawdown(ordered["net_return_pct"].to_numpy(dtype="float64")),
+        effective_samples=n_eff,
+        wilson_lb_clustered=wilson_lower_bound(wins_eff, n_eff, wilson_z) if n_eff else None,
+        book_haircut_pct=parts["book_haircut_pct"] if parts else None,
+        sales_tax_pct=parts["sales_tax_pct"] if parts else None,
+        total_friction_pct=parts["total_friction_pct"] if parts else None,
         first_half_wilson_lb=wilson_lower_bound(int((first > 0).sum()), first.size, wilson_z)
         if first.size
         else None,
@@ -535,14 +673,14 @@ def price_instances(
     priced = instances[usable].copy()
     if priced.empty:
         return priced.assign(net_return_pct=pd.Series(dtype="float64")), excluded
-    entry_effective = priced["entry_close"] * (
-        1.0 + entry_haircut[usable].to_numpy(dtype="float64") * multiple
+    # Bounded to the economically possible (§21 R3): the old expression went
+    # negative for a wide book at 2x or 3x, so a sale "realised" negative ISK.
+    entry_bump = 1.0 + np.maximum(0.0, entry_haircut[usable].to_numpy(dtype="float64")) * multiple
+    exit_bite = np.minimum(
+        1.0, np.maximum(0.0, exit_haircut[usable].to_numpy(dtype="float64")) * multiple
     )
-    exit_effective = (
-        priced["exit_close"]
-        * (1.0 - exit_haircut[usable].to_numpy(dtype="float64") * multiple)
-        * (1.0 - sales_tax_pct / 100.0)
-    )
+    entry_effective = priced["entry_close"] * entry_bump
+    exit_effective = priced["exit_close"] * (1.0 - exit_bite) * (1.0 - sales_tax_pct / 100.0)
     priced["entry_effective"] = entry_effective
     priced["exit_effective"] = exit_effective
     priced["net_return_pct"] = (exit_effective / entry_effective - 1.0) * 100.0
@@ -802,10 +940,11 @@ def render_backtest(result: BacktestResult) -> str:
         lines.append("## Results by horizon, tier and haircut sensitivity")
         lines.append("")
         lines.append(
-            "| horizon | notional | haircut | n | gross % | friction % | win rate "
-            "| Wilson LB | breakeven WR | net expectancy % | median % | max DD % |"
+            "| horizon | notional | haircut | n | gross % | total friction % | win rate "
+            "| Wilson LB | breakeven WR | net expectancy % | median % | n_eff "
+            "| Wilson LB (clustered) |"
         )
-        lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for cell in result.cells:
 
             def fmt(value, digits=3):
@@ -818,7 +957,8 @@ def render_backtest(result: BacktestResult) -> str:
                 f"| {fmt(cell.get('round_trip_haircut_pct'), 2)} "
                 f"| {fmt(cell['win_rate'])} | {fmt(cell['wilson_lb'])} "
                 f"| {fmt(cell['breakeven_win_rate'])} | {fmt(cell['expectancy_pct'])} "
-                f"| {fmt(cell['median_pct'])} | {fmt(cell['max_drawdown_pct'], 2)} |"
+                f"| {fmt(cell['median_pct'])} | {cell.get('effective_samples', '')} "
+                f"| {fmt(cell.get('wilson_lb_clustered'))} |"
             )
     if result.cohorts:
         lines.append("")

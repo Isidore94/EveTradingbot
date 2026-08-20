@@ -214,12 +214,34 @@ def main() -> None:
         int(type_id): {250e6: {"entry": 0.015, "exit": 0.02, "round_trip": 0.035}}
         for type_id in instances["type_id"].unique()
     }
+    # Withdrawn by plan.md §21 R3 and preserved rather than deleted: no
+    # historical number is erased, and the metric stays out of the report
+    # until a reproducible portfolio model exists to justify it.
+    backtest_withdrawn = {
+        "_reason": (
+            "max_drawdown_pct was sequential compounding of OVERLAPPING trades "
+            "in date order, with no portfolio or capital-allocation model "
+            "behind it. It was not a drawdown. The -100% readings at 2x and 3x "
+            "are the artefact that gives it away."
+        ),
+        "_withdrawn_on": "2026-08-20",
+        "1x": {"max_drawdown_pct": -99.99999999727139},
+        "2x": {"max_drawdown_pct": -100.0},
+        "3x": {"max_drawdown_pct": -100.0},
+    }
     backtest_cells = {}
     for multiple in (1.0, 2.0, 3.0):
         priced, excluded = price_instances(
             instances, haircuts, tier=250e6, multiple=multiple, sales_tax_pct=3.375
         )
-        stats = _stats(priced, horizon=10, tier=250e6, multiple=multiple, wilson_z=1.96)
+        stats = _stats(
+            priced,
+            horizon=10,
+            tier=250e6,
+            multiple=multiple,
+            wilson_z=1.96,
+            sales_tax_pct=3.375,
+        )
         backtest_cells[f"{multiple:.0f}x"] = {
             **stats.as_dict(),
             "excluded_haircut_unknown": excluded,
@@ -293,6 +315,7 @@ def main() -> None:
         "true_range_max_winsorized": float(clean_tr.max()),
         "true_range_clamped_bars": int(clamped.sum()),
         "backtest": backtest_cells,
+        "backtest_withdrawn_pre_r3": backtest_withdrawn,
         "moving": moving,
         "indices": indices,
         "levels": {

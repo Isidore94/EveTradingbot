@@ -374,3 +374,75 @@ def test_tax_is_inside_the_net_edge():
     # A perfectly flat book already at value: the only thing left is the tax.
     flat = _net_edge_pct(vwap=100.0, close=100.0, ask_walk=100.0, bid_walk=100.0, costs=costs)
     assert flat == pytest.approx(-3.375, abs=1e-6)
+
+
+# -- expected-R -------------------------------------------------------------
+
+
+def test_expected_r_is_the_structural_prior_until_trades_close():
+    from evescreener.scoring import score_candidate
+
+    score = score_candidate(dip_sigma=-1.7, rrs=1.7, participation=0.9, net_edge_pct=8.0)
+    assert score.closed_samples == 0
+    assert score.blend_weight == 0.0
+    assert score.expected_r == score.prior_r
+    assert "no closed trades have been recorded yet" in score.evidence
+
+
+def test_the_tracker_leads_once_the_ledger_has_evidence():
+    from evescreener.scoring import score_candidate
+
+    prior = score_candidate(dip_sigma=-1.7, rrs=1.7, participation=0.9, net_edge_pct=8.0)
+    tracked = score_candidate(
+        dip_sigma=-1.7,
+        rrs=1.7,
+        participation=0.9,
+        net_edge_pct=8.0,
+        realized_r=-0.6,
+        closed_samples=25,
+    )
+    assert tracked.blend_weight > 0.8
+    assert tracked.expected_r < 0 < prior.expected_r
+    assert "tracker-led" in tracked.evidence
+
+
+def test_the_net_edge_is_an_input_to_the_score_not_only_a_filter():
+    from evescreener.scoring import quality_points
+
+    thin = quality_points(dip_sigma=-1.7, rrs=1.7, participation=0.9, net_edge_pct=0.5)
+    fat = quality_points(dip_sigma=-1.7, rrs=1.7, participation=0.9, net_edge_pct=15.0)
+    assert fat > thin, "a setup whose edge the spread eats must score lower AS a setup"
+
+
+def test_an_unmeasurable_setup_scores_unknown_not_middling():
+    from evescreener.scoring import score_candidate
+
+    score = score_candidate(dip_sigma=None, rrs=1.7, participation=0.9)
+    assert score.expected_r is None
+    assert score.evidence == "UNKNOWN"
+
+
+def test_realized_r_ignores_trades_that_never_defined_their_risk():
+    from evescreener.scoring import realized_from_ledger
+
+    records = [
+        {"event": "close", "realized_r": 1.5},
+        {"event": "close", "realized_r": None},
+        {"event": "close", "realized_r": -0.5},
+        {"event": "open"},
+    ]
+    mean, count = realized_from_ledger(records)
+    assert count == 2
+    assert mean == pytest.approx(0.5)
+    assert realized_from_ledger([]) == (None, 0)
+
+
+def test_candidates_rank_on_expected_r_with_net_edge_as_tie_break(config, seeded_db):
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, book_for(ids), now=NOW)
+    if len(result.candidates) > 1:
+        scores = [row["rank_score"] for row in result.candidates]
+        assert scores == sorted(scores, reverse=True)
+        assert all(row["evidence"] for row in result.candidates)

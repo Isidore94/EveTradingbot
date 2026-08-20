@@ -285,6 +285,7 @@ def _cmd_sweep_books(config: Config, args) -> int:
 
 def _build_screen(config: Config, db, region: int):
     from .killmails import destruction_frame, destruction_z
+    from .paper import PaperLedger
     from .screen import run_screen
 
     bars, composite = _composite_and_bars(config, db, region)
@@ -303,6 +304,7 @@ def _build_screen(config: Config, db, region: int):
         destruction=destruction,
         anchor_dates=_anchor_dates(config),
         region_id=region,
+        paper_records=PaperLedger(config.paths.ensure().paper_ledger, config).records(),
     )
 
 

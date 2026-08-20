@@ -126,10 +126,13 @@ def build_digest(
         for index, row in enumerate(screen.candidates, start=1):
             name = row.get("type_name") or f"type {row['type_id']}"
             lines.append(
-                f"**{index}. {name}** — net edge {_fmt(row.get('net_edge_pct'), 2, '%')} "
+                f"**{index}. {name}** — expected {_fmt(row.get('expected_r'), 2, 'R')} "
+                f"· net edge {_fmt(row.get('net_edge_pct'), 2, '%')} "
                 f"(expected move {_fmt(row.get('expected_move_pct'), 2, '%')})"
             )
             lines.append(f"    {row.get('thesis', '')}")
+            if row.get("evidence"):
+                lines.append(f"    evidence: {row['evidence']}")
             tiers = " · ".join(
                 f"{tier['notional_isk'] / 1e9:.2f}B "
                 + (

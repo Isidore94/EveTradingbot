@@ -26,6 +26,7 @@ import pandas as pd
 
 from .config import Config
 from .costs import CostModel
+from .scoring import SetupScore, realized_from_ledger, score_candidate
 from .signals.atr import atr_last, risk_unit
 from .signals.avwap import anchored_vwap_bands, classify_band
 from .signals.levels import build_level_store, levels_near
@@ -59,6 +60,10 @@ class Candidate:
     book_sweep_ts: str | None = None
     book_age_minutes: float | None = None
     freshness: str = "UNKNOWN"
+    expected_r: float | None = None
+    rank_score: float | None = None
+    quality_points: float | None = None
+    evidence: str = "UNKNOWN"
     flags: list[str] = field(default_factory=list)
     thesis: str = ""
     nearby_levels: list[dict] = field(default_factory=list)
@@ -85,6 +90,10 @@ class Candidate:
             "book_sweep_ts": self.book_sweep_ts,
             "book_age_minutes": self.book_age_minutes,
             "freshness": self.freshness,
+            "expected_r": self.expected_r,
+            "rank_score": self.rank_score,
+            "quality_points": self.quality_points,
+            "evidence": self.evidence,
             "flags": self.flags,
             "thesis": self.thesis,
             "nearby_levels": self.nearby_levels,
@@ -164,6 +173,7 @@ def run_screen(
     destruction: pd.DataFrame | None = None,
     anchor_dates=(),
     region_id: int | None = None,
+    paper_records: list[dict] | None = None,
     now=None,
 ) -> ScreenResult:
     """Build ranked candidates for one region. Every displayed number is net."""
@@ -204,6 +214,10 @@ def run_screen(
         }
 
     names = db.type_names(ids)
+    # Expected-R blends the structural prior toward the operator's OWN realized
+    # R. With an empty ledger the blend weight is 0 and the score is the prior,
+    # which every row says out loud rather than presenting as measured.
+    realized_r, closed_samples = realized_from_ledger(paper_records or [])
     candidates: list[Candidate] = []
     for type_id in ids:
         group = groups.get(type_id)
@@ -324,6 +338,20 @@ def run_screen(
         strength = real_relative_strength(
             frame, composite_frame, length=config.signals.rrs_length, scope="forge_composite"
         )
+        nearby = levels_near(levels, reference, atr_value, min_strength=0.5)[:3]
+        score: SetupScore = score_candidate(
+            dip_sigma=float(last["dip_sigma"]) if np.isfinite(last["dip_sigma"]) else None,
+            rrs=strength.rrs,
+            participation=float(last["participation"])
+            if np.isfinite(last["participation"])
+            else None,
+            level_conviction=max(
+                (level.get("conviction") or 0.0 for level in nearby), default=None
+            ),
+            net_edge_pct=net_edge,
+            realized_r=realized_r,
+            closed_samples=closed_samples,
+        )
         candidates.append(
             Candidate(
                 type_id=int(type_id),
@@ -359,6 +387,10 @@ def run_screen(
                 book_age_minutes=round(age_minutes, 1) if age_minutes is not None else None,
                 freshness="fresh" if not stale_reason else "stale",
                 flags=flags,
+                expected_r=score.expected_r,
+                rank_score=score.rank_score,
+                quality_points=score.quality_points,
+                evidence=score.evidence,
                 thesis=_thesis(last, bands, strength, destruction_latest.get(int(type_id))),
                 nearby_levels=[
                     {
@@ -367,12 +399,15 @@ def run_screen(
                         "strength": level.get("strength"),
                         "conviction": level.get("conviction"),
                     }
-                    for level in levels_near(levels, reference, atr_value, min_strength=0.5)[:3]
+                    for level in nearby
                 ],
             )
         )
 
-    candidates.sort(key=lambda item: -(item.net_edge_pct or 0.0))
+    # Rank on expected R (which already carries the net edge as an input), with
+    # the raw net edge as the tie-break. The cost model is the GATE; expected-R
+    # is the RANK (plan.md §5, §6).
+    candidates.sort(key=lambda item: (-(item.rank_score or -99.0), -(item.net_edge_pct or 0.0)))
     result.candidates = [item.as_dict() for item in candidates[: config.screen.max_candidates]]
     return result
 

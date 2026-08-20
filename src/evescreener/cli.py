@@ -92,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     paper_fill.add_argument("--price", type=float, required=True)
     paper_fill.add_argument("--units", type=float, required=True)
 
+    anchors = sub.add_parser(
+        "anchors", help="patch-notes watcher: append anchor CANDIDATES for confirmation"
+    )
+    anchors.add_argument("--list", action="store_true", help="show the calendar and stop")
+    anchors.add_argument("--all", action="store_true", help="include non-market-relevant posts")
+
     sub.add_parser("report", help="regenerate the viability report (plan.md §16)")
 
     daemon = sub.add_parser("daemon", help="run all cadences in one asyncio process")
@@ -511,6 +517,33 @@ def _cmd_paper(config: Config, args) -> int:
     return 0
 
 
+def _cmd_anchors(config: Config, args) -> int:
+    from .patchnotes import FeedError, fetch_patch_notes, sync_anchor_candidates
+    from .signals.anchors import load_anchors
+
+    calendar = Path.cwd() / "config" / "anchors.jsonl"
+    if args.list:
+        for anchor in load_anchors(calendar):
+            mark = "confirmed" if anchor.confirmed else "CANDIDATE"
+            print(f"{anchor.anchor_date} [{mark}] {anchor.label} ({anchor.scope})")
+        return 0
+    try:
+        notes = fetch_patch_notes(config)
+    except FeedError as exc:
+        print(f"patch-notes feed unavailable: {exc}", file=sys.stderr)
+        return 1
+    added = sync_anchor_candidates(notes, calendar, market_relevant_only=not args.all)
+    print(f"{len(notes)} post(s) in the feed; {len(added)} new candidate(s) appended")
+    for note in added:
+        print(f"  {note.published}  {note.title}")
+    if added:
+        print(
+            "\nThese are CANDIDATES. The signal layer ignores them until you set"
+            '\n"confirmed": true in config/anchors.jsonl. Nothing anchors itself.'
+        )
+    return 0
+
+
 def _cmd_report(config: Config, args) -> int:
     from .paper import PaperLedger
     from .report import build_viability_report, render_viability, write_viability
@@ -585,6 +618,16 @@ def _cmd_daemon(config: Config, args) -> int:
             def killmails():
                 return poll_r2z2(config, db).as_dict()
 
+            def patch_notes():
+                from .patchnotes import FeedError, fetch_patch_notes, sync_anchor_candidates
+
+                calendar = Path.cwd() / "config" / "anchors.jsonl"
+                try:
+                    added = sync_anchor_candidates(fetch_patch_notes(config), calendar)
+                except FeedError as exc:
+                    return {"error": str(exc)}
+                return {"candidates_added": [note.title for note in added]}
+
             def on_tick(outcomes, scheduler):
                 for outcome in outcomes:
                     print(json.dumps(outcome, default=str), flush=True)
@@ -599,6 +642,7 @@ def _cmd_daemon(config: Config, args) -> int:
                         "universe": universe,
                         "digest": digest,
                         "killmails": killmails,
+                        "patch_notes": patch_notes,
                     },
                     stop_after=args.ticks,
                     on_tick=on_tick,
@@ -622,6 +666,7 @@ HANDLERS = {
     "killmails": _cmd_killmails,
     "cross-region": _cmd_cross_region,
     "paper": _cmd_paper,
+    "anchors": _cmd_anchors,
     "report": _cmd_report,
     "daemon": _cmd_daemon,
 }

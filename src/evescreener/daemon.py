@@ -16,6 +16,7 @@ The cadences it owns, all UTC:
 | digest | daily 16:00 |
 | paper mark | daily, with the digest |
 | killmail poll | every 5 minutes (R2Z2) |
+| patch-notes watcher | daily, with the universe refresh |
 
 Nothing here fetches before `Expires`; the client refuses to, and the schedule
 simply keeps the process from asking pointlessly.
@@ -165,6 +166,13 @@ def build_jobs(config: Config, handlers: dict) -> list[Job]:
             name="killmails",
             run=handlers.get("killmails"),
             interval=timedelta(seconds=cadence.killmail_poll_interval_seconds),
+        ),
+        # The patch-notes tripwire (§9 R9). It appends candidates only; nothing
+        # in this daemon can confirm an anchor.
+        Job(
+            name="patch_notes",
+            run=handlers.get("patch_notes"),
+            daily_at=cadence.universe_refresh_utc,
         ),
     ]
     return [job for job in definitions if job.run is not None]

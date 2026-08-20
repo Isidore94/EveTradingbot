@@ -1,6 +1,16 @@
-{"date": "2025-11-11", "label": "Winter expansion (operator to confirm exact date)", "scope": "global", "confirmed": false, "source": "seed"}
-{"date": "2026-01-13", "label": "January patch (operator to confirm)", "scope": "global", "confirmed": false, "source": "seed"}
-{"date": "2026-03-10", "label": "Spring quadrant (operator to confirm)", "scope": "global", "confirmed": false, "source": "seed"}
-{"date": "2026-05-12", "label": "May patch (operator to confirm)", "scope": "global", "confirmed": false, "source": "seed"}
-{"date": "2026-06-09", "label": "Summer expansion (operator to confirm)", "scope": "global", "confirmed": false, "source": "seed"}
-{"date": "2026-08-11", "label": "August patch (operator to confirm)", "scope": "global", "confirmed": false, "source": "seed"}
+# EVE patch/expansion calendar — the anchor events (plan.md §6, §11 D7).
+#
+# Every row below was pulled from the official patch-notes RSS feed on
+# 2026-08-20 by `python -m evescreener anchors`, so the DATES are real.
+# They ship as "confirmed": false because which of them the operator
+# considers a live anchor for HIS items is his judgement, not the feed's:
+# a version patch that rebalances one hull is not the same anchor event as
+# an expansion. The signal layer ignores unconfirmed rows and falls back to
+# a synthetic 90-day grid until you flip the ones you want to true.
+{"confirmed": false, "date": "2024-11-08", "label": "Revenant: Expansion Notes", "scope": "global", "source": "https://www.eveonline.com/news/view/revenant-expansion-notes"}
+{"confirmed": false, "date": "2025-05-15", "label": "Patch Notes - Version 22.02", "scope": "global", "source": "https://www.eveonline.com/news/view/patch-notes-version-22-02"}
+{"confirmed": false, "date": "2025-05-23", "label": "Legion: Expansion Notes", "scope": "global", "source": "https://www.eveonline.com/news/view/legion-expansion-notes"}
+{"confirmed": false, "date": "2025-11-06", "label": "Patch Notes - Version 23.01", "scope": "global", "source": "https://www.eveonline.com/news/view/patch-notes-version-23-01"}
+{"confirmed": false, "date": "2025-11-14", "label": "Catalyst: Expansion Notes", "scope": "global", "source": "https://www.eveonline.com/news/view/catalyst-expansion-notes"}
+{"confirmed": false, "date": "2026-06-05", "label": "Cradle of War: Expansion Notes", "scope": "global", "source": "https://www.eveonline.com/news/view/cradle-of-war-expansion-notes"}
+{"confirmed": false, "date": "2026-08-19", "label": "Patch Notes - Version 24.01", "scope": "global", "source": "https://www.eveonline.com/news/view/patch-notes-version-24-01"}

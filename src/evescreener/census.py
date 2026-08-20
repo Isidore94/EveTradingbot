@@ -460,7 +460,7 @@ def render_census(result: CensusResult) -> str:
                     "count is the ceiling on how many names any idea could ever use:"
                 )
                 measured = result.haircut_percentiles.get("types_measured", 0) or 1
-                for threshold, count in below.items():
+                for threshold, count in sorted(below.items(), key=lambda item: float(item[0])):
                     lines.append(
                         f"- round-trip friction < {threshold}%: **{count:,}** types "
                         f"({count / measured:.2%})"

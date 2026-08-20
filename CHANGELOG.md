@@ -204,13 +204,16 @@ The point of the build. All recorded in `plan.md` §17.
   Without TR winsorization **20.5% of tracked types would carry a risk unit
   more than twice too large**.
 - **The backtest says NOT PLAUSIBLE at every horizon — on friction, not
-  direction.** The setup returns **+3.08% gross** over 10 days (53.7% win rate)
-  against **~16% friction at 1× haircut**. The measured round-trip haircut
+  direction.** On the full lake (2,654 tracked types, **108,441** instances)
+  the setup returns **+2.80% gross** over 10 days (55.7% win rate) and
+  **+3.91%** over 20 days (56.0%), against **14.7% friction at 1× haircut**. The measured round-trip haircut
   distribution (p1 2.17%, p50 33.6%) plus 3.375% tax exceeds the 20-day gross
   edge of 4.15% even at the **first percentile**.
-- **The destruction lead-lag effect does not survive.** ρ=0.052 at a 1-day lag
-  (p=3e-65, n=108,586) against a 0.10 threshold, and the within-day placebo
-  reproduces 61% of it. Destruction ships as an annotation only.
+- **The destruction lead-lag effect does not survive.** On **473,606**
+  observations, ρ=**0.027** at a 1-day lag (p=1.2e-76) against a 0.10
+  threshold. The effect *halved* versus the smaller sample while p collapsed to
+  1e-76 on sample size alone — exactly why the frozen rule demanded an effect
+  size and a placebo rather than significance. Destruction ships as an annotation only.
 - **Cross-region is the one bright spot.** Of 151,123 hub pairs, 14 clear real
   PushX freight and tax at 0.25B; best +14.44% net. It is a snapshot, not an
   edge — the haul takes days and the scan prices both legs simultaneously.

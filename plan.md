@@ -1088,8 +1088,8 @@ and expectations written above. Each is cited where it changes a decision.
 | Bars in the lake at the time of measurement | **1,854,651** across **7,264** types |
 | Bars whose true range needs clamping (8× rolling median) | **7.9%**, touching **79%** of tracked types |
 | Tracked types whose ATR would be >2× too large without winsorization | **20.5%** (p99 143× too large, worst 2,433×) |
-| Backtest, 10-day horizon, 0.25B tier | gross **+3.08%** (win rate 53.7%) against **~16% friction at 1× haircut / ~29% at 2×** → net **−21.8%**, verdict **NOT PLAUSIBLE** |
-| Lead-lag study, best lag | **ρ=0.052** at 1 day vs participation (p=3e-65, n=108,586); placebo ρ=0.032 — **DOES NOT SURVIVE** |
+| Backtest on the **full** lake (2,654 tracked types, **108,441** setup instances) | 10-day: gross **+2.80%** (win rate 55.7%) against **14.7% friction at 1× / 26.0% at 2×** → net **−20.0%**. 20-day: gross **+3.91%** (56.0%) → net **−19.2%**. **NOT PLAUSIBLE at every horizon**, on friction rather than direction. The 20-day gross edge *rises* with horizon while friction stays flat, and never catches it |
+| Lead-lag on the **full** lake (**473,606** observations, 2,088 types) | best **ρ=0.027** at 1 day vs participation (p=1.2e-76) — **DOES NOT SURVIVE**. Note the effect *halved* versus the 347-type sample (ρ=0.052), while p fell to 1e-76 purely on sample size: exactly why §14.3 required an effect **size** and a placebo rather than significance alone |
 | Round-trip taker friction at 0.25B, all fillable types (n=6,672) | min 0.00% · p1 **2.17%** · p5 5.34% · p50 **33.61%**. Types below 1% friction: **27**; below 2%: 55; below 5%: 285 |
 | Round-trip friction among the **tracked** types (n=315) | min **0.062%** · p1 1.21% · p5 2.43% · p50 **9.54%**. Only **2 types (0.63%)** sit under the ~0.78% that the measured 20-day gross edge of 4.15% could absorb after the 3.375% sales tax: *100MN Afterburner II* (0.062%) and *Mexallon* (0.767%) |
 | Cross-region at 0.25B after real PushX freight and tax | **14 routes** clear costs of **151,123** pairs considered; best **+14.44%** net (Electronic Parts, Dodixie→Hek) |

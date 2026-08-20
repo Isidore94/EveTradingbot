@@ -148,7 +148,7 @@ def _census_section(payload: dict | None) -> Section:
                 "must clear its own friction plus the tax, so the count of types tight "
                 "enough to permit an edge at all is:"
             )
-            for threshold, count in below.items():
+            for threshold, count in sorted(below.items(), key=lambda item: float(item[0])):
                 body.append(f"- friction < {threshold}%: **{count:,}** types")
     depth = payload.get("depth_coverage") or {}
     if depth:

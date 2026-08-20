@@ -178,7 +178,9 @@ def run_screen(
         result.notes.append("the bar lake is empty for this region; nothing can be screened")
         return result
 
-    ids = type_ids if type_ids is not None else sorted(bars["type_id"].unique())
+    # Group ONCE: per-type boolean masks over the whole lake are O(n x m).
+    groups = dict(tuple(bars.groupby("type_id", sort=True)))
+    ids = type_ids if type_ids is not None else sorted(groups)
     result.universe = len(ids)
     params = SetupParams(
         entry_band_sigma=config.backtest.entry_band_sigma,
@@ -202,7 +204,10 @@ def run_screen(
     names = db.type_names(ids)
     candidates: list[Candidate] = []
     for type_id in ids:
-        frame = bars[bars["type_id"] == type_id].sort_values("datetime").reset_index(drop=True)
+        group = groups.get(type_id)
+        if group is None:
+            continue
+        frame = group.sort_values("datetime").reset_index(drop=True)
         if len(frame) < params.min_bars:
             continue
         try:

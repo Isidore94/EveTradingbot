@@ -548,7 +548,7 @@ def run_backtest(
         progress=progress,
     )
     result.gates = gates
-    result.types_evaluated = int(gates.get("bars", 0) and len(bars["type_id"].unique()))
+    result.types_evaluated = int(bars["type_id"].nunique()) if not bars.empty else 0
     result.instances = int(len(instances))
     if instances.empty:
         result.notes.append("no historical instances of the setup were found")

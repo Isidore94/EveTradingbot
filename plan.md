@@ -1,7 +1,12 @@
 # EVE Market Screener — port review, architecture decision, and phased plan
 
-Status: **PLANNING COMPLETE — Phase 0 (§8) is authorized. Implementation
-decisions are locked in §11; `CLAUDE.md` governs working sessions.**
+Status: **v1 BUILT in one push under operator directive 2026-08-20 (§17).
+Phases 0–6 are IMPLEMENTED and GREEN; the consolidated live-validation
+checklist in `CURRENT_CHECKPOINT.md` is owed before anything here is
+LIVE_VALIDATED. Implementation decisions are locked in §11; the studies'
+hypotheses and pass rules are frozen in §12.4, §13.6 and §14.3 — they were
+written before the studies ran and are not to be retrofitted. `CLAUDE.md`
+governs working sessions.**
 Prepared 2026-08-18 against `Isidore94/TradingBotV3` branches `phase05-r8-weekend-prep`
 (primary, 208 commits ahead of `main`) and `phase05-r2-focus-gating-strength-board`
 (relative-strength work), following the source repo's mandatory reading order
@@ -740,3 +745,326 @@ edits freely; this is the starting roster:
 | Control set | `CLAUDE.md` (agent operating rules), `plan.md` (this file — roadmap + contracts), `CHANGELOG.md` (implemented inventory), `CURRENT_CHECKPOINT.md` (single active item + verification stamp). No AGENTS.md copy — one file, one truth |
 | Status vocabulary | `IMPLEMENTED → GREEN → LIVE_VALIDATED → PROMOTED`, as defined in the source repo; only the operator promotes |
 | Session rule | One phase active at a time; a session that finishes a phase stops at its gate and hands the gate checklist to the operator |
+
+---
+
+## 12. Paper trading platform
+
+**Status: specified 2026-08-20 under operator directive 2026-08-20, which
+promotes paper trading from an implied Phase-3 activity to the centrepiece of
+the build.** The reasoning is the operator's and it is correct: the backtest
+(§13) only justifies *running the experiment*; paper trading **is** the
+experiment. A screener nobody can score is a toy.
+
+### 12.1 What it is and is not
+
+An append-only decisions ledger with realistic fills, marked daily, reported
+against a verdict rule frozen before the first trade. It is **not** a
+simulator, not a broker adapter, and not a step toward automation (§10.1).
+Nothing in it places an order or touches the EVE client.
+
+### 12.2 Fill realism — non-negotiable
+
+These rules exist because a paper record that flatters itself is worse than no
+record: it manufactures the confidence to risk real ISK.
+
+| Rule | Consequence |
+|---|---|
+| Entries are **ask-walk taker fills** at the operator's declared notional, taken from a **live book sweep** | Not best ask, not mid, not the daily close. The declared size sets the price. |
+| Exits are **bid-walk taker fills** × (1 − sales tax) | The tax is inside every exit, always. |
+| Maker exit is shown **advisory only** and never realized | Queue risk cannot be priced from a snapshot; showing both numbers and picking neither is the honest option (§5). |
+| A book older than `paper.stale_book_minutes` (60) **refuses the fill** | The position is not opened. `UNKNOWN` is the outcome, not a price off history. **Never prices off history, ever.** |
+| No retro-entries | An open is stamped with the sweep that priced it. There is no "I would have bought it on Tuesday". |
+| Self-impact flag when notional > 10% of 30-day median daily ISK turnover | The fill is still recorded; it is *labelled* as a size the market would have noticed. |
+| Daily mark-to-market carries a staleness stamp | A mark computed off a 6-hour-old book says so. |
+
+### 12.3 The ledger
+
+`data/streams/paper.jsonl`, append-only, one record per event
+(`open`, `mark`, `close`, `real_fill`). Nothing rewrites history; a correction
+is a new record, not an edit. Every record carries the sweep timestamp, the
+book age at decision time, the thesis fields, the planned net-R, and every
+cost component separately so the arithmetic can be audited after the fact.
+
+The **SMALL-REAL rung**: when the operator takes the same trade for real, he
+records the actual fill beside the predicted effective price. That is how the
+cost model gets validated against reality rather than against itself. The
+tolerance is stated now, not retrofitted: **predicted vs actual effective
+price within ±0.5% of notional** (this is the same tolerance §8 Phase 4's gate
+names, and the two are deliberately the same number).
+
+### 12.4 The verdict tracker — FROZEN 2026-08-20, before the first trade
+
+`paper report` leads with refused/UNKNOWN counts (because a system that
+refuses to price things is doing its job and that must be visible first), then
+closed count, cumulative net P&L, win rate, R distribution, open positions,
+and the verdict.
+
+Definitions, fixed:
+
+* A **closed trade** is one `open` matched by one `close`, both priced from
+  live sweeps. Refused opens are not trades.
+* `net_return_pct` = (exit effective price × (1 − tax) / entry effective
+  price − 1) × 100. Every number is net; gross never appears.
+* `breakeven_win_rate` = mean|loss| / (mean win + mean|loss|) over the closed
+  sample. This is the win rate the observed payoff ratio *requires*.
+* `wilson_lb` = Wilson 95% one-sided lower bound of the win rate at the
+  observed sample size.
+
+The rule:
+
+| Closed trades | Verdict |
+|---:|---|
+| < 20 | `TOO_EARLY` — no read is offered, and none should be taken. |
+| ≥ 20 | **First read.** Report the numbers; state `PROMISING` if cumulative net P&L > 0 **and** `wilson_lb > breakeven_win_rate`, else `WEAK`. Neither is a decision. |
+| ≥ 40 | **Falsified** if cumulative net P&L < 0 **and** `wilson_lb < breakeven_win_rate`. That is the answer to the operator's question at this size and cadence: it is not a money-making activity for him, and the honest thing is to stop. |
+| ≥ 40 | **Provisionally confirmed** if cumulative net P&L > 0 **and** `wilson_lb > breakeven_win_rate`. Promotion to real ISK remains an explicit operator decision (§8's ladder), never an automatic consequence. |
+| ≥ 40, otherwise | `INCONCLUSIVE` — keep running. |
+
+The tracker never moves these thresholds after the fact. If they turn out to
+be the wrong thresholds, that is a plan-level edit made *before* the next
+sample, with the reason stated and the old rule left visible in this file.
+
+---
+
+## 13. Historical viability backtest — hypothesis and verdict rule
+
+**FROZEN 2026-08-20, before the study was run.** Promoted from "deferred" to
+required by operator directive 2026-08-20. The purpose is to vet the setup
+*class* on data before the operator risks his time on it.
+
+### 13.1 The hypothesis
+
+> **H1.** In The Forge, a type trading below its anchored value while its
+> demand is still intact produces a positive net expectancy over 5–20 trading
+> days, after all EVE frictions at a real notional.
+
+"Below anchored value" and "demand intact" are defined mechanically in §13.2
+so the study cannot be steered by interpretation after the fact.
+
+Explicitly **not** hypothesised, and not testable by this study by
+construction: any momentum or breakout-continuation effect. EVE supply is
+player-produced and elastic; spikes are arbitraged flat by industrialists
+(§6). The backtest does not search for continuation setups, and finding one
+would not license building one — momentum is out of scope even as a study
+(operator directive 2026-08-20).
+
+### 13.2 The setup, defined mechanically
+
+At bar `t`, a type is an instance of the setup iff **all** of:
+
+1. **Below anchored value.** `close(t) < AVWAP(anchor) − entry_band_sigma × σ`
+   where the anchor is the most recent *confirmed* applicable anchor at `t`
+   (§11 D7), or — when none exists — a rolling anchor `anchor_lookback_days`
+   (90) bars back. σ is the frozen running-AVWAP volume-weighted deviation
+   (§4). Default `entry_band_sigma = 1.0`.
+2. **Demand intact — relative strength.** `RRS(t)` vs the Forge Composite
+   `≥ min_rrs` (default −0.5). A type in freefall relative to the market is
+   not a dip, it is a decline.
+3. **Demand intact — participation.** `order_count(t) / mean(order_count,
+   trailing 20, excluding t) ≥ participation_floor` (default 0.7). A price
+   move on collapsing `order_count` is a thin-book artifact (§4).
+4. **Measurable.** ATR(20) is known, the bar is not a ghost day
+   (`order_count > 0`), and the type has at least `min_bars` (120) bars of
+   history at `t`.
+5. **Tradeable.** The type clears the census-derived liquidity floor.
+
+Any gate that cannot be evaluated is **UNKNOWN and fails** (tri-state, §8).
+
+### 13.3 Forward measurement
+
+Each instance is measured at horizons 5, 10 and 20 trading days. Entry and
+exit both bear full costs at each notional tier.
+
+### 13.4 Fill realism — and its hard limitation, stated up front
+
+**There are no historical order books.** ESI publishes daily aggregates, not
+depth, and nothing reconstructs a 2025 book. This study therefore prices
+historical entries and exits at the daily close (= ESI `average`) with a
+**conservative slippage haircut derived from data**:
+
+* For each type, measure from **live** `book_summary` sweeps, per notional
+  tier: `entry_haircut = ask_walk(tier)/mid − 1` and
+  `exit_haircut = 1 − bid_walk(tier)/mid`.
+* Apply that type's own measured `round_trip_haircut` to its own history.
+* A type whose **current** book cannot fill the tier is flagged
+  `haircut_unknown` and **excluded from that tier's results**, with the count
+  of exclusions reported. It is never silently priced at zero slippage.
+
+Then:
+
+```
+entry_effective = close(t)   × (1 + entry_haircut × m)
+exit_effective  = close(t+h) × (1 − exit_haircut  × m) × (1 − sales_tax)
+net_return_pct  = (exit_effective / entry_effective − 1) × 100
+```
+
+for haircut multiplier `m ∈ {1, 2, 3}` (§13.6).
+
+### 13.5 What is reported
+
+Per **setup variant** (the σ threshold and demand gates) and per **market-group
+cohort**, at each horizon and each notional tier:
+
+- sample count `n`;
+- win rate and its **Wilson 95% one-sided lower bound**;
+- **net expectancy per trade** (mean `net_return_pct`);
+- the strategy equity curve's **maximum drawdown**;
+- **sensitivity**: every metric at 1×, 2× and 3× the measured haircut;
+- the `haircut_unknown` exclusion count.
+
+### 13.6 The verdict rule — FROZEN before measurement
+
+At the **0.25B tier** (the smallest, because a setup that needs size to work
+is not a setup the operator can start with):
+
+> The setup class is **PLAUSIBLE** iff **all** of:
+> 1. `n ≥ 100` at the horizon under test;
+> 2. net expectancy per trade remains **> 0** at **2× the measured haircut**;
+> 3. `wilson_lb(win rate) > breakeven_win_rate` on the full sample, where
+>    `breakeven_win_rate = mean|loss| / (mean win + mean|loss|)`;
+> 4. condition 3 holds **independently in both halves** of the sample period.
+>
+> Fail any of 2–4 → **NOT PLAUSIBLE**.
+> `n < 100` → **UNKNOWN**, which is not a pass and never rounds up to one.
+
+### 13.7 Limitations the report must state about itself
+
+A backtest that hides its own weaknesses is worthless. Every generated report
+carries these, verbatim, in its own body:
+
+1. **No historical depth.** Fills are close-to-close with a haircut measured
+   from *today's* book. A type whose liquidity has changed since 2025 is
+   mispriced by exactly that change, and the direction is unknowable.
+2. **Close-to-close fills.** ESI `average` is a whole-day mean, so the study
+   can neither buy the low nor sell the high, and equally cannot be hurt by
+   intraday adversity. This cuts both ways and is not conservative by default.
+3. **~13.5-month window.** One year is one meta. A patch cycle, a war, or a
+   single industry rebalance can dominate it.
+4. **Survivorship.** The universe comes from types with *live orders today*.
+   Types that died between 2025 and now are absent, and their absence is
+   invisible to the win rate.
+5. **No concurrency or capital constraint** unless configured: expectancy is
+   per instance, not per ISK-day of a real portfolio.
+6. **The haircut is measured, not the spread paid.** It assumes the operator
+   crosses the spread exactly as the depth walk describes, at one moment.
+
+---
+
+## 14. Destruction lead-lag study — hypothesis and pass rule
+
+**FROZEN 2026-08-20, before the study was run.** This is the system's genuine
+edge — item-level demand-destruction telemetry that equity systems do not have
+(§7) — so it is measured properly or it does not influence a ranking.
+
+### 14.1 The hypothesis
+
+> **H2.** `destruction_z` leads `order_count`/`volume` upticks and price
+> firming in doctrine-class hulls and their fitted modules by **1–5 days**.
+
+`destruction_z(type, t)` = (units destroyed in the trailing 7 days − mean of
+the trailing 90-day 7-day-window baseline) / (std of that baseline). Losses
+are bucketed by region catchment: Forge-adjacent war-zone losses replace at
+Jita.
+
+### 14.2 Method
+
+For each lag `k ∈ {1..5}`, pooled over the cohort, compute the **Spearman rank
+correlation** between `destruction_z(t)` and each of:
+
+* `participation(t + k)` = `order_count(t+k)` / its trailing-20 baseline;
+* `forward_return(t, k)` = `close(t+k)/close(t) − 1`.
+
+Significance uses the large-sample normal approximation
+`z = ρ × sqrt(n − 1)`; `p < 0.01` two-sided ⇔ `|z| > 2.576`. (No scipy — the
+dependency set is locked at four runtime packages, §11 D1 — so the
+approximation is stated rather than hidden inside a library call.)
+
+### 14.3 The pass rule — FROZEN before measurement
+
+> The effect **survives** iff **all** of:
+> 1. at least one lag `k ∈ {1..5}` shows `ρ ≥ 0.10` with `p < 0.01`;
+> 2. `n ≥ 500` (type, day) observations at that lag;
+> 3. the sign of `ρ` at that lag is the **same in both halves** of the sample
+>    period;
+> 4. a **placebo** — `destruction_z` shuffled across types within the same
+>    day, preserving the daily marginal distribution — yields `|ρ_placebo|`
+>    less than **half** the measured `ρ`.
+>
+> Survives → destruction features **may** influence ranking, after a shadow
+> period, never straight in (§8 Phase 5's ladder).
+> Does not survive → destruction ships as **digest annotations only**, and the
+> annotation says the lead-lag claim was tested and not supported.
+
+---
+
+## 15. Cross-region scan
+
+Hub-to-hub net margin from the WARM sweeps (Domain, Sinq Laison, Heimatar,
+Metropolis vs The Forge), with freight netted from a **real PushX quote** at
+the SDE packaged volume and the position's collateral, plus a staleness
+haircut on cached quotes.
+
+**No freight quote → no cross-region row, ever.** A margin that has not paid
+for its own hauling is not a margin, and estimating freight from a formula
+would be exactly the kind of invented number this system exists to avoid.
+
+This is a **swing-compatible arbitrage screen** — buy in hub A, haul, sell in
+hub B over days — not station trading (§10.5). The holding period is the
+freight time plus the sell queue, and the escrow cost of that time is charged.
+
+---
+
+## 16. The viability report
+
+`data/reports/viability-<date>.md`, regenerated on demand, is the single
+document that answers the operator's actual question from measurements:
+
+1. **Census opportunity map** (§8 Phase 1) — how many types clear the derived
+   floor, and what turnover they carry.
+2. **Backtest verdict** (§13) with its sensitivities and its stated
+   limitations.
+3. **Destruction lead-lag result** (§14) with its pass/fail against the frozen
+   rule.
+4. **Cross-region margin distribution** after freight (§15).
+5. **Running paper-trading tally** (§12) against the frozen verdict tracker.
+
+Every number cites its source (lake query, sweep, study) and its date. A
+section whose inputs do not exist yet renders as **UNKNOWN with the reason**,
+never as an empty table implying zero opportunity, and never as an estimate.
+
+Reading the report and deciding whether EVE trading is worth the operator's
+time is **his** decision. The system's job is to make that decision an
+informed one, and to be honest enough that a negative answer is a possible
+output.
+
+---
+
+## 17. Operator directive 2026-08-20 — deviations recorded
+
+The operator authorized a single-push build of the complete v1 system,
+overriding the one-phase-per-session rule for this build. Every deviation from
+this document's prior text is recorded here with its reason.
+
+| # | Deviation | Reason |
+|---|---|---|
+| D-1 | **Phases 0–6 collapsed into one build.** The per-phase gates collapse into one consolidated live-validation checklist handed to the operator at the end. | Operator directive 2026-08-20. The gates are not waived — they are batched, and every one of them still owes its live evidence before the system is trusted. |
+| D-2 | **Historical viability backtest promoted from deferred to required** (§13). | Operator directive 2026-08-20: the mission is to vet whether EVE swing trading makes money, not to ship a screener. |
+| D-3 | **Destruction lead-lag study promoted from Phase 5's gate to a required deliverable** (§14). | Same. |
+| D-4 | **Paper trading platform specified as the centrepiece** (§12), where the prior text had only an append-only decisions log. | Operator directive 2026-08-20: the backtest justifies the experiment; paper trading is the experiment. |
+| D-5 | **Subcommand set extended** beyond §11 D1's list with `paper`, `backtest`, `killmails`, `cross-region`, `report`, `sde`, `screen`. | The added deliverables need entry points. Additive only; no listed command was removed or renamed. |
+| D-6 | **SDE source changed** from per-file jsonl URLs to the per-build bundle zip (`latest.jsonl` → `eve-online-static-data-{build}-jsonl.zip`). | Measured 2026-08-20: the flat per-file URLs return HTTP 403; the bundle URL serves. The plan's §0 statement that the SDE "includes types and marketGroups" holds — the packaging differs. |
+| D-7 | **Vendored files carry mechanical lint edits** and are marked `diverged` in `VENDORED.md`. | §11 D1 forbids per-file lint exemptions, so excluding `vendored/` was not available. No numerical behaviour changed. |
+| D-8 | **Upstream branch for vendoring is `phase05-integration-blitz`**, not `phase05-r8-weekend-prep`. | Measured 2026-08-20: the r8 branch no longer exists on the remote. The integration-blitz branch carries the same tree. Module paths are under `scripts/`, not the repo root, correcting §0's file:line citations by that prefix. |
+| D-9 | **The `≤15k LOC` budget (§1) may be exceeded** by the added studies. | Operator directive 2026-08-20 authorized this explicitly, requiring the final count be stated. |
+
+### §0 named checks — status after this build
+
+| Check | Status |
+|---|---|
+| #1 ESI `average` semantics | **OPEN.** Not resolved by this build. The bar contract tolerates either answer (§4) and nothing computed here depends on it, but it belongs in the contract doc and the Fuzzwork cross-check is a Phase-2-gate item still owed. |
+| #2 page-snapshot consistency | **MITIGATED, not resolved.** The sweep reconciles by `order_id` and reports `duplicate_order_ids` as a data-quality counter; the two-sweeps-in-one-window diff is still owed. |
+| #3 structure blind spot | **INSTRUMENTED.** `station_volume_share` is carried per `book_summary` row and the sweep reports the region-wide structure share. The number now exists; reading it against the in-game view is an operator gate item. |
+| #4 outlier prints in `highest`/`lowest` | **MITIGATED, not resolved.** TR winsorization at 8× rolling median clamps and flags them (§6). Whether CCP filters them upstream is still unmeasured. |
+| #5 relist/modify fee formula | **OPEN.** Modelled as `relist_surcharge_multiple` in config, defaulting to 1.0× the broker fee. Only the maker-exit branch depends on it, and that branch is advisory. |
+| #6 sales tax / broker base rates | **OPEN.** 7.5% / 3% are config defaults, not constants; the operator's one-real-fill reconciliation is the gate that closes this. |

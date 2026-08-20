@@ -102,3 +102,23 @@ def test_a_refused_paper_open_exits_three_and_says_it_was_recorded(tmp_path, mon
     captured = capsys.readouterr()
     assert "REFUSED" in captured.err
     assert "a result, not a crash" in captured.out
+
+
+def test_paper_open_accepts_a_name_instead_of_a_type_id():
+    args = build_parser().parse_args(["paper", "open", "--name", "Tritanium", "--thesis", "dip"])
+    assert args.name == "Tritanium"
+    assert args.type_id is None
+
+
+def test_paper_open_with_neither_id_nor_name_is_refused(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    code = main(["--example-config", "paper", "open", "--thesis", "dip"])
+    assert code == 2
+    assert "must name what it is buying" in capsys.readouterr().err
+
+
+def test_an_unresolvable_name_is_a_loud_error_not_a_guess(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    code = main(["--example-config", "paper", "open", "--name", "Rifter Mk III", "--thesis", "x"])
+    assert code == 2
+    assert "no type named 'Rifter Mk III'" in capsys.readouterr().err

@@ -74,7 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     paper = sub.add_parser("paper", help="the paper trading experiment (plan.md §12)")
     paper_sub = paper.add_subparsers(dest="paper_command", required=True)
     paper_open = paper_sub.add_parser("open", help="price and record a taker entry")
-    paper_open.add_argument("--type-id", type=int, required=True)
+    paper_open.add_argument("--type-id", type=int, help="type id (or use --name)")
+    paper_open.add_argument("--name", help="type name, resolved against the SDE")
     paper_open.add_argument("--notional", type=float, help="ISK notional (default: config)")
     paper_open.add_argument("--thesis", required=True, help="why — one sentence you can argue with")
     paper_open.add_argument("--stop", type=float, help="stop price, for R sizing")
@@ -461,6 +462,24 @@ def _cmd_paper(config: Config, args) -> int:
     with _open_db(config) as db:
         try:
             if args.paper_command == "open":
+                type_id = args.type_id
+                if type_id is None:
+                    if not args.name:
+                        print(
+                            "give --type-id or --name; a paper open must name what it is buying",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    row = db.type_by_name(args.name)
+                    if row is None:
+                        # An unresolvable name is a loud error, never a guess.
+                        print(
+                            f"no type named {args.name!r} in the SDE — "
+                            "run `sde` first, or check the spelling",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    type_id = int(row["type_id"])
                 turnover = liquidity_table(
                     BarLake(config.paths),
                     region,
@@ -468,12 +487,12 @@ def _cmd_paper(config: Config, args) -> int:
                 )
                 median = None
                 if not turnover.empty:
-                    match = turnover[turnover["type_id"] == args.type_id]
+                    match = turnover[turnover["type_id"] == type_id]
                     if not match.empty:
                         median = float(match.iloc[0]["median_isk_value"])
-                type_row = db.type_by_id(args.type_id)
+                type_row = db.type_by_id(type_id)
                 record = ledger.open_position(
-                    type_id=args.type_id,
+                    type_id=type_id,
                     type_name=type_row["name"] if type_row else None,
                     notional_isk=args.notional or config.paper.default_notional_isk,
                     book=book,

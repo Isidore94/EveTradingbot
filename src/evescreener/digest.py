@@ -87,6 +87,31 @@ def split_content(text: str, limit: int) -> list[str]:
     return [f"({index}/{total})\n{chunk}" for index, chunk in enumerate(chunks, start=1)]
 
 
+def _verdict_banner(backtest_verdict: dict | None) -> str:
+    """A one-line warning when the backtest says this setup class did not pass."""
+    if not backtest_verdict:
+        return ""
+    verdicts = {
+        horizon: judgement.get("verdict")
+        for horizon, judgement in backtest_verdict.items()
+        if isinstance(judgement, dict)
+    }
+    if not verdicts:
+        return ""
+    if any(value == "PLAUSIBLE" for value in verdicts.values()):
+        return ""
+    if all(value == "UNKNOWN" for value in verdicts.values()):
+        return (
+            "⚠ **The backtest returned UNKNOWN at every horizon** — too small a "
+            "sample to judge, which is not the same as a pass."
+        )
+    return (
+        "⚠ **The backtest says this setup class is NOT PLAUSIBLE at every horizon "
+        "tested**, against a rule frozen before the measurement. The rows below are "
+        "what the screen found today; they are not evidence the class works."
+    )
+
+
 def _fmt(value, digits=2, suffix="") -> str:
     if value is None:
         return "UNKNOWN"
@@ -108,6 +133,12 @@ def build_digest(
         f"region {screen.region_id} · universe {screen.universe:,} tracked types",
         "",
     ]
+    # The caveat goes ABOVE the candidates, not in a footer. If the setup class
+    # failed its own pre-stated test, no one should read a ranked list without
+    # knowing that first.
+    banner = _verdict_banner(backtest_verdict)
+    if banner:
+        lines.extend([banner, ""])
     if screen.honest_zero:
         lines.append("**Nothing clears costs today.**")
         lines.append(

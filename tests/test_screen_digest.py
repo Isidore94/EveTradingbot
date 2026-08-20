@@ -446,3 +446,44 @@ def test_candidates_rank_on_expected_r_with_net_edge_as_tie_break(config, seeded
         scores = [row["rank_score"] for row in result.candidates]
         assert scores == sorted(scores, reverse=True)
         assert all(row["evidence"] for row in result.candidates)
+
+
+# -- the verdict banner -----------------------------------------------------
+
+
+def test_a_failed_backtest_warns_ABOVE_the_candidates(config, seeded_db):
+    """No one should read a ranked list without knowing the class failed."""
+    ids = list(range(34, 44))
+    bars = bars_for(ids, dip_at=150)
+    composite = build_composite(bars_for(ids, seed=2), members=10, min_members=5)
+    result = run_screen(config, seeded_db, bars, composite, book_for(ids), now=NOW)
+    text = build_digest(
+        config,
+        result,
+        backtest_verdict={
+            "5": {"verdict": "NOT PLAUSIBLE"},
+            "10": {"verdict": "NOT PLAUSIBLE"},
+        },
+    )
+    assert "NOT PLAUSIBLE at every horizon" in text
+    assert "not evidence the class works" in text
+    banner_at = text.index("NOT PLAUSIBLE at every horizon")
+    if result.candidates:
+        assert banner_at < text.index("candidate(s) clearing costs")
+
+
+def test_a_plausible_backtest_needs_no_banner(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    text = build_digest(config, result, backtest_verdict={"10": {"verdict": "PLAUSIBLE"}})
+    assert "NOT PLAUSIBLE" not in text
+
+
+def test_an_all_unknown_backtest_says_unknown_is_not_a_pass(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    text = build_digest(config, result, backtest_verdict={"10": {"verdict": "UNKNOWN"}})
+    assert "not the same as a pass" in text
+
+
+def test_no_backtest_means_no_banner(config, seeded_db):
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    assert "⚠ **The backtest" not in build_digest(config, result)

@@ -187,6 +187,11 @@ min_net_edge_pct = 0.0
 participation_window = 20
 # Spoof flag: largest single order / total resting volume.
 top_order_share_flag = 0.5
+# Bar freshness, judged separately from the book (plan.md §21 R2). A book sweep
+# says nothing about whether the daily-history job has been failing all week.
+# Stale bars turn every analytical gate UNKNOWN; UNKNOWN fails.
+max_bar_age_days = 3
+max_refresh_age_hours = 36.0
 
 [discord]
 # Webhook URL. Never committed. Empty string = `unconfigured` (not an error).

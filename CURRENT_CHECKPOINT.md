@@ -50,8 +50,8 @@ adjacent.
 | phase | scope | state |
 |---|---|---|
 | **R1** | Executable order-book identity and validated snapshots | **IMPLEMENTED + GREEN** |
-| **R2** | Completed-bar enforcement and independent bar freshness | **NEXT — not started** |
-| R3 | Backtest price bounds, statistics and friction labels | not started |
+| **R2** | Completed-bar enforcement and independent bar freshness | **IMPLEMENTED + GREEN** |
+| **R3** | Backtest price bounds, statistics and friction labels | **NEXT** |
 | R4 | Maker analysis and location-specific cost semantics | not started |
 | R5 | Killmail lead-lag hypothesis fidelity | not started |
 | R6 | Learning freshness and eligible-sample handling | not started |

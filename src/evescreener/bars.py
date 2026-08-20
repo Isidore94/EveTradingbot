@@ -21,13 +21,15 @@ import pandas as pd
 
 from .esi.client import HISTORY_FEED, EsiClient, EsiNotFound
 from .store.lake import BAR_LAKE_COLUMNS, EVE_DAILY_BAR_COLUMNS, BarLake
-from .timeutil import bar_datetime, iso, utcnow
+from .timeutil import bar_datetime, ensure_utc, iso, last_completed_bar_date, utcnow
 
 __all__ = [
     "BAR_LAKE_COLUMNS",
     "EVE_DAILY_BAR_COLUMNS",
     "HistoryIngestResult",
     "empty_bar_frame",
+    "BarFreshness",
+    "bar_freshness",
     "frame_from_history",
     "ingest_history",
     "participation",
@@ -45,16 +47,27 @@ def frame_from_history(
     type_id: int,
     region_id: int,
     fetched_at=None,
+    now=None,
 ) -> pd.DataFrame:
     """The single ESI-history -> bar-contract mapping site.
 
     close  <- average    high <- highest    low <- lowest
     datetime = the ESI date stamped at 11:00 UTC (the downtime boundary)
     isk_value = volume x close, derived at write (plan.md §3.4)
+
+    **Completed days only, enforced here (§21 R2).** Anything dated after
+    `last_completed_bar_date` is a day that has not finished happening, and a
+    partial day that reaches the lake can confirm a signal with a bar whose
+    high, low and average are all still moving. The rule was written in
+    `timeutil` and never applied at ingestion; it is applied here now, at the
+    one place ESI rows become bars, so no caller can forget it. Drops are
+    counted in `frame.attrs`, never silent.
     """
     if not rows:
         return empty_bar_frame()
     fetched = iso(fetched_at or utcnow())
+    cutoff = last_completed_bar_date(now)
+    dropped = 0
     records = []
     for row in rows:
         try:
@@ -66,6 +79,10 @@ def frame_from_history(
             moment = bar_datetime(row["date"])
         except (KeyError, TypeError, ValueError):
             # A malformed bar is dropped and counted, never repaired by guess.
+            continue
+        if moment.date() > cutoff:
+            # Today's partial bar, or a future-dated one. Not yet a fact.
+            dropped += 1
             continue
         records.append(
             {
@@ -82,10 +99,100 @@ def frame_from_history(
             }
         )
     if not records:
-        return empty_bar_frame()
+        frame = empty_bar_frame()
+        frame.attrs["incomplete_dropped"] = dropped
+        frame.attrs["last_completed_bar_date"] = cutoff.isoformat()
+        return frame
     frame = pd.DataFrame.from_records(records, columns=BAR_LAKE_COLUMNS)
     frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True)
-    return frame.sort_values("datetime").reset_index(drop=True)
+    frame = frame.sort_values("datetime").reset_index(drop=True)
+    frame.attrs["incomplete_dropped"] = dropped
+    frame.attrs["last_completed_bar_date"] = cutoff.isoformat()
+    return frame
+
+
+@dataclass(slots=True)
+class BarFreshness:
+    """Whether the *bars* are current — a fact the order book cannot supply.
+
+    Two independent ways the lake goes stale, and they are not the same
+    question:
+
+    * **`bar_age_days`** — how many completed EVE days lie between the newest
+      bar and today's. This is what an analyst means by "old data".
+    * **`refresh_age_hours`** — how long since ingestion last wrote anything.
+      A lake whose history job has been failing for a week still contains a
+      bar dated the day it stopped, so bar age alone cannot see the outage.
+
+    Either exceeding its budget is stale, and stale is UNKNOWN, and UNKNOWN
+    fails (§4).
+    """
+
+    last_bar_date: str | None = None
+    bar_age_days: int | None = None
+    fetched_at: str | None = None
+    refresh_age_hours: float | None = None
+    stale: bool = True
+    reason: str = "no bars"
+
+    @property
+    def known(self) -> bool:
+        return self.last_bar_date is not None and not self.stale
+
+    @property
+    def label(self) -> str:
+        if self.last_bar_date is None:
+            return "UNKNOWN"
+        return "stale" if self.stale else "fresh"
+
+
+def bar_freshness(
+    frame: pd.DataFrame,
+    *,
+    now=None,
+    max_bar_age_days: int,
+    max_refresh_age_hours: float,
+) -> BarFreshness:
+    """Judge the bars on their own evidence, never on the book's (§21 R2)."""
+    moment = ensure_utc(now or utcnow())
+    if frame is None or frame.empty or "datetime" not in frame:
+        return BarFreshness(reason="no bars in the lake for this type")
+
+    stamps = pd.to_datetime(frame["datetime"], utc=True, errors="coerce").dropna()
+    if stamps.empty:
+        return BarFreshness(reason="no bars in the lake for this type")
+    newest = stamps.max()
+    last_bar = newest.date()
+    cutoff = last_completed_bar_date(moment)
+    age_days = max(0, (cutoff - last_bar).days)
+
+    fetched_iso = None
+    refresh_hours = None
+    if "fetched_at" in frame:
+        fetched = pd.to_datetime(frame["fetched_at"], utc=True, errors="coerce").dropna()
+        if not fetched.empty:
+            newest_fetch = fetched.max()
+            fetched_iso = iso(newest_fetch.to_pydatetime())
+            refresh_hours = max(
+                0.0, (moment - newest_fetch.to_pydatetime()).total_seconds() / 3600.0
+            )
+
+    reasons = []
+    if age_days > max_bar_age_days:
+        reasons.append(f"bars {age_days} completed day(s) behind")
+    if refresh_hours is None:
+        reasons.append("no ingestion stamp on these bars")
+    elif refresh_hours > max_refresh_age_hours:
+        reasons.append(f"last refreshed {refresh_hours:.0f}h ago")
+
+    return BarFreshness(
+        last_bar_date=last_bar.isoformat(),
+        bar_age_days=age_days,
+        fetched_at=fetched_iso,
+        refresh_age_hours=refresh_hours,
+        stale=bool(reasons),
+        reason=" · ".join(reasons),
+    )
 
 
 def quality_flags(frame: pd.DataFrame) -> dict[str, int]:

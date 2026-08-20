@@ -145,6 +145,37 @@ def test_brief_reads_one_type_fully(config, seeded_db):
     assert brief.friction_pct is not None and brief.friction_pct > 0
 
 
+def test_stale_bars_turn_every_gate_unknown_however_fresh_the_book(config, seeded_db):
+    """§21 R2: freshness was read off the book, so old bars looked current.
+
+    These fixture bars end 2026-07-19 while NOW is 2026-08-20 — 32 completed
+    days behind — against a book swept moments ago.
+    """
+    bars = bars_for([34])
+    brief = build_brief(config, seeded_db, bars, None, book_for([34]), 34, now=NOW)
+    assert brief.freshness == "fresh", "the book really is current"
+    assert brief.bar_freshness == "stale", "the bars really are not"
+    assert brief.bar_age_days is not None and brief.bar_age_days > 3
+    assert set(brief.gates.values()) == {"UNKNOWN"}, "no gate survives a stale bar"
+    assert any("behind" in flag for flag in brief.flags)
+
+
+def test_current_bars_let_the_gates_be_decided(config, seeded_db):
+    """The downgrade must not be unconditional, or it would say nothing."""
+    from evescreener.timeutil import iso, last_completed_bar_date
+
+    bars = bars_for([34])
+    # Re-date the same series so its newest bar is the last completed EVE day.
+    span = pd.date_range(end=last_completed_bar_date(NOW), periods=200, freq="D", tz="UTC")
+    bars = bars.copy()
+    bars["datetime"] = [stamp.replace(hour=11) for stamp in span]
+    bars["fetched_at"] = iso(NOW)
+    brief = build_brief(config, seeded_db, bars, None, book_for([34]), 34, now=NOW)
+    assert brief.bar_freshness == "fresh"
+    assert brief.bar_age_days == 0
+    assert set(brief.gates.values()) != {"UNKNOWN"}
+
+
 def test_brief_on_a_stale_book_is_unknown_not_priced(config, seeded_db):
     bars = bars_for([34])
     stale = book_for([34], sweep=NOW - timedelta(hours=6))

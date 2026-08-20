@@ -1560,7 +1560,7 @@ it is adjacent.**
 | phase | scope | state |
 |---|---|---|
 | **R1** | Executable order-book identity and validated snapshots | **IMPLEMENTED + GREEN** |
-| R2 | Completed-bar enforcement and independent bar freshness | not started |
+| **R2** | Completed-bar enforcement and independent bar freshness | **IMPLEMENTED + GREEN** |
 | R3 | Backtest price bounds, statistics and friction labels | not started |
 | R4 | Maker analysis and location-specific cost semantics | not started |
 | R5 | Killmail lead-lag hypothesis fidelity | not started |
@@ -1632,3 +1632,47 @@ in-game market that `exec_location_id` for a handful of liquid types is the
 station the operator actually trades at, and that a type whose best bid rests
 in a structure is flagged rather than priced. No row produced by this phase has
 been checked against a live client.
+
+### §21 R2 — Completed bars at ingestion, and freshness that is not the book's — **IMPLEMENTED + GREEN**
+
+**Two contracts repaired.**
+
+**1. Only completed EVE days enter the lake.** `timeutil.last_completed_bar_date`
+existed but was never applied in production ingestion, so `frame_from_history`
+accepted every date ESI returned. A partial current-day bar — whose high, low
+and average are all still moving — could confirm a signal. The rule is now
+enforced at the single ESI-to-bar mapping site, so no caller can forget it, and
+drops are counted in `frame.attrs["incomplete_dropped"]` rather than being
+silent. The boundary is the 11:05 history roll, not midnight.
+
+**2. Bar freshness and book freshness are separate facts.** `brief.freshness`
+was `"fresh" if sell_row is not None and not stale_reason` — derived entirely
+from the order book. A history job failing for a week while sweeps kept running
+rendered a week-old signal as fresh. `bars.bar_freshness()` now judges the bars
+on their own evidence, and a test asserts its source never mentions the book.
+
+It measures two independent failures, because they are not the same question:
+
+* **`bar_age_days`** — completed EVE days between the newest bar and today's.
+* **`refresh_age_hours`** — time since ingestion last wrote. A lake whose
+  history job stopped still holds a bar dated the day it stopped, so bar age
+  alone cannot see the outage.
+
+Either exceeding its budget is stale, and **stale downgrades every analytical
+gate to UNKNOWN** (`TypeBrief.apply_bar_freshness`) — not to FAIL, because the
+gate is unestablished rather than false. `TypeBrief` now carries
+`bar_freshness`, `bar_stale_reason` and `bar_age_days` alongside the book's own
+`freshness`, so a read can say "book fresh, bars stale" and be believed.
+
+Budgets are config: `[screen].max_bar_age_days` (3) and
+`max_refresh_age_hours` (36).
+
+**A config-loading change was required and is recorded here.** `build_section`
+rejected any section missing a key. Adding an optional setting would therefore
+have broken the operator's existing `config.toml`. It now honours a field's
+**declared default** and requires only fields that have none — drift still
+fails loudly, optional settings no longer do.
+
+**Owed live gate (R2).** Confirm on the operator's machine that a deliberately
+skipped `ingest-history` run makes the screen report bars stale while the book
+still reads fresh, and that gates go UNKNOWN rather than silently passing.

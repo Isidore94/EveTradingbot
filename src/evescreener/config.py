@@ -8,7 +8,7 @@ if they diverge, which is how a secret-bearing local config stays honest.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +148,12 @@ class ScreenConfig:
     min_net_edge_pct: float
     participation_window: int
     top_order_share_flag: float
+    #: Bar freshness, independent of the book (§21 R2). A bar is stale when it
+    #: is this many completed EVE days behind, or when ingestion last wrote
+    #: longer ago than the refresh budget — a lake whose history job has been
+    #: failing still holds a bar dated the day it stopped.
+    max_bar_age_days: int = 3
+    max_refresh_age_hours: float = 36.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,13 +286,24 @@ def build_section(section_type: type, data: dict, name: str):
     if not is_dataclass(section_type):  # pragma: no cover - programming error
         raise ConfigError(f"{name} is not a config section")
     expected = {f.name: f.type for f in fields(section_type)}
-    missing = sorted(set(expected) - set(data))
+    # A field that declares a default is an *optional* setting, not drift: an
+    # operator's existing config.toml must keep loading when a later phase adds
+    # one. A field with no default is still required and still fails loudly,
+    # which is the property this check exists for.
+    optional = {
+        f.name
+        for f in fields(section_type)
+        if f.default is not MISSING or f.default_factory is not MISSING
+    }
+    missing = sorted(set(expected) - set(data) - optional)
     unknown = sorted(set(data) - set(expected))
     if missing:
         raise ConfigError(f"[{name}] missing keys: {', '.join(missing)}")
     if unknown:
         raise ConfigError(f"[{name}] unknown keys: {', '.join(unknown)}")
-    kwargs = {key: _coerce(expected[key], data[key], f"[{name}].{key}") for key in expected}
+    kwargs = {
+        key: _coerce(expected[key], data[key], f"[{name}].{key}") for key in expected if key in data
+    }
     return section_type(**kwargs)
 
 

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from .bars import bar_freshness
 from .config import Config
 from .costs import CostModel
 from .screen import _book_rows, _tier_prices, setup_params
@@ -96,9 +97,31 @@ class TypeBrief:
     entry_price: float | None = None
     exit_price: float | None = None
     book_age_minutes: float | None = None
+    #: The **order book's** freshness, and only that. Kept as its own field so
+    #: nothing can quietly read it as "the data is current" (§21 R2).
     freshness: str = "UNKNOWN"
+    #: The **bars'** freshness, judged on bar age and ingestion age. A book
+    #: sweep says nothing about whether the history job has been failing for a
+    #: week, so these are two facts and are reported as two.
+    bar_freshness: str = "UNKNOWN"
+    bar_stale_reason: str | None = None
+    bar_age_days: int | None = None
     flags: list[str] = field(default_factory=list)
     note: str | None = None
+
+    def apply_bar_freshness(self) -> None:
+        """Stale or unknown bars turn every analytical gate UNKNOWN (§4).
+
+        A gate answered from a week-old bar is not a PASS, it is an answer to
+        a question about last week. Downgrading rather than failing keeps the
+        tri-state honest: the gate is not FALSE, it is unestablished.
+        """
+        if self.bar_freshness == "fresh":
+            return
+        self.gates = {name: "UNKNOWN" for name in self.gates}
+        reason = self.bar_stale_reason or "bar freshness UNKNOWN"
+        if reason not in self.flags:
+            self.flags.append(reason)
 
     def as_dict(self) -> dict:
         return {
@@ -132,6 +155,9 @@ class TypeBrief:
             "exit_price": self.exit_price,
             "book_age_minutes": self.book_age_minutes,
             "freshness": self.freshness,
+            "bar_freshness": self.bar_freshness,
+            "bar_stale_reason": self.bar_stale_reason,
+            "bar_age_days": self.bar_age_days,
             "flags": self.flags,
             "note": self.note,
         }
@@ -286,7 +312,21 @@ def build_brief(
         config, book, int(type_id), now
     )
     brief.book_age_minutes = round(age_minutes, 1) if age_minutes is not None else None
+    # The book's own freshness. It says nothing about the bars, and after
+    # §21 R2 it is no longer allowed to stand in for them.
     brief.freshness = "fresh" if sell_row is not None and not stale_reason else "stale"
+
+    bars_state = bar_freshness(
+        work,
+        now=now,
+        max_bar_age_days=config.screen.max_bar_age_days,
+        max_refresh_age_hours=config.screen.max_refresh_age_hours,
+    )
+    brief.bar_freshness = bars_state.label
+    brief.bar_stale_reason = bars_state.reason or None
+    brief.bar_age_days = bars_state.bar_age_days
+    # A gate answered from a week-old bar is an answer about last week (§4).
+    brief.apply_bar_freshness()
     ask_prices = _tier_prices(sell_row, tiers)
     bid_prices = _tier_prices(buy_row, tiers)
     for tier in tiers:

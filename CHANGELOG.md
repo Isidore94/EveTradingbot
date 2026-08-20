@@ -5,6 +5,40 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A week-old bar is not a fresh signal (§21 R2)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R2. `uv run pytest -q` →
+**618 passed, 7 deselected**, ruff check + format clean.
+
+**Completed days only, enforced at ingestion.** `last_completed_bar_date`
+existed in `timeutil` but was never applied in production, so
+`frame_from_history` accepted every date ESI returned — including today's
+partial bar, whose high, low and average are all still moving. It is enforced
+at the one ESI-to-bar mapping site now, and drops are counted in
+`frame.attrs["incomplete_dropped"]` rather than being silent. The boundary is
+the 11:05 roll, not midnight.
+
+**Bar freshness is no longer the book's freshness.** `brief.freshness` was
+derived entirely from the order book, so a history job failing for a week while
+sweeps kept running rendered a week-old signal as fresh. `bars.bar_freshness()`
+judges the bars on their own evidence — a test asserts its source never
+mentions the book — and measures two independent failures: how many completed
+days the newest bar is behind, and how long since ingestion last wrote. A lake
+whose history job stopped still holds a bar dated the day it stopped, so bar
+age alone cannot see the outage.
+
+Stale bars now **downgrade every analytical gate to UNKNOWN**, not to FAIL: the
+gate is unestablished, not false. `TypeBrief` carries `bar_freshness`,
+`bar_stale_reason` and `bar_age_days` beside the book's own `freshness`.
+
+Budgets: `[screen].max_bar_age_days` (3), `max_refresh_age_hours` (36).
+
+**Config loading changed to allow this without breaking existing files.**
+`build_section` rejected any section missing a key, so adding an optional
+setting would have broken the operator's `config.toml`. It now honours a
+field's declared default and requires only fields that have none — drift still
+fails loudly, optional settings no longer do.
+
 ## 2026-08-20 — A spread nobody could trade is not a spread (§21 R1)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R1. `uv run pytest -q` →

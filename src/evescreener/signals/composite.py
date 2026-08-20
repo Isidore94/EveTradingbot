@@ -15,6 +15,19 @@ built: an **ISK-turnover-weighted index** over the top tracked types, with
 
 The composite is returned as a bar frame under the same contract as any type,
 so RRS treats it as just another series.
+
+**One engine, three uses** (plan.md §19 Part 1). `build_composite` also builds
+FORGE-EW (equal weight over the *same* membership) and every sector index
+(turnover weight over a market-group subtree). They differ only in
+`weighting` and `member_ids`; the chain-link, the cap and the diagnostics are
+shared, because three index implementations would drift into three answers.
+
+**"Weighted by daily volume" means ISK TURNOVER — units × price — never raw
+unit volume.** Raw units would make the index essentially 100% Tritanium: it
+trades ~5 billion units a day at ~4 ISK. Turnover is the only common
+denominator across items whose unit prices span twelve orders of magnitude
+(§6). Membership is decided separately, by a unit-volume floor (§11 D3), so
+4-ISK dust that clears the unit gate still cannot distort the level.
 """
 
 from __future__ import annotations
@@ -24,17 +37,33 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-__all__ = ["Composite", "build_composite"]
+__all__ = ["Composite", "TURNOVER", "EQUAL", "build_composite"]
+
+# Weighting schemes. FORGE is TURNOVER; FORGE-EW is EQUAL over the same names.
+TURNOVER = "turnover"
+EQUAL = "equal"
 
 
 @dataclass(slots=True)
 class Composite:
     frame: pd.DataFrame
     diagnostics: dict = field(default_factory=dict)
+    member_ids: tuple[int, ...] = ()
 
     @property
     def known(self) -> bool:
         return not self.frame.empty and len(self.frame) > 1
+
+    @property
+    def series(self) -> pd.Series:
+        """The index level, indexed by date. Empty when the index is UNKNOWN."""
+        if self.frame.empty:
+            return pd.Series(dtype="float64")
+        return pd.Series(
+            self.frame["close"].to_numpy(),
+            index=pd.to_datetime(self.frame["datetime"], utc=True),
+            name="level",
+        )
 
 
 def _entropy(weights: np.ndarray) -> float:
@@ -73,23 +102,49 @@ def build_composite(
     single_cap: float = 0.10,
     rebalance_days: int = 30,
     min_members: int = 5,
+    weighting: str = TURNOVER,
+    member_ids=None,
+    ticker: str = "FORGE",
+    name: str | None = None,
 ) -> Composite:
-    """Chain-linked, turnover-weighted composite over the supplied bar lake.
+    """Chain-linked index over the supplied bar lake. One engine, three uses.
 
     `bars` is the long-format lake frame (`type_id, datetime, close, volume,
     isk_value, ...`). The output frame carries `datetime, high, low, close,
     volume, order_count` so it is a drop-in reference series for RRS.
+
+    * `weighting=TURNOVER` — FORGE and the sector indices.
+    * `weighting=EQUAL` — FORGE-EW, which must be handed the **same**
+      `member_ids` FORGE selected so the pair differ only in weighting; that is
+      the whole point of the breadth read.
+    * `member_ids` restricts the candidate pool (a sector's subtree, or
+      FORGE's chosen basket). None means "everything in `bars`".
     """
+    if weighting not in (TURNOVER, EQUAL):
+        raise ValueError(f"unknown weighting {weighting!r}; expected {TURNOVER!r} or {EQUAL!r}")
+    label = {"ticker": ticker, "name": name or ticker, "weighting": weighting}
     if bars is None or bars.empty:
-        return Composite(pd.DataFrame(), {"reason": "no bars"})
+        return Composite(pd.DataFrame(), {**label, "reason": "no bars"})
     frame = bars.copy()
     frame["datetime"] = pd.to_datetime(frame["datetime"], utc=True)
+    if member_ids is not None:
+        wanted = {int(value) for value in member_ids}
+        frame = frame[frame["type_id"].isin(wanted)]
+        if frame.empty:
+            return Composite(
+                pd.DataFrame(),
+                {**label, "reason": "no bars for the requested members", "members": 0},
+            )
     closes = frame.pivot_table(index="datetime", columns="type_id", values="close")
     turnover = frame.pivot_table(index="datetime", columns="type_id", values="isk_value")
     if closes.shape[0] < 2 or closes.shape[1] < min_members:
         return Composite(
             pd.DataFrame(),
-            {"reason": f"needs >= {min_members} members and 2 dates", "members": closes.shape[1]},
+            {
+                **label,
+                "reason": f"needs >= {min_members} members and 2 dates",
+                "members": int(closes.shape[1]),
+            },
         )
     returns = closes.pct_change()
 
@@ -111,7 +166,11 @@ def build_composite(
             median_turnover = median_turnover[median_turnover > 0]
             if len(median_turnover) >= min_members:
                 selected = median_turnover.nlargest(members)
-                weights = _capped_weights(selected, single_cap)
+                if weighting == EQUAL:
+                    # Equal weight, same names: FORGE-EW minus FORGE is breadth.
+                    weights = pd.Series(1.0 / len(selected), index=selected.index, dtype="float64")
+                else:
+                    weights = _capped_weights(selected, single_cap)
                 last_rebalance = stamp
                 basket_history.append(
                     {
@@ -161,6 +220,7 @@ def build_composite(
     # close-to-close, which is exactly what the RRS power index wants.
     final_weights = weights if weights is not None else pd.Series(dtype="float64")
     diagnostics = {
+        **label,
         "members": int(len(final_weights)),
         "top_weight": float(final_weights.max()) if len(final_weights) else None,
         "weight_entropy": _entropy(final_weights.to_numpy()) if len(final_weights) else None,
@@ -172,4 +232,8 @@ def build_composite(
         "level_last": float(levels[-1]),
         "basket_history": basket_history[-6:],
     }
-    return Composite(composite, diagnostics)
+    return Composite(
+        composite,
+        diagnostics,
+        member_ids=tuple(int(value) for value in final_weights.index),
+    )

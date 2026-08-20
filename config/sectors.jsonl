@@ -1,0 +1,27 @@
+# Sector index definitions (plan.md §19 Part 1). Operator-editable data.
+#
+# One JSON object per line:
+#   {"ticker": "MIN", "name": "Minerals & Ore",
+#    "roots": [1857, 1031], "min_members": 8, "min_unit_volume": 1000}
+#
+# `roots` are marketGroup ids whose SUBTREES define membership; a type belongs
+# to the sector if any root is an ancestor of its market group. Members come
+# from the tracked universe only, and NPC-price-seeded items are excluded.
+#
+# `min_members` — below this the sector renders UNKNOWN rather than being
+# merged into a neighbour or shown as a thin index nobody should trust.
+# `min_unit_volume` — optional per-sector floor (some industries are
+# structurally thinner than the market-wide default); omit to inherit
+# `config.toml`'s universe floor. Each sector's floor and resulting member
+# count render in its diagnostics.
+#
+# The market-group ids below were read from the live SDE on 2026-08-20.
+{"ticker": "MIN", "name": "Minerals & Ore", "roots": [1857, 1031, 1033, 1034], "min_members": 8}
+{"ticker": "SHIP", "name": "Ships", "roots": [4], "min_members": 8}
+{"ticker": "MOD", "name": "Ship Modules & Equipment", "roots": [9, 955, 2202, 2203], "min_members": 8}
+{"ticker": "AMMO", "name": "Ammunition & Charges", "roots": [11], "min_members": 8}
+{"ticker": "DRONE", "name": "Drones & Fighters", "roots": [157], "min_members": 8}
+{"ticker": "MFG", "name": "Manufacturing Inputs", "roots": [475, 1035, 1332, 1861], "min_members": 8}
+{"ticker": "FUEL", "name": "Fuel & Structures", "roots": [1870, 477], "min_members": 6}
+{"ticker": "PLEX", "name": "Pilot Services", "roots": [1922], "min_members": 3}
+{"ticker": "IMP", "name": "Implants & Boosters", "roots": [24], "min_members": 8}

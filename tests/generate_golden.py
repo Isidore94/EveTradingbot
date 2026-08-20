@@ -107,10 +107,86 @@ def synthetic_instances(seed: int = 20260820, count: int = 400) -> pd.DataFrame:
     )
 
 
+def index_lake(seed: int = 424242, bars: int = 120, types: int = 12) -> pd.DataFrame:
+    """A deterministic multi-type lake for freezing the index series."""
+    rng = np.random.default_rng(seed)
+    stamps = pd.date_range("2026-01-01 11:00", periods=bars, freq="D", tz="UTC")
+    rows = []
+    for index in range(types):
+        close = 100.0 * (index + 1) * np.exp(np.cumsum(rng.normal(0.0005, 0.02, bars)))
+        units = 10_000.0 * (index + 1)
+        for position, stamp in enumerate(stamps):
+            rows.append(
+                {
+                    "type_id": 1000 + index,
+                    "region_id": 10000002,
+                    "datetime": stamp,
+                    "high": close[position] * 1.01,
+                    "low": close[position] * 0.99,
+                    "close": close[position],
+                    "volume": units,
+                    "order_count": 50,
+                    "isk_value": close[position] * units,
+                    "fetched_at": "2026-08-20T00:00:00+00:00",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def churn_lake() -> pd.DataFrame:
+    """A lake where a huge new member joins mid-series at a wildly different
+    price level, to prove the chain-link holds the index level flat.
+
+    Without chain-linking, admitting a member priced 1,000x the incumbents at a
+    rebalance would print as an enormous index move. It must print as nothing.
+    """
+    bars = 120
+    stamps = pd.date_range("2026-01-01 11:00", periods=bars, freq="D", tz="UTC")
+    rows = []
+    for index in range(8):
+        for stamp in stamps:
+            close = 100.0 + index
+            rows.append(
+                {
+                    "type_id": 2000 + index,
+                    "region_id": 10000002,
+                    "datetime": stamp,
+                    "high": close,
+                    "low": close,
+                    "close": close,
+                    "volume": 10_000.0,
+                    "order_count": 50,
+                    "isk_value": close * 10_000.0,
+                    "fetched_at": "2026-08-20T00:00:00+00:00",
+                }
+            )
+    # The interloper: appears at bar 60, priced 1,000x, with enormous turnover
+    # so it dominates the next basket. Its own price never moves either.
+    for position, stamp in enumerate(stamps):
+        if position < 60:
+            continue
+        rows.append(
+            {
+                "type_id": 2999,
+                "region_id": 10000002,
+                "datetime": stamp,
+                "high": 100_000.0,
+                "low": 100_000.0,
+                "close": 100_000.0,
+                "volume": 1_000_000.0,
+                "order_count": 500,
+                "isk_value": 100_000.0 * 1_000_000.0,
+                "fetched_at": "2026-08-20T00:00:00+00:00",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     from evescreener.backtest import _stats, price_instances, verdict
     from evescreener.signals.atr import atr_series, true_range, winsorized_true_range
     from evescreener.signals.avwap import anchored_vwap_bands
+    from evescreener.signals.composite import EQUAL, TURNOVER, build_composite
     from evescreener.signals.levels import build_level_store
     from evescreener.signals.moving import cloud_state, cross_within, ema, sma
 
@@ -177,6 +253,33 @@ def main() -> None:
         ),
     }
 
+    lake = index_lake()
+    forge = build_composite(lake, members=100, weighting=TURNOVER, ticker="FORGE")
+    forge_ew = build_composite(
+        lake,
+        members=100,
+        single_cap=1.0,
+        weighting=EQUAL,
+        member_ids=forge.member_ids,
+        ticker="FORGE-EW",
+    )
+    churn = build_composite(churn_lake(), members=100, rebalance_days=30, ticker="CHURN")
+    churn_levels = [float(value) for value in churn.frame["close"]]
+
+    indices = {
+        "forge_tail": [float(value) for value in forge.frame["close"].tail(5)],
+        "forge_members": list(forge.member_ids),
+        "forge_top_weight": forge.diagnostics["top_weight"],
+        "forge_entropy": forge.diagnostics["weight_entropy"],
+        "forge_ew_tail": [float(value) for value in forge_ew.frame["close"].tail(5)],
+        "forge_ew_top_weight": forge_ew.diagnostics["top_weight"],
+        "forge_ew_members": list(forge_ew.member_ids),
+        "churn_level_min": min(churn_levels),
+        "churn_level_max": max(churn_levels),
+        "churn_rebalances": churn.diagnostics["rebalances"],
+        "churn_final_members": churn.diagnostics["members"],
+    }
+
     payload = {
         "_provenance": {
             "generator": "tests/generate_golden.py",
@@ -191,6 +294,7 @@ def main() -> None:
         "true_range_clamped_bars": int(clamped.sum()),
         "backtest": backtest_cells,
         "moving": moving,
+        "indices": indices,
         "levels": {
             "count": len(levels["levels"]),
             "prices": [round(float(level["price"]), 4) for level in levels["levels"][:12]],

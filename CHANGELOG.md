@@ -5,6 +5,41 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Bars, because the eye reads a body as a fact
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §19.2. `uv run pytest -q` →
+**558 passed, 7 deselected**, ruff check + format clean.
+
+### The change
+
+The chart drew price as a line over a shaded high/low envelope. It now draws
+**HLC bars**: a vertical high–low range per bar with a close tick on its
+right, coloured against the **previous close**.
+
+The `open` invariant (§4) is untouched, and the reason it is untouched is the
+whole point of the form. A candlestick's body is the mark a reader trusts
+first and questions last; drawing one here would require inventing the open it
+measures, and the fabrication would arrive wearing the most persuasive shape
+on the chart. An HLC bar has no body. Every mark on it — the range, the tick,
+the colour — is a measured number or a comparison between two of them.
+
+`bar_colours()` is a pure function over the close series, so the rule is
+tested directly rather than through a paint event. A bar with nothing behind
+it (the first, or one following a gap) is FLAT: no direction to report is not
+the same as no change, and neither is guessed.
+
+### Density
+
+A 400-bar window on a narrow pane cannot resolve a tick, so the form degrades
+by measured slot width rather than smearing into a block that would read as
+more data than it is:
+
+| pixels per bar | drawn |
+| --- | --- |
+| ≥ 4.0 | range + close tick |
+| 1.5 – 4.0 | bare coloured range |
+| < 1.5 | shaded envelope + close line (the previous rendering) |
+
 ## 2026-08-20 — A risk unit made of float noise is not a risk unit
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §13.2 (amended) and §17 D-29.

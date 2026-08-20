@@ -92,8 +92,9 @@ Eight pages — MARKET, CHARTS, BOARD, FOCUS, SCANNER, PAPER, LEARNING, HEALTH �
 over the local lake only. The refresh timer re-reads what is on disk and
 cannot cause a fetch before `Expires`; the desk *shows* staleness rather than
 curing it. Paper Buy is on every surface a name appears, through one prefilled
-form that calls the same ledger the CLI does, with the same refusals. There
-are no candlesticks, because there is no `open`.
+form that calls the same ledger the CLI does, with the same refusals. Price
+is drawn as HLC bars — high–low range with a close tick, coloured against the
+previous close — and never as candlesticks, because there is no `open`.
 
 ```bash
 uv run python -m evescreener daemon    # every cadence in one process

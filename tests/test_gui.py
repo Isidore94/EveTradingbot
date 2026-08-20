@@ -247,16 +247,49 @@ def test_charting_from_the_board_reaches_the_chart_page(qtbot, desk, config):
     assert window.rail.currentItem().text() == "CHARTS"
 
 
-def test_the_chart_draws_no_candles_because_there_is_no_open(qtbot, desk):
-    """The bar contract has no open and the chart must not invent one (§4)."""
+def test_the_chart_draws_no_candle_bodies_because_there_is_no_open(qtbot, desk):
+    """Price is HLC bars; the bar contract has no open and none is invented (§4)."""
     from evescreener.gui.chart import build_series
 
     series = build_series(desk, 601)
     assert series.known
     assert not hasattr(series, "open")
     assert series.high is not None and series.low is not None
-    # The honest substitute for a body is the measured high/low envelope.
-    assert len(series.high) == len(series.close)
+    # An HLC bar is range plus close. Both are measured; nothing else is drawn.
+    assert len(series.high) == len(series.low) == len(series.close)
+
+
+def test_hlc_bars_colour_against_the_previous_close_not_an_open():
+    """Up/down is a comparison between two closes, both of which exist."""
+    import numpy as np
+
+    from evescreener.gui.chart import DOWN_COLOUR, FLAT_COLOUR, UP_COLOUR, bar_colours
+
+    close = np.array([100.0, 110.0, 110.0, 90.0, np.nan, 95.0], dtype="float64")
+    assert bar_colours(close) == [
+        FLAT_COLOUR,  # nothing behind the first bar: no direction to report
+        UP_COLOUR,
+        FLAT_COLOUR,  # unchanged close is not a direction either
+        DOWN_COLOUR,
+        FLAT_COLOUR,  # a missing close is uncertainty, never a colour
+        UP_COLOUR,  # ... and the next bar compares against the last real close
+    ]
+    assert bar_colours(np.array([], dtype="float64")) == []
+
+
+def test_dense_windows_fall_back_rather_than_smear_into_a_block(qtbot, desk):
+    """Below a resolvable slot width the bars degrade; they never render as a mass."""
+    from PySide6.QtCore import QSize
+
+    from evescreener.gui.chart import BAR_MIN_SLOT, BAR_TICK_SLOT, ChartCanvas, build_series
+
+    assert 0 < BAR_MIN_SLOT < BAR_TICK_SLOT
+    canvas = ChartCanvas()
+    qtbot.addWidget(canvas)
+    canvas.set_series(build_series(desk, 601))
+    for size in (QSize(240, 400), QSize(1600, 900)):
+        canvas.resize(size)
+        canvas.grab()  # paints through every density regime without raising
 
 
 def test_the_chart_draws_the_levels_that_were_already_computed(qtbot, desk):

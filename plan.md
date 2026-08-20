@@ -1319,9 +1319,14 @@ now hold:
 Measured after: **8.6 s to interactive**, a 15 ms timer tick, and a revisit to
 an already-computed page at **0.000 s**.
 
-**No candlesticks.** The bar contract has no `open` and none is synthesized
-(§4). Price is a line with the measured high/low envelope — the honest
-substitute for a body. Drawn on top: the frozen anchored-VWAP σ ladder,
+**HLC bars, not candlesticks.** The bar contract has no `open` and none is
+synthesized (§4). Price is drawn the way price is drawn wherever there is no
+open: a vertical high–low range per bar with a close tick on its right,
+coloured against the **previous close** — a comparison between two measured
+numbers. There is no body, because a body is exactly the part a reader trusts
+most and exactly the part this data cannot supply. Below a resolvable slot
+width the form degrades (tick → bare range → shaded envelope with a close
+line) rather than smearing into a block. Drawn on top: the frozen anchored-VWAP σ ladder,
 configurable SMA/EMA overlays, the EMA cloud as a shaded two-EMA ribbon, and
 the **high-volume levels, pivots and round-ISK levels that `levels.py` has
 computed since Phase 2 and that nothing had ever drawn**. Volume and

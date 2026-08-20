@@ -5,12 +5,16 @@ desk aims this window at that type. A pile of chart windows is how a desk
 becomes unusable, and it is also how you end up comparing two names against
 two different anchor sets without noticing.
 
-**No candlesticks.** The EVE bar contract is
+**HLC bars, not candlesticks.** The EVE bar contract is
 `["datetime","high","low","close","volume","order_count"]` with `close ← ESI
-average`; there is no `open` and none is ever synthesized (§4). A candle body
-drawn here would be a fabrication with a very convincing shape, so price is
-drawn as a line with a high/low envelope — which is exactly what the data
-supports and no more.
+average`; there is no `open` and none is ever synthesized (§4). So price is
+drawn the way price has always been drawn when there is no open: a vertical
+high–low range per bar with a close tick on its right, coloured against the
+previous close. That reads at a glance like a candle chart and every mark on
+it is measured. A candle *body* would be a fabrication with a very convincing
+shape — the one thing the eye trusts most on such a chart is the part the data
+cannot supply — so there is no body, and the space where one would sit stays
+empty rather than filled with a guess.
 
 What is drawn, all of it from the frozen or already-computed layers:
 
@@ -50,10 +54,13 @@ from ..signals.moving import ema, ema_cloud, sma
 from ..signals.setup import anchor_grid, evaluate_setups
 from .widgets import BLANK, format_isk
 
-__all__ = ["ChartPanel", "ChartSeries", "build_series"]
+__all__ = ["ChartPanel", "ChartSeries", "bar_colours", "build_series"]
 
 PRICE_COLOUR = QColor(220, 224, 232)
 ENVELOPE_COLOUR = QColor(90, 100, 120, 70)
+UP_COLOUR = QColor(110, 210, 150)
+DOWN_COLOUR = QColor(235, 110, 110)
+FLAT_COLOUR = QColor(180, 186, 196)
 VWAP_COLOUR = QColor(120, 190, 255)
 SIGMA_COLOURS = (
     QColor(120, 190, 255, 150),
@@ -77,6 +84,36 @@ TARGET_COLOUR = QColor(120, 230, 150)
 GRID_COLOUR = QColor(70, 74, 82)
 TEXT_COLOUR = QColor(190, 195, 205)
 BACKGROUND = QColor(24, 26, 30)
+
+# Below BAR_MIN_SLOT pixels per bar the vertical ranges merge into a block, and
+# below BAR_TICK_SLOT the close tick is narrower than the pen that draws it.
+BAR_MIN_SLOT = 1.5
+BAR_TICK_SLOT = 4.0
+
+
+def bar_colours(close: np.ndarray) -> list[QColor]:
+    """Colour each bar against the **previous close**, never against an open.
+
+    Both sides of that comparison are measured numbers, which is the whole
+    reason it is allowed to carry colour. A bar with nothing behind it — the
+    first one, or one following a gap in the series — is FLAT: it has no
+    direction to report, and guessing one would be the same fabrication as
+    drawing a body.
+    """
+    colours: list[QColor] = []
+    previous = np.nan
+    for value in close:
+        colour = FLAT_COLOUR
+        if np.isfinite(value) and np.isfinite(previous):
+            if value > previous:
+                colour = UP_COLOUR
+            elif value < previous:
+                colour = DOWN_COLOUR
+            previous = value
+        elif np.isfinite(value):
+            previous = value
+        colours.append(colour)
+    return colours
 
 
 @dataclass(slots=True)
@@ -211,7 +248,7 @@ def build_series(data, type_id: int, *, positions=None) -> ChartSeries:
 
 
 class ChartCanvas(QWidget):
-    """The painter. Line and envelope only — there is no open to draw."""
+    """The painter. HLC bars — range and close only, because there is no open."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -257,8 +294,7 @@ class ChartCanvas(QWidget):
             self._draw_cloud(painter, price_pane, series, low, high)
         if self.show_levels:
             self._draw_levels(painter, price_pane, series, low, high)
-        self._draw_envelope(painter, price_pane, series, low, high)
-        self._draw_price(painter, price_pane, series, low, high)
+        self._draw_bars(painter, price_pane, series, low, high)
         if self.show_moving:
             self._draw_moving(painter, price_pane, series, low, high)
         self._draw_positions(painter, price_pane, series, low, high)
@@ -365,7 +401,7 @@ class ChartCanvas(QWidget):
             painter.drawLine(QPointF(pane.x(), y), QPointF(pane.right(), y))
 
     def _draw_envelope(self, painter, pane, series, low, high) -> None:
-        """High/low as a shaded band. This is the honest substitute for a body."""
+        """High/low as a shaded band — the dense fallback when bars cannot resolve."""
         path = QPainterPath()
         count = len(series.high)
         started = False
@@ -391,6 +427,42 @@ class ChartCanvas(QWidget):
     def _draw_price(self, painter, pane, series, low, high) -> None:
         painter.setPen(QPen(PRICE_COLOUR, 1.8))
         painter.drawPolyline(self._polyline(pane, series.close, low, high))
+
+    def _draw_bars(self, painter, pane, series, low, high) -> None:
+        """One HLC bar per day: the measured range, ticked at the close.
+
+        Colour compares this close with the one before it, which is a
+        comparison between two numbers that both exist. It is deliberately not
+        a body: with no `open`, a body could only be drawn by inventing one.
+
+        Density decides how much of the bar survives. A 400-bar window on a
+        narrow pane cannot resolve a tick, so the form degrades — tick, then
+        bare range, then the shaded envelope with a close line — rather than
+        smearing into a solid block that would read as more data than it is.
+        """
+        count = len(series.close)
+        slot = pane.width() / max(count - 1, 1)
+        if slot < BAR_MIN_SLOT:
+            self._draw_envelope(painter, pane, series, low, high)
+            self._draw_price(painter, pane, series, low, high)
+            return
+        ticked = slot >= BAR_TICK_SLOT
+        tick = min(slot * 0.4, 6.0) if ticked else 0.0
+        width = 1.6 if ticked else 1.0
+        colours = bar_colours(series.close)
+        for index in range(count):
+            close = series.close[index]
+            top, bottom = series.high[index], series.low[index]
+            x = self._x(pane, index, count)
+            painter.setPen(QPen(colours[index], width))
+            if np.isfinite(top) and np.isfinite(bottom):
+                painter.drawLine(
+                    QPointF(x, self._y(pane, top, low, high)),
+                    QPointF(x, self._y(pane, bottom, low, high)),
+                )
+            if tick and np.isfinite(close):
+                y = self._y(pane, close, low, high)
+                painter.drawLine(QPointF(x, y), QPointF(min(x + tick, pane.right()), y))
 
     def _draw_moving(self, painter, pane, series, low, high) -> None:
         for index, (name, values) in enumerate(series.moving.items()):

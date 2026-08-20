@@ -38,7 +38,13 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
-- **Latest — the relative measurable gate (plan.md §13.2 amended, §17 D-29):**
+- **Latest — the chart draws HLC bars (plan.md §19.2):** `uv run pytest -q` →
+  **558 passed, 7 deselected**, ruff check + format clean. Price is a high–low
+  range with a close tick, coloured against the previous close; no `open` is
+  synthesized and there is no candle body. Presentation only — no detector,
+  formula or verdict rule moved, so nothing on the live-validation checklist
+  below changes state.
+- **The relative measurable gate (plan.md §13.2 amended, §17 D-29):**
   `uv run pytest -q` → **556 passed, 7 deselected**, ruff check + format clean.
   39 types (1.33%) now read UNKNOWN rather than carrying a float-noise risk
   unit; max abs RRS falls 9.05e11 → 1.19e7 with the median unchanged at +3.18.

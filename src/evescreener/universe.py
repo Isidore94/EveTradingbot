@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .esi.client import TYPES_FEED, EsiClient
 from .store.db import Database
 from .store.lake import BarLake
 from .timeutil import iso, utcnow
@@ -152,13 +151,17 @@ class UniverseSnapshot:
         }
 
 
-async def active_type_ids(client: EsiClient, region_id: int) -> tuple[list[int], bool]:
+async def active_type_ids(client, region_id: int) -> tuple[list[int], bool]:
     """Every type with a live order in the region — the universe primitive.
 
     Returns `(type_ids, fetched)`. `fetched=False` means the list was still
     fresh and we did not ask; the caller falls back to what it already knows
     rather than pretending the universe is empty.
     """
+    # Imported here, not at module scope: the desk reaches this module for
+    # watchlist reads and must not pull an HTTP client with it (§21 R8).
+    from .esi.client import TYPES_FEED
+
     result = await client.get_all_pages(TYPES_FEED, f"/markets/{region_id}/types")
     if not result.rows:
         return [], False

@@ -1607,7 +1607,7 @@ it is adjacent.**
 | **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
 | **R6** | Learning freshness and eligible-sample handling | **IMPLEMENTED + GREEN** |
 | **R7** | Desk threading, invalidation and worker lifecycle | **IMPLEMENTED + GREEN** |
-| R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
+| **R8** | GUI network isolation, chart parity, regional data, stale docs | **IMPLEMENTED + GREEN** |
 
 The consolidated live-validation checklist in `CURRENT_CHECKPOINT.md` is
 untouched by this track and remains owed in full.
@@ -1906,3 +1906,48 @@ executable-identity columns.
 SPREADS hub while a computation is running, and confirm the list that appears
 matches the hub finally selected. Then close the window mid-compute and confirm
 no `RuntimeError` reaches the console.
+
+### §21 R8 — Isolation proved, parity restored, a retracted number removed — **IMPLEMENTED + GREEN**
+
+**1. GUI isolation is now proved by the import graph.** The old guard walked
+the AST for *direct* imports, so it could not see
+`gui.pages.spreads` → `spreads` → `books` → `esi.client` → `httpx`. The
+invariant was real; the check was one hop short.
+
+`tests/_import_probe.py` imports **every** module under `gui/` in one cold
+subprocess and asks `sys.modules` what actually loaded — the only check an
+extra hop cannot fool. Three module-scope ESI imports moved into the one
+function in each file that fetches (`books.sweep_region`,
+`bars.ingest_history`, `universe.active_type_ids`); everything else in those
+modules is pure analysis over a frame, which is why the desk imports them at
+all. The AST guard stays as a fast first line.
+
+**2. Chart parity.** `build_series` tailed the frame to `gui.chart_bars` and
+*then* computed AVWAP and the overlays, so an anchor just outside the display
+window produced bands that disagreed with the screen's. Everything is computed
+on the full analytical history now; the canvas tails a **view** at paint time
+through `ChartSeries.tail()`, which R2 already made slice every overlay in step.
+
+**3. Regional data is keyed by region.** The desk loaded home-region bars while
+SPREADS iterated every configured hub, so a second hub would have been judged
+against Jita's traded averages. `DeskData.bars_for_region()` and
+`last_close_by_region()` answer per region, and a region with nothing in the
+lake returns empty — UNKNOWN, never another region's numbers standing in.
+
+**4. `Expires` fails closed.** A missing or malformed header was treated as *no
+active expiry*, which permits an immediate refetch — the precise behaviour the
+never-fetch-before-expiry invariant exists to prevent, and circumventing it is
+a bannable offence (§3.2). Unknown now means **wait**: an unparseable header
+falls back to a feed TTL, and a malformed `Expires` on a **304** keeps the
+previously stored valid expiry rather than clearing it.
+
+**5. The retracted 16,789 is gone.** `esi/client.py` and `store/db.py` both
+quoted "16,789 of 19,152 types 404" as fact. §17 D-10 **withdrew** that figure:
+it was the D-12 circuit-breaker cascade — a bug in this repository — mistaken
+for a property of ESI. Both now state the measured **241 of 17,325 (1.3%)** and
+name the withdrawal, so the correction cannot be lost again.
+
+**Owed live gate (§21 R8).** Open the desk against a second region's book once
+one exists, and confirm its rows are priced against that region's own traded
+averages. Separately, confirm against live ESI that a response with no
+`Expires` results in a wait rather than an immediate refetch.

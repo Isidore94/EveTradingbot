@@ -47,10 +47,11 @@ class EsiNotFound(EsiError):
 
     Measured 2026-08-20: `/markets/{region}/types` lists type_ids that
     `/markets/{region}/history` rejects with 404 (the plan's §3.2 expectation
-    that 404s "should not occur in the steady state" is wrong — 16,789 of
-    19,152 Forge-active types 404 on history). That is a fact about one type,
-    not a fault in the feed, so it must never trip the per-feed breaker: doing
-    so turns a routine catalogue gap into a total ingest outage.
+    that 404s "should not occur in the steady state" is wrong: the completed
+    crawl measured **241 real 404s out of 17,325 history requests (1.3%)**. An
+    earlier draft of this comment quoted 16,789; that figure is
+    **withdrawn** (plan.md §17 D-10) — that figure was the circuit-breaker cascade of D-12, a bug
+    in this repository mistaken for a property of ESI.
     """
 
 
@@ -104,6 +105,25 @@ class PagedResult:
     @property
     def complete(self) -> bool:
         return self.pages_expected > 0 and self.pages_fetched == self.pages_expected
+
+
+#: Feed TTLs used when a response carries no usable `Expires` (§21 R8).
+#: Conservative: the point is to wait, not to guess a short window.
+DEFAULT_FEED_TTL_SECONDS = 300
+
+
+def fallback_expiry(header: str | None, *, feed_ttl_seconds: int = DEFAULT_FEED_TTL_SECONDS):
+    """Seconds to wait when `Expires` is missing or malformed, else None.
+
+    A missing or unparseable `Expires` was treated as "no active expiry", which
+    permits an immediate refetch — the exact behaviour the never-fetch-before-
+    expiry invariant exists to prevent, and circumventing it is a bannable
+    offence (§3.2). Unknown must mean **wait**, not **go**: this returns a TTL
+    to hold for, and `None` only when the header parsed into a real instant.
+    """
+    if header and parse_http_date(header) is not None:
+        return None
+    return int(feed_ttl_seconds)
 
 
 class EsiClient:
@@ -283,6 +303,13 @@ class EsiClient:
             if status == 304:
                 self._breaker_success(feed)
                 expires_at = parse_http_date(hdrs.get("expires"))
+                if expires_at is None:
+                    # A malformed or absent Expires on a 304 must not clear the
+                    # stored one: that would license an immediate refetch of a
+                    # resource the server just told us had not changed (§21 R8).
+                    expires_at = self.db.expires_at(url) or self._now() + timedelta(
+                        seconds=DEFAULT_FEED_TTL_SECONDS
+                    )
                 self.db.touch_etag_expiry(url, expires_at)
                 return EsiResponse(
                     url=url,
@@ -314,6 +341,9 @@ class EsiClient:
                 raise EsiError(f"{url} -> HTTP {status}: {response.text[:300]}")
 
             expires_at = parse_http_date(hdrs.get("expires"))
+            if expires_at is None:
+                # Fail closed: unknown expiry means wait, never "no expiry".
+                expires_at = self._now() + timedelta(seconds=DEFAULT_FEED_TTL_SECONDS)
             self.db.put_etag(url, hdrs.get("etag"), expires_at, hdrs.get("last-modified"))
             self._breaker_success(feed)
             pages = int(hdrs["x-pages"]) if hdrs.get("x-pages") else None

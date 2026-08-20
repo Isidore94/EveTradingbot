@@ -36,7 +36,32 @@ Every item on it is an **operator action**. The build cannot self-certify: the
 whole point of the ladder is that a machine's confidence in itself is not
 evidence.
 
-## ACTIVE — plan.md §21 remediation track (operator-authorized 2026-08-20)
+## §21 remediation track — ALL PHASES IMPLEMENTED + GREEN, NONE LIVE_VALIDATED
+
+R1 through R8 are code-complete and the offline gate is green:
+**716 passed, 7 deselected**, ruff check + format clean.
+
+**That is not the same as correct.** Every phase carries an owed live gate, and
+none has been run. The build cannot self-certify — a machine's confidence in
+itself is not evidence — so nothing here is `LIVE_VALIDATED` and nothing may be
+promoted to real ISK. The consolidated live-validation checklist further down
+is untouched and still owed in full. **§20.3 resumes only when the operator
+says so.**
+
+### Owed live gates, by phase
+
+| phase | owed |
+|---|---|
+| R1 | After a sweep, confirm `exec_location_id` for liquid types is the station actually traded at, and that a structure-resting best bid is flagged rather than priced. |
+| R2 | Skip an `ingest-history` run and confirm the screen reports bars stale while the book reads fresh, with gates UNKNOWN. |
+| R3 | Re-run the backtest on the real lake: verdict unchanged, `n_eff` materially below `samples`, no cell below −100%. |
+| R4 | Transcribe the client's actual broker fee at two hubs and confirm `broker_fee_at` reproduces them; verify the order-modification fee before anything consumes `relist_cost_unverified`. |
+| R5 | **The confirmatory H2 run does not exist.** The doctrine cohort is declared but not measured; all lead-lag evidence remains exploratory. |
+| R6 | Unobservable until real closed trades exist — every LEARNING row is still UNVALIDATED. |
+| R7 | Switch the SPREADS hub mid-computation and confirm the list matches the hub finally selected; close the window mid-compute and confirm no `RuntimeError`. |
+| R8 | Confirm a second region prices against its own averages; confirm a missing `Expires` produces a wait against live ESI. |
+
+## Superseded heading — plan.md §21 remediation track (operator-authorized 2026-08-20)
 
 An adversarial repository review found defects in how the order book was
 reduced and how snapshots were validated. The operator authorized this track
@@ -56,7 +81,7 @@ adjacent.
 | **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
 | **R6** | Learning freshness and eligible-sample handling | **IMPLEMENTED + GREEN** |
 | **R7** | Desk threading, invalidation and worker lifecycle | **IMPLEMENTED + GREEN** |
-| **R8** | GUI network isolation, chart parity, regional data, stale docs | **NEXT** |
+| **R8** | GUI network isolation, chart parity, regional data, stale docs | **IMPLEMENTED + GREEN** |
 
 ### R1 owed live gate
 

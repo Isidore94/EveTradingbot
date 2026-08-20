@@ -150,7 +150,9 @@ CREATE TABLE IF NOT EXISTS destruction (
 CREATE INDEX IF NOT EXISTS idx_destruction_day ON destruction(day);
 
 -- Types listed by /markets/{region}/types that /markets/{region}/history
--- rejects with 404 (measured 2026-08-20: 16,789 of 19,152 in The Forge).
+-- rejects with 404 (measured 2026-08-20: 241 of 17,325 history requests,
+-- 1.3%. An earlier note said 16,789; that figure is withdrawn -- plan.md
+-- §17 D-10 -- as a circuit-breaker cascade mistaken for data).
 -- Remembered so a daily crawl does not spend its 4xx error budget rediscovering
 -- the same catalogue gap every morning.
 CREATE TABLE IF NOT EXISTS history_missing (

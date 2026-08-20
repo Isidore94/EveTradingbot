@@ -116,6 +116,27 @@ class DeskData:
     def tier(self, type_id: int) -> str | None:
         return self.tiers.get(int(type_id))
 
+    def bars_for_region(self, region_id: int) -> pd.DataFrame:
+        """This region's bars, and only this region's (§21 R8).
+
+        The desk loaded home-region bars while SPREADS iterated every
+        configured hub, so a second region would have been judged against Jita's
+        history. A region with nothing in the lake gets an empty frame, which is
+        UNKNOWN — never another region's numbers standing in for it.
+        """
+        source = self.all_bars if not self.all_bars.empty else self.bars
+        if source.empty or "region_id" not in source:
+            return pd.DataFrame()
+        return source[source["region_id"] == int(region_id)].reset_index(drop=True)
+
+    def last_close_by_region(self, region_id: int) -> dict[int, float]:
+        """Newest traded average per type, for one named region."""
+        frame = self.bars_for_region(region_id)
+        if frame.empty:
+            return {}
+        last = frame.sort_values("datetime").groupby("type_id")["close"].last()
+        return {int(key): float(value) for key, value in last.items()}
+
     def frame_for(self, type_id: int) -> pd.DataFrame:
         """One type's bars, newest last. Watchlist names come from the whole
         lake, not the tracked slice — an operator's name renders even below

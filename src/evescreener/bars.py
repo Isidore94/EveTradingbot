@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .esi.client import HISTORY_FEED, EsiClient, EsiNotFound
 from .store.lake import BAR_LAKE_COLUMNS, EVE_DAILY_BAR_COLUMNS, BarLake
 from .timeutil import bar_datetime, ensure_utc, iso, last_completed_bar_date, utcnow
 
@@ -262,7 +261,7 @@ class HistoryIngestResult:
 
 
 async def ingest_history(
-    client: EsiClient,
+    client,
     lake: BarLake,
     type_ids: Iterable[int],
     *,
@@ -277,7 +276,15 @@ async def ingest_history(
     History expires daily at 11:05 UTC, so a second run on the same day fetches
     nothing at all — every URL is skipped as still-fresh, which is the
     never-fetch-before-expiry invariant doing its job, not a failure.
+
+    **The ESI client is imported here, not at module scope (§21 R8).** Every
+    other function in this module is pure analysis over a frame, and the desk
+    reaches them through `screen` and `brief` — so a module-level import put
+    `httpx` into the GUI's import graph through a chain no direct-import check
+    could see.
     """
+    from .esi.client import HISTORY_FEED, EsiNotFound
+
     region = region_id if region_id is not None else client.config.esi.home_region_id
     result = HistoryIngestResult()
     pending: list[pd.DataFrame] = []

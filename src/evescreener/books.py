@@ -30,7 +30,6 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from .config import Config
-from .esi.client import ORDERS_FEED, EsiClient
 from .store.lake import BOOK_SUMMARY_COLUMNS, EXECUTABLE_COLUMNS, BookLake
 from .timeutil import iso, parse_iso, utcnow
 
@@ -559,7 +558,7 @@ def load_validated_book(
 
 async def sweep_region(
     config: Config,
-    client: EsiClient,
+    client,
     lake: BookLake,
     region_id: int,
     *,
@@ -569,7 +568,14 @@ async def sweep_region(
 
     A still-fresh book means no sweep happened; that is reported, never
     substituted with the previous sweep re-stamped as new.
+
+    **The ESI client is imported here, not at module scope (§21 R8).** Every
+    other function in this module is pure analysis over a frame, and the desk
+    imports them — so a module-level `esi.client` import put `httpx` into the
+    GUI's import graph through a chain no direct-import check could see.
     """
+    from .esi.client import ORDERS_FEED
+
     paged = await client.get_all_pages(ORDERS_FEED, f"/markets/{region_id}/orders")
     if paged.first.skipped or not paged.rows:
         return SweepResult(

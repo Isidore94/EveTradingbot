@@ -153,14 +153,12 @@ class SpreadsPage(DeskPage):
                     (region,),
                 ).fetchall()
                 volumes[region] = {int(row[0]): float(row[1]) for row in rows if row[1] is not None}
-            bars = data.all_bars if not data.all_bars.empty else data.bars
-            if not bars.empty and "region_id" in bars:
-                for region in regions:
-                    slice_ = bars[bars["region_id"] == region]
-                    if slice_.empty:
-                        continue
-                    last = slice_.sort_values("datetime").groupby("type_id")["close"].last()
-                    averages[region] = {int(k): float(v) for k, v in last.items()}
+            for region in regions:
+                # Keyed by region, so Amarr is never judged against Jita's
+                # traded averages (§21 R8).
+                region_averages = data.last_close_by_region(region)
+                if region_averages:
+                    averages[region] = region_averages
             wanted = {tid for mapping in averages.values() for tid in mapping}
             wanted |= {tid for mapping in volumes.values() for tid in mapping}
             if wanted:

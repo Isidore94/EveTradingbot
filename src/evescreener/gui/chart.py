@@ -230,9 +230,11 @@ def build_series(data, type_id: int, *, positions=None) -> ChartSeries:
             f"no bars in the lake for this type — run `ingest-history --type-id {int(type_id)}`"
         )
         return series
-    limit = int(config.gui.chart_bars)
-    if len(frame) > limit:
-        frame = frame.tail(limit).reset_index(drop=True)
+    # NOT truncated here (§21 R8). The frame used to be tailed to
+    # `gui.chart_bars` before the bands and overlays were computed, so an
+    # anchor just outside the display window produced a chart that disagreed
+    # with the screen. Everything is computed on the full analytical history;
+    # the canvas tails a *view* of it at paint time via `ChartSeries.tail()`.
 
     series.stamps = list(pd.to_datetime(frame["datetime"], utc=True))
     series.close = pd.to_numeric(frame["close"], errors="coerce").to_numpy(dtype="float64")

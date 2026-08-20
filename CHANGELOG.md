@@ -5,6 +5,33 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Isolation proved, parity restored, a retracted number removed (§21 R8)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R8. `uv run pytest -q` ->
+**716 passed, 7 deselected**, ruff check + format clean. This completes R1-R8;
+**none of them is LIVE_VALIDATED** and every phase still owes its live gate.
+
+- **GUI isolation is proved by the import graph.** The old AST guard saw only
+  *direct* imports, so it missed
+  `gui.pages.spreads` -> `spreads` -> `books` -> `esi.client` -> `httpx`.
+  `tests/_import_probe.py` imports every GUI module in one cold subprocess and
+  asks `sys.modules` what loaded. Three module-scope ESI imports moved into the
+  one function that fetches (`books.sweep_region`, `bars.ingest_history`,
+  `universe.active_type_ids`).
+- **Chart parity.** `build_series` tailed the frame *before* computing AVWAP
+  and the overlays, so an anchor outside the display window produced bands that
+  disagreed with the screen. Everything computes on full history; the canvas
+  tails a view at paint time.
+- **Regional data is keyed by region.** `bars_for_region()` /
+  `last_close_by_region()`; a region with no bars returns empty rather than
+  another region's numbers.
+- **`Expires` fails closed.** Missing or malformed now means *wait*, not "no
+  expiry"; a malformed `Expires` on a 304 keeps the stored valid expiry.
+- **The retracted 16,789 is gone.** Both `esi/client.py` and `store/db.py`
+  quoted it as fact; §17 D-10 withdrew it as a circuit-breaker cascade mistaken
+  for data. They state the measured 241 of 17,325 (1.3%) and name the
+  withdrawal.
+
 ## 2026-08-20 — The threading contract, held structurally (§21 R7)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R7. `uv run pytest -q` ->

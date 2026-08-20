@@ -386,6 +386,11 @@ class LeadLagResult:
     generated_at: str
     observations: int = 0
     types: int = 0
+    #: Which population this run measured. Declared on the result so a pooled
+    #: exploratory run can never be read later as evidence about H2 (§21 R5).
+    cohort: str = "pooled_all_types"
+    #: Clusters rather than rows — see `independent_observations`.
+    independent_observations: int = 0
     sample_start: str | None = None
     sample_end: str | None = None
     lags: list[dict] = field(default_factory=list)
@@ -397,7 +402,16 @@ class LeadLagResult:
         return {
             "generated_at": self.generated_at,
             "observations": self.observations,
+            "independent_observations": self.independent_observations,
             "types": self.types,
+            "cohort": self.cohort,
+            "cohort_declaration": cohort_declaration(self.cohort),
+            "multiple_comparisons": {
+                "tests": LEAD_LAG_TESTS,
+                "frozen_alpha": MAX_P,
+                "family_wise_alpha": FAMILY_ALPHA,
+                "correction": "bonferroni",
+            },
             "sample_start": self.sample_start,
             "sample_end": self.sample_end,
             "lags": self.lags,
@@ -417,6 +431,110 @@ MIN_RHO = 0.10
 MAX_P = 0.01
 MIN_OBSERVATIONS = 500
 PLACEBO_RATIO = 0.5
+
+
+# -- R5: hypothesis fidelity (plan.md §21 R5) ------------------------------
+
+COHORT_POOLED = "pooled_all_types"
+COHORT_DOCTRINE = "doctrine_cohort"
+
+#: Five lags x two targets. Declared before the run so it cannot be chosen
+#: after seeing which cell looked best.
+LEAD_LAG_TESTS = 10
+#: Bonferroni over that family, against the frozen §14.3 alpha of 0.01.
+FAMILY_ALPHA = 0.01 / LEAD_LAG_TESTS
+
+
+def cohort_declaration(cohort: str) -> dict:
+    """What population a run measured, and what class of evidence it is.
+
+    H2 (§14.1) named **doctrine-class hulls and their fitted modules**, with
+    losses **bucketed by region catchment**. The original run pooled global
+    destruction against every type in the lake. That is a different population,
+    and pooling unrelated catalogue types can dilute a real effect as easily as
+    manufacture one — so the pooled number is **exploratory** and is not
+    evidence about H2 either way.
+
+    Declaring this on the result, rather than in prose beside it, is what stops
+    the two runs being read as the same measurement later.
+    """
+    if cohort == COHORT_DOCTRINE:
+        return {
+            "cohort": COHORT_DOCTRINE,
+            "evidence_class": "confirmatory",
+            "definition": (
+                "doctrine-class hulls and their fitted modules, per H2: types whose "
+                "SDE market-group ancestry is Ships or Ship Equipment, restricted to "
+                "the tracked universe"
+            ),
+            "catchment": "forge_adjacent",
+            "caveat": (
+                "the cohort and catchment are declared BEFORE remeasurement; a run "
+                "whose membership was chosen after seeing results is not confirmatory"
+            ),
+        }
+    return {
+        "cohort": COHORT_POOLED,
+        "evidence_class": "exploratory",
+        "definition": "every type in the lake with both bars and destruction rows",
+        "catchment": "global",
+        "caveat": (
+            "this is NOT the H2 cohort: H2 named doctrine-class hulls and their "
+            "fitted modules with a regional catchment. Pooling the whole catalogue "
+            "answers a different question and is exploratory only"
+        ),
+    }
+
+
+def exact_lag_frame(frame: pd.DataFrame, lag: int) -> pd.DataFrame:
+    """Attach `day + lag` values by an exact calendar join (§21 R5).
+
+    `groupby.shift(-lag)` takes the next *observed row*. On a lake where a
+    thin type trades on the 1st and again on the 10th, that labels the 10th a
+    one-day lead — a nine-day move counted as a one-day effect. Joining on the
+    literal date makes the gap what it is: **absent**, and therefore UNKNOWN,
+    rather than quietly filled by whatever came next.
+    """
+    if frame is None or frame.empty:
+        return frame
+    lead = frame.copy()
+    lead["day"] = lead["day"] - pd.Timedelta(days=int(lag))
+    keep = [column for column in ("close", "participation") if column in lead.columns]
+    lead = lead[["type_id", "day", *keep]].rename(
+        columns={column: f"{column}_lead" for column in keep}
+    )
+    return frame.merge(lead, on=["type_id", "day"], how="left")
+
+
+def independent_observations(frame: pd.DataFrame) -> int:
+    """Clusters, not rows (§21 R5).
+
+    Daily observations on one type are serially dependent, and observations
+    across types on one day are cross-sectionally dependent through the market
+    itself. Neither is modelled. Counting **types** is the conservative floor:
+    it is certainly not more independent than that, and a p-value computed on
+    row count treats one type's year as 365 facts.
+    """
+    if frame is None or frame.empty or "type_id" not in frame.columns:
+        return 0
+    return int(frame["type_id"].nunique())
+
+
+def adjusted_verdict(row: dict) -> dict:
+    """Both verdicts, side by side: the frozen rule, and the family-wise one.
+
+    §14.3 is frozen and judged each test at p < 0.01. Ten tests were run, so
+    at least one crossing 0.01 by chance is likely. The frozen verdict is
+    reported unchanged — it is not retrofitted — and the Bonferroni verdict is
+    reported beside it so a reader can see which claims survive both.
+    """
+    p_value = row.get("p_value")
+    if p_value is None:
+        return {"p_value_frozen_rule": None, "p_value_family_wise": None}
+    return {
+        "p_value_frozen_rule": bool(p_value < MAX_P),
+        "p_value_family_wise": bool(p_value < FAMILY_ALPHA),
+    }
 
 
 def run_lead_lag_study(
@@ -446,13 +564,19 @@ def run_lead_lag_study(
     frame["participation"] = grouped["order_count"].transform(
         lambda series: series / series.shift(1).rolling(window, min_periods=window // 2).mean()
     )
+    # Exact calendar joins, not row shifts (§21 R5): a type trading on the 1st
+    # and again on the 10th had the 10th labelled a one-day lead.
     for lag in range(1, lag_cap + 1):
-        frame[f"participation_lead_{lag}"] = grouped["participation"].shift(-lag)
-        frame[f"return_lead_{lag}"] = grouped["close"].shift(-lag) / frame["close"] - 1.0
+        lagged = exact_lag_frame(frame[["type_id", "day", "close", "participation"]], lag)
+        frame[f"participation_lead_{lag}"] = lagged["participation_lead"].to_numpy()
+        frame[f"return_lead_{lag}"] = (
+            lagged["close_lead"].to_numpy() / frame["close"].to_numpy() - 1.0
+        )
 
     joined = frame.merge(destruction, on=["type_id", "day"], how="inner")
     joined = joined[np.isfinite(joined["destruction_z"])]
     result.observations = int(len(joined))
+    result.independent_observations = independent_observations(joined)
     result.types = int(joined["type_id"].nunique()) if not joined.empty else 0
     if joined.empty:
         result.notes.append("no overlapping (type, day) rows between the lake and destruction data")
@@ -491,6 +615,8 @@ def run_lead_lag_study(
                     "rho": rho,
                     "p_value": p,
                     "observations": n,
+                    "independent_observations": independent_observations(ordered),
+                    **adjusted_verdict({"p_value": p, "rho": rho}),
                     "first_half_rho": first_rho,
                     "first_half_n": first_n,
                     "second_half_rho": second_rho,

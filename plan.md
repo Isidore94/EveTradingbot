@@ -1028,6 +1028,47 @@ Significance uses the large-sample normal approximation
 dependency set is locked at four runtime packages, §11 D1 — so the
 approximation is stated rather than hidden inside a library call.)
 
+### 14.4 Method amendment — added 2026-08-20 by §21 R5
+
+**§14.1–14.3 above are FROZEN and are not edited.** The pass rule, its
+thresholds and the recorded result all stand exactly as written. What follows
+is an amendment to the *method*, added beside them with its reason, because the
+implementation did not test the hypothesis §14.1 declared.
+
+**1. The cohort was wrong.** H2 names *doctrine-class hulls and their fitted
+modules*, with losses *bucketed by region catchment*. The implementation pooled
+global destruction against every type in the lake. That is a different
+population: pooling unrelated catalogue types can dilute a real effect as
+easily as manufacture one. The recorded rho=0.027 on 473,606 observations is
+therefore **exploratory**, and is not evidence about H2 in either direction.
+Every result now carries a `cohort_declaration` naming its population,
+catchment and evidence class, so a pooled run can never later be read as
+confirmatory.
+
+**2. Lags were row positions, not calendar days.** `groupby.shift(-lag)` takes
+the next *observed* row, so a type trading on 1 January and again on 10 January
+had the 10th labelled "lag 1" — a nine-day move counted as a one-day effect.
+`exact_lag_frame()` joins on the literal `day + k`, so a gap is **absent** and
+therefore UNKNOWN rather than filled by whatever came next.
+
+**3. Observations were treated as independent.** Daily rows on one type are
+serially dependent, and rows across types on one day are cross-sectionally
+dependent through the market itself. `independent_observations()` counts
+**types** — the conservative floor, since the data is certainly not more
+independent than that — and reports it beside the raw count.
+
+**4. Ten tests, one alpha.** Five lags times two targets were each judged at
+p < 0.01 with no family-wise policy. `LEAD_LAG_TESTS = 10` and
+`FAMILY_ALPHA = 0.001` (Bonferroni) are declared, and every lag row now carries
+both `p_value_frozen_rule` and `p_value_family_wise`. The frozen verdict is
+reported unchanged; the corrected one sits beside it.
+
+**Owed live gate (§21 R5).** The doctrine cohort has been *declared* but not
+yet *run*: a confirmatory H2 measurement requires selecting the cohort and
+catchment before looking at results, then regenerating. Until that run exists,
+the only lead-lag evidence in this repository is exploratory, and the digest
+annotation must continue to say the claim was tested and not supported.
+
 ### 14.3 The pass rule — FROZEN before measurement
 
 > The effect **survives** iff **all** of:
@@ -1563,7 +1604,7 @@ it is adjacent.**
 | **R2** | Completed-bar enforcement and independent bar freshness | **IMPLEMENTED + GREEN** |
 | **R3** | Backtest price bounds, statistics and friction labels | **IMPLEMENTED + GREEN** |
 | **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
-| R5 | Killmail lead-lag hypothesis fidelity | not started |
+| **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
 | R6 | Learning freshness and eligible-sample handling | not started |
 | R7 | Desk threading, invalidation and worker lifecycle | not started |
 | R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
@@ -1771,3 +1812,24 @@ one: it looks answered.
 at Jita 4-4 and at one secondary hub, and confirm `broker_fee_at` reproduces
 them. Separately, verify the order-modification fee against the client before
 anything is allowed to consume `relist_cost_unverified`.
+
+### §21 R5 — The study must test the hypothesis that was frozen — **IMPLEMENTED + GREEN**
+
+The method amendment is recorded at **§14.4**, beside the frozen §14.1–14.3
+rather than over it. In summary:
+
+* **Cohort.** H2 named doctrine-class hulls and fitted modules with a regional
+  catchment; the run pooled the whole catalogue globally. Every result now
+  carries a `cohort_declaration` with its population, catchment and evidence
+  class, and the existing rho=0.027 result is labelled **exploratory**.
+* **Lags.** `exact_lag_frame()` joins `day + k` literally, so a gap is UNKNOWN
+  instead of the next observed row masquerading as a one-day lead.
+* **Dependence.** `independent_observations()` counts types — the conservative
+  floor — and is reported beside the raw row count.
+* **Multiplicity.** Ten tests are declared, Bonferroni gives
+  `FAMILY_ALPHA = 0.001`, and each lag row carries both the frozen verdict and
+  the family-wise one.
+
+**Nothing was retrofitted.** The frozen pass rule text is asserted unchanged by
+a test, and no recorded result was regenerated — the confirmatory H2 run does
+not exist yet and is owed.

@@ -5,6 +5,32 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The study must test the hypothesis that was frozen (§21 R5)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R5, method amendment at §14.4.
+`uv run pytest -q` -> **677 passed, 7 deselected**, ruff check + format clean.
+
+§14.1–14.3 are frozen and are not edited; the amendment sits beside them.
+
+- **The cohort was wrong.** H2 names doctrine-class hulls and their fitted
+  modules with a regional catchment; the run pooled global destruction against
+  every type in the lake. The recorded rho=0.027 on 473,606 observations is
+  therefore **exploratory** and is not evidence about H2 either way. Results
+  now carry a `cohort_declaration` naming population, catchment and evidence
+  class, so a pooled run cannot later be read as confirmatory.
+- **Lags were row positions, not calendar days.** `groupby.shift(-lag)` takes
+  the next *observed* row, so a type trading on 1 and 10 January had the 10th
+  labelled "lag 1". `exact_lag_frame()` joins `day + k` literally; a gap is
+  UNKNOWN rather than filled by whatever came next.
+- **Observations were treated as independent.** `independent_observations()`
+  counts types — the conservative floor — beside the raw row count.
+- **Ten tests, one alpha.** `LEAD_LAG_TESTS = 10`, `FAMILY_ALPHA = 0.001`
+  (Bonferroni), and every lag row carries both `p_value_frozen_rule` and
+  `p_value_family_wise`.
+
+**Owed:** the confirmatory H2 run does not exist yet. The cohort is *declared*
+but not *measured*, so the only lead-lag evidence here remains exploratory.
+
 ## 2026-08-20 — A quoted margin is not an expected edge (§21 R4)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R4. `uv run pytest -q` ->

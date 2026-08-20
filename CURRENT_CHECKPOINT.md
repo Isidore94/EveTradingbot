@@ -53,8 +53,8 @@ adjacent.
 | **R2** | Completed-bar enforcement and independent bar freshness | **IMPLEMENTED + GREEN** |
 | **R3** | Backtest price bounds, statistics and friction labels | **IMPLEMENTED + GREEN** |
 | **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
-| **R5** | Killmail lead-lag hypothesis fidelity | **NEXT** |
-| R6 | Learning freshness and eligible-sample handling | not started |
+| **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
+| **R6** | Learning freshness and eligible-sample handling | **NEXT** |
 | R7 | Desk threading, invalidation and worker lifecycle | not started |
 | R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
 

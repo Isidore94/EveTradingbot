@@ -83,6 +83,19 @@ def build_parser() -> argparse.ArgumentParser:
     paper_open.add_argument("--name", help="type name, resolved against the SDE")
     paper_open.add_argument("--notional", type=float, help="ISK notional (default: config)")
     paper_open.add_argument("--thesis", required=True, help="why — one sentence you can argue with")
+    paper_open.add_argument(
+        "--setup",
+        required=True,
+        help="the setup that fired, by name, or 'discretionary'",
+    )
+    paper_open.add_argument(
+        "--like",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help="why you like it, from config/reasons.jsonl (repeatable; at least one required)",
+    )
+    paper_open.add_argument("--reason-text", default="", help="optional free text")
     paper_open.add_argument("--stop", type=float, help="stop price, for R sizing")
     paper_open.add_argument("--target", type=float, help="target price, for planned R")
     paper_close = paper_sub.add_parser("close", help="price and record a taker exit")
@@ -94,6 +107,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="gross unit price you REALLY sold at; the only way to close a "
         "position whose book can no longer price it",
     )
+    paper_pass = paper_sub.add_parser(
+        "pass", help="record a decision NOT to take something — same rigour as an open"
+    )
+    paper_pass.add_argument("--type-id", type=int, help="type id (or use --name)")
+    paper_pass.add_argument("--name", help="type name, resolved against the SDE")
+    paper_pass.add_argument(
+        "--action",
+        choices=("not_today", "bad_signal"),
+        default="not_today",
+        help="not_today clears it from today's queue only and NEVER touches the "
+        "watchlist; bad_signal says the setup itself misfired",
+    )
+    paper_pass.add_argument(
+        "--dislike",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help="why you passed, from config/reasons.jsonl (repeatable; at least one required)",
+    )
+    paper_pass.add_argument("--reason-text", default="", help="optional free text")
+    paper_pass.add_argument("--setup", help="the setup that surfaced it, if any")
+
+    reasons_cmd = sub.add_parser("reasons", help="the reason vocabulary, validated on load")
+    reasons_cmd.add_argument(
+        "--direction", choices=("like", "dislike"), help="show only one direction"
+    )
+
     paper_sub.add_parser("mark", help="daily mark-to-market with staleness stamps")
     paper_sub.add_parser("report", help="the §12.4 report and verdict")
     paper_fill = paper_sub.add_parser(
@@ -585,9 +625,39 @@ def _cmd_paper(config: Config, args) -> int:
                     notional_isk=args.notional or config.paper.default_notional_isk,
                     book=book,
                     thesis=args.thesis,
+                    setup_tag=args.setup,
+                    like_tags=args.like,
+                    reason_text=args.reason_text,
                     stop_price=args.stop,
                     target_price=args.target,
                     median_daily_turnover=median,
+                    vocabulary=_vocabulary(),
+                )
+                print(json.dumps(record, indent=2, default=str))
+            elif args.paper_command == "pass":
+                type_id = args.type_id
+                if type_id is None:
+                    if not args.name:
+                        print("give --type-id or --name", file=sys.stderr)
+                        return 2
+                    row = db.type_by_name(args.name)
+                    if row is None:
+                        print(
+                            f"no type named {args.name!r} in the SDE — "
+                            "run `sde` first, or check the spelling",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    type_id = int(row["type_id"])
+                type_row = db.type_by_id(type_id)
+                record = ledger.record_pass(
+                    type_id=type_id,
+                    type_name=type_row["name"] if type_row else None,
+                    action=args.action,
+                    dislike_tags=args.dislike,
+                    reason_text=args.reason_text,
+                    setup_tag=args.setup,
+                    vocabulary=_vocabulary(),
                 )
                 print(json.dumps(record, indent=2, default=str))
             elif args.paper_command == "close":
@@ -767,6 +837,29 @@ def _sector_context(config: Config, db, bars, region: int):
         if composite.known
     }
     return sectors, frames
+
+
+def _vocabulary():
+    """The committed reason vocabulary, or an empty one if none is present."""
+    from .reasons import REASONS_FILE, load_reasons
+
+    return load_reasons(Path.cwd() / "config" / REASONS_FILE)
+
+
+def _cmd_reasons(config: Config, args) -> int:
+    vocabulary = _vocabulary()
+    if not vocabulary:
+        print("no config/reasons.jsonl — decisions cannot be qualified until there is one")
+        return 2
+    for direction, reasons in (("like", vocabulary.likes), ("dislike", vocabulary.dislikes)):
+        if args.direction and args.direction != direction:
+            continue
+        print(f"# why I {'like' if direction == 'like' else 'do not like'} it")
+        for reason in reasons:
+            print(f"  {reason.tag:<24} {reason.label}")
+            if reason.notes:
+                print(f"      {reason.notes}")
+    return 0
 
 
 def _cmd_setups(config: Config, args) -> int:
@@ -985,6 +1078,7 @@ HANDLERS = {
     "board": _cmd_board,
     "scan": _cmd_scan,
     "setups": _cmd_setups,
+    "reasons": _cmd_reasons,
     "anchors": _cmd_anchors,
     "report": _cmd_report,
     "daemon": _cmd_daemon,

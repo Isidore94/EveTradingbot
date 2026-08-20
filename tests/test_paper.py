@@ -11,6 +11,9 @@ from evescreener.paper import PaperLedger, Refusal, book_quote, render_report
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
 TIER = 250_000_000.0
+# Every opening must say why (§19 Amendment 3). These are the boilerplate
+# reasons the mechanics tests carry so they can test the mechanics.
+REASONS = {"setup_tag": "discretionary", "like_tags": ["clean_dip_below_value"]}
 
 
 def book(
@@ -54,6 +57,8 @@ def test_entry_is_the_ask_walk_not_the_best_ask(ledger):
         notional_isk=TIER,
         book=book(),
         thesis="dip below anchored value",
+        setup_tag="discretionary",
+        like_tags=["clean_dip_below_value"],
         now=NOW,
     )
     assert record["entry_effective_price"] == 106.0, "best ask is 105; the walk is 106"
@@ -67,6 +72,7 @@ def test_exit_is_the_bid_walk_net_of_tax(ledger):
         notional_isk=TIER,
         book=book(),
         thesis="t",
+        **REASONS,
         now=NOW,
     )
     exit_at = NOW + timedelta(days=5)
@@ -84,7 +90,13 @@ def test_a_stale_book_refuses_the_fill_and_never_prices_off_history(ledger):
     stale = book(sweep=NOW - timedelta(hours=4))
     with pytest.raises(Refusal, match="refusing the fill"):
         ledger.open_position(
-            type_id=34, type_name="Tritanium", notional_isk=TIER, book=stale, thesis="t", now=NOW
+            type_id=34,
+            type_name="Tritanium",
+            notional_isk=TIER,
+            book=stale,
+            thesis="t",
+            now=NOW,
+            **REASONS,
         )
     refusals = ledger.refusals()
     assert len(refusals) == 1
@@ -99,6 +111,7 @@ def test_a_refusal_is_recorded_not_swallowed(ledger):
             notional_isk=TIER,
             book=pd.DataFrame(),
             thesis="t",
+            **REASONS,
             now=NOW,
         )
     assert ledger.refusals()[0]["reason"] == "no book sweep available"
@@ -110,7 +123,7 @@ def test_a_book_too_thin_for_the_notional_is_refused(ledger):
     thin.loc[:, "depth_fill_price_0"] = float("nan")
     with pytest.raises(Refusal, match="cannot fill this notional"):
         ledger.open_position(
-            type_id=34, type_name="X", notional_isk=TIER, book=thin, thesis="t", now=NOW
+            type_id=34, type_name="X", notional_isk=TIER, book=thin, thesis="t", now=NOW, **REASONS
         )
 
 
@@ -122,13 +135,14 @@ def test_an_off_tier_notional_is_refused_rather_than_interpolated(ledger):
             notional_isk=333_000_000,
             book=book(),
             thesis="t",
+            **REASONS,
             now=NOW,
         )
 
 
 def test_no_retro_entries_the_open_is_stamped_with_its_sweep(ledger):
     record = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     assert record["book_sweep_ts"] == NOW.isoformat(timespec="seconds")
     assert record["book_age_minutes"] == pytest.approx(0.0, abs=0.02)
@@ -141,6 +155,7 @@ def test_maker_exit_is_advisory_and_never_realized(ledger):
         notional_isk=TIER,
         book=book(),
         thesis="t",
+        **REASONS,
         target_price=130.0,
         now=NOW,
     )
@@ -162,6 +177,7 @@ def test_self_impact_is_flagged_but_still_recorded(ledger):
         notional_isk=TIER,
         book=book(),
         thesis="t",
+        **REASONS,
         median_daily_turnover=1_000_000_000,
         now=NOW,
     )
@@ -172,6 +188,7 @@ def test_self_impact_is_flagged_but_still_recorded(ledger):
         notional_isk=TIER,
         book=book(type_id=35),
         thesis="t",
+        **REASONS,
         median_daily_turnover=100_000_000_000,
         now=NOW,
     )
@@ -197,6 +214,8 @@ def test_ledger_round_trips_open_mark_close(ledger):
         notional_isk=TIER,
         book=book(),
         thesis="dip",
+        setup_tag="discretionary",
+        like_tags=["clean_dip_below_value"],
         stop_price=100.0,
         target_price=130.0,
         now=NOW,
@@ -220,7 +239,7 @@ def test_ledger_round_trips_open_mark_close(ledger):
 
 def test_a_stale_mark_says_so_rather_than_pricing(ledger):
     ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     marks = ledger.mark(book=book(sweep=NOW), now=NOW + timedelta(hours=5))
     assert marks[0]["mark_price"] is None
@@ -230,7 +249,7 @@ def test_a_stale_mark_says_so_rather_than_pricing(ledger):
 
 def test_closing_twice_is_refused(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     ledger.close_position(position_id=opened["position_id"], book=book(), now=NOW)
     with pytest.raises(Refusal, match="already closed"):
@@ -239,7 +258,7 @@ def test_closing_twice_is_refused(ledger):
 
 def test_the_ledger_is_append_only(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     ledger.close_position(position_id=opened["position_id"], book=book(), now=NOW)
     events = [record["event"] for record in ledger.records()]
@@ -248,7 +267,7 @@ def test_the_ledger_is_append_only(ledger):
 
 def test_real_fill_measures_the_cost_model_against_reality(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     record = ledger.record_real_fill(
         position_id=opened["position_id"],
@@ -267,7 +286,7 @@ def test_real_fill_measures_the_cost_model_against_reality(ledger):
 
 def test_a_real_fill_outside_tolerance_is_flagged(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     record = ledger.record_real_fill(
         position_id=opened["position_id"],
@@ -298,6 +317,8 @@ def run_trades(ledger, count, *, wins, win_fill, loss_fill, start=NOW):
             notional_isk=TIER,
             book=book(type_id=34 + index, sweep=moment),
             thesis="dip",
+            setup_tag="discretionary",
+            like_tags=["clean_dip_below_value"],
             stop_price=100.0,
             now=moment,
         )
@@ -351,6 +372,7 @@ def test_report_leads_with_refusals(ledger):
             notional_isk=TIER,
             book=pd.DataFrame(),
             thesis="t",
+            **REASONS,
             now=NOW,
         )
     text = render_report(ledger.report(now=NOW))
@@ -368,7 +390,7 @@ def test_an_empty_ledger_reports_honestly(ledger):
 def test_a_position_whose_book_vanished_can_still_be_closed_at_a_real_fill(ledger):
     """Otherwise a position is stuck open forever with no honest way out."""
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     gone = book(sweep=NOW + timedelta(days=3))
     gone = gone[gone["side"] == "sell"]  # the bid side has disappeared
@@ -392,7 +414,7 @@ def test_a_position_whose_book_vanished_can_still_be_closed_at_a_real_fill(ledge
 
 def test_a_book_priced_close_is_labelled_as_such(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     closed = ledger.close_position(position_id=opened["position_id"], book=book(), now=NOW)
     assert closed["priced_from"] == "book_walk"
@@ -400,7 +422,7 @@ def test_a_book_priced_close_is_labelled_as_such(ledger):
 
 def test_a_nonsense_actual_price_is_refused(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     with pytest.raises(Refusal, match="must be positive"):
         ledger.close_position(
@@ -418,6 +440,7 @@ def test_the_report_says_how_the_exits_were_priced(ledger):
             notional_isk=TIER,
             book=book(type_id=34 + index, sweep=moment),
             thesis="t",
+            **REASONS,
             now=moment,
         )
         ledger.close_position(
@@ -433,7 +456,7 @@ def test_the_report_says_how_the_exits_were_priced(ledger):
 
 def test_an_all_book_priced_tally_needs_no_note(ledger):
     opened = ledger.open_position(
-        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW, **REASONS
     )
     ledger.close_position(position_id=opened["position_id"], book=book(), now=NOW)
     report = ledger.report(now=NOW)

@@ -36,6 +36,7 @@ import pandas as pd
 from .config import Config
 from .costs import CostModel
 from .paths import append_jsonl, read_jsonl
+from .reasons import DISLIKE, LIKE, PASS_ACTIONS, normalise_tags
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
 
 __all__ = [
@@ -46,9 +47,38 @@ __all__ = [
     "render_report",
 ]
 
+# Every recorded decision — taken or passed — must say why, in the committed
+# vocabulary (§19 Amendment 3). No tags, no record, in either direction.
+NO_LIKE_TAGS = (
+    "an opening needs at least one 'why I like it' tag from config/reasons.jsonl. "
+    "A trade whose reason is not recorded is a trade the learning loop can never "
+    "attribute, in either direction"
+)
+NO_DISLIKE_TAGS = (
+    "a pass needs at least one 'why I don't like it' tag from config/reasons.jsonl. "
+    "A pass with its reasons is a recorded decision; a pass without them is a "
+    "dismissal, and half the evidence is thrown away"
+)
+NO_SETUP_TAG = (
+    "an opening needs a setup tag — the name of the setup that fired, or "
+    "'discretionary'. Without it the learning loop cannot say which setups earn"
+)
+
 
 class Refusal(RuntimeError):
     """The system declined to price something. UNKNOWN, not an approximation."""
+
+
+def _clean_tags(tags, vocabulary, direction: str) -> tuple[str, ...]:
+    """Validate tags against the vocabulary when one is supplied.
+
+    With no vocabulary the tags are still cleaned and de-duplicated but not
+    checked — a caller with no `config/reasons.jsonl` can still record a
+    decision, it just cannot be told it typed a tag wrong.
+    """
+    from .reasons import ReasonVocabulary
+
+    return normalise_tags(tags, vocabulary or ReasonVocabulary(reasons=()), direction)
 
 
 @dataclass(slots=True)
@@ -204,15 +234,24 @@ class PaperLedger:
         notional_isk: float,
         book: pd.DataFrame,
         thesis: str,
+        setup_tag: str,
+        like_tags=(),
+        reason_text: str = "",
         stop_price: float | None = None,
         target_price: float | None = None,
         median_daily_turnover: float | None = None,
         now: datetime | None = None,
+        vocabulary=None,
     ) -> dict:
         """Price and record one taker entry, or refuse it.
 
         A refusal is written to the ledger too: how often the system declines
         to price something is a headline number, not an omission (§12.4).
+
+        `setup_tag` and at least one `like_tags` entry are **required**
+        (§19 Amendment 3). The refusal for a missing reason is recorded like
+        any other refusal — a decision the operator started and did not
+        qualify is itself information.
         """
         now = ensure_utc(now or utcnow())
         tiers = list(self.config.costs.notional_tiers_isk)
@@ -223,6 +262,13 @@ class PaperLedger:
             "notional_isk": float(notional_isk),
             "action": "open",
         }
+        if not str(thesis).strip():
+            self._refuse("an opening needs a thesis sentence you can argue with", context)
+        if not str(setup_tag).strip():
+            self._refuse(NO_SETUP_TAG, context)
+        likes = _clean_tags(like_tags, vocabulary, LIKE)
+        if not likes:
+            self._refuse(NO_LIKE_TAGS, context)
         if tier_index is None:
             self._refuse(
                 f"notional {notional_isk:,.0f} ISK is not one of the configured tiers "
@@ -301,9 +347,62 @@ class PaperLedger:
             "self_impact": self_impact,
             "median_daily_turnover": median_daily_turnover,
             "thesis": thesis,
+            "setup_tag": str(setup_tag).strip(),
+            "like_tags": list(likes),
+            "reason_text": str(reason_text),
             "planned_r": _planned_r(ask.price, stop_price, target_price, self.costs),
         }
         return self._append(record)
+
+    def record_pass(
+        self,
+        *,
+        type_id: int,
+        type_name: str | None,
+        action: str,
+        dislike_tags=(),
+        reason_text: str = "",
+        setup_tag: str | None = None,
+        close: float | None = None,
+        now: datetime | None = None,
+        vocabulary=None,
+    ) -> dict:
+        """Record a decision NOT to take something. Same rigour as an opening.
+
+        `action` is `not_today` (clears the name from today's queue only —
+        it NEVER touches the watchlist, §11 D4) or `bad_signal` (the setup
+        itself misfired). The forward outcome of this pass is measured later
+        on the backtest's horizons and cost realism, which is what lets the
+        learning loop say whether the reason was a good one.
+        """
+        now = ensure_utc(now or utcnow())
+        if action not in PASS_ACTIONS:
+            raise Refusal(f"pass action must be one of {PASS_ACTIONS}, got {action!r}")
+        context = {
+            "type_id": int(type_id),
+            "type_name": type_name,
+            "action": action,
+        }
+        dislikes = _clean_tags(dislike_tags, vocabulary, DISLIKE)
+        if not dislikes:
+            self._refuse(NO_DISLIKE_TAGS, context)
+        return self._append(
+            {
+                "event": "pass",
+                "at": iso(now),
+                "type_id": int(type_id),
+                "type_name": type_name,
+                "action": action,
+                "setup_tag": setup_tag,
+                "dislike_tags": list(dislikes),
+                "reason_text": str(reason_text),
+                "close_at_pass": close,
+            }
+        )
+
+    def passes(self) -> list[dict]:
+        """Every recorded pass. The other half of the decision record."""
+        return [record for record in self.records() if record.get("event") == "pass"]
 
     def mark(self, *, book: pd.DataFrame, now: datetime | None = None) -> list[dict]:
         """Daily mark-to-market. Every mark carries its staleness stamp."""

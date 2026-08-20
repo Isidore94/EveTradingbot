@@ -1,0 +1,27 @@
+# config/reasons.jsonl — why I acted, in both directions.
+#
+# This file is DATA and it is meant to be edited. Every tag here becomes a
+# thing the learning loop can measure: "trades tagged X ran +0.42R on
+# average", "passes tagged Y were right to pass 78% of the time". Adding a
+# tag adds a hypothesis about your own judgement; removing one stops new
+# decisions carrying it but never rewrites decisions already recorded.
+#
+# Schema: {"tag": str, "direction": "like"|"dislike", "label": str,
+#          "notes": str}
+#
+# An opening requires a thesis, a setup tag, and at least one LIKE tag.
+# A pass ("not today" / "bad signal") requires at least one DISLIKE tag.
+# No tags, no record — in either direction.
+{"tag": "clean_dip_below_value", "direction": "like", "label": "clean dip below value", "notes": "Price is below anchored value without the chart looking broken."}
+{"tag": "rrs_strong", "direction": "like", "label": "RRS strong", "notes": "Outperforming its scope while it dips — falling less than the market, not more."}
+{"tag": "level_confluence", "direction": "like", "label": "level confluence", "notes": "A high-volume level, a round ISK number and/or a pivot land in the same place."}
+{"tag": "participation_intact", "direction": "like", "label": "participation intact", "notes": "Volume has not dried up on the way down."}
+{"tag": "tight_friction", "direction": "like", "label": "tight friction", "notes": "The round trip clears costs with room to spare at my tier."}
+{"tag": "patch_catalyst", "direction": "like", "label": "patch catalyst", "notes": "A confirmed anchor plausibly explains the move."}
+{"tag": "sector_leader", "direction": "like", "label": "sector leader", "notes": "Leading its own sector, not just riding FORGE."}
+{"tag": "spread_too_wide", "direction": "dislike", "label": "spread too wide", "notes": "The round-trip haircut eats the whole expected move."}
+{"tag": "too_thin", "direction": "dislike", "label": "too thin", "notes": "Not enough daily volume to get out at size."}
+{"tag": "chart_ugly", "direction": "dislike", "label": "chart ugly", "notes": "The structure is a mess — no clean read either way."}
+{"tag": "no_confluence", "direction": "dislike", "label": "no confluence", "notes": "Nothing else agrees with the signal."}
+{"tag": "wrong_sector_regime", "direction": "dislike", "label": "wrong sector regime", "notes": "The whole sector is the wrong side of the market right now."}
+{"tag": "already_extended", "direction": "dislike", "label": "already extended", "notes": "The move I wanted has already happened."}

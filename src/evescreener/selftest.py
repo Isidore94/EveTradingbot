@@ -152,6 +152,44 @@ def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
     except Exception as exc:  # noqa: BLE001
         checks.append(Check("sector map", False, f"{type(exc).__name__}: {exc}"))
 
+    # 10. The operator's setups parse. A malformed file must fail here rather
+    #     than halfway through a scan.
+    from .setups import SETUPS_FILE, load_setups
+
+    try:
+        setups = load_setups(root / "config" / SETUPS_FILE)
+        enabled = [setup for setup in setups if setup.enabled]
+        checks.append(
+            Check(
+                "setups",
+                True,
+                f"{len(setups)} setup(s), {len(enabled)} enabled"
+                + (f": {', '.join(setup.name for setup in enabled)}" if enabled else ""),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check("setups", False, f"{type(exc).__name__}: {exc}"))
+
+    # 11. The reason vocabulary parses and covers both directions. A vocabulary
+    #     with no dislike tags cannot record a pass, and half the decision
+    #     record would silently go missing (§19 Amendment 3).
+    from .reasons import REASONS_FILE, load_reasons
+
+    try:
+        vocabulary = load_reasons(root / "config" / REASONS_FILE)
+        both = bool(vocabulary.likes) and bool(vocabulary.dislikes)
+        checks.append(
+            Check(
+                "reason vocabulary",
+                both,
+                f"{len(vocabulary.likes)} like / {len(vocabulary.dislikes)} dislike tag(s)"
+                if both
+                else "both directions are required; a pass cannot be recorded without dislike tags",
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check("reason vocabulary", False, f"{type(exc).__name__}: {exc}"))
+
     return checks
 
 

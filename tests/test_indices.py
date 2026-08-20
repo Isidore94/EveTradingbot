@@ -203,6 +203,7 @@ def sector_db(db):
         [
             (600, "Ishtar", 100, 1.0, 1.0, 1),
             (601, "Vexor", 100, 1.0, 1.0, 1),
+            (602, "Thorax", 100, 1.0, 1.0, 1),
             (700, "Damage Control II", 9, 1.0, 1.0, 1),
             (800, "Antimatter L", 11, 1.0, 1.0, 1),
         ]
@@ -284,3 +285,27 @@ def test_index_set_diagnostics_are_publishable(config, sector_db):
     assert payload["forge"]["top_weight"] is not None
     assert payload["forge"]["weight_entropy"] is not None
     assert payload["forge_ew"]["weighting"] == "equal"
+
+
+def test_a_sector_floor_removes_members_and_says_how_many(config, sector_db):
+    frame = lake([600, 601, 602, 700])
+    sectors = [
+        Sector(ticker="SHIP", name="Ships", roots=(4,), min_members=2, min_unit_volume=500.0)
+    ]
+    volumes = {600: 10_000.0, 601: 10_000.0, 602: 10.0}
+    result = build_index_set(config, sector_db, frame, sectors=sectors, unit_volume=volumes)
+    meta = result.sector_meta["SHIP"]
+    assert meta["candidate_members"] == 2
+    assert meta["excluded_by_sector_floor"] == 1
+
+
+def test_a_sector_floor_with_no_measurements_is_unknown_not_ignored(config, sector_db):
+    frame = lake([600, 601, 602, 700])
+    sectors = [
+        Sector(ticker="SHIP", name="Ships", roots=(4,), min_members=2, min_unit_volume=500.0)
+    ]
+    result = build_index_set(config, sector_db, frame, sectors=sectors)
+    meta = result.sector_meta["SHIP"]
+    assert meta["status"] == "UNKNOWN"
+    assert "cannot be applied" in meta["reason"]
+    assert "SHIP" not in result.sectors

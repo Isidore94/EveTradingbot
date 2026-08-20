@@ -117,6 +117,41 @@ def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
         )
     )
 
+    # 8. The membership floors are coherent (§11 D3, amended).
+    universe = config.universe
+    floors_ok = 0 < universe.absolute_min_unit_volume <= universe.min_median_unit_volume
+    checks.append(
+        Check(
+            "membership floors",
+            floors_ok,
+            f"tradeable >= {universe.min_median_unit_volume:,.0f} units/day; "
+            f"THIN band {universe.absolute_min_unit_volume:,.0f}-"
+            f"{universe.min_median_unit_volume:,.0f}; below that, lookup only",
+        )
+    )
+
+    # 9. The committed sector map parses. A malformed one must fail here, on a
+    #    command the operator runs deliberately, not halfway through a digest.
+    from .indices import SECTORS_FILE, load_sectors
+
+    sectors_path = root / "config" / SECTORS_FILE
+    try:
+        sectors = load_sectors(sectors_path)
+        if not sectors_path.exists():
+            checks.append(
+                Check("sector map", False, f"no {sectors_path}; the index layer has no sectors")
+            )
+        else:
+            checks.append(
+                Check(
+                    "sector map",
+                    True,
+                    f"{len(sectors)} sector(s): " + ", ".join(sector.ticker for sector in sectors),
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check("sector map", False, f"{type(exc).__name__}: {exc}"))
+
     return checks
 
 

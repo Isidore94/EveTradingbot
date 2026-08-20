@@ -98,7 +98,9 @@ def test_selftest_passes_on_a_coherent_install(config, repo_root, monkeypatch, t
     checks = run_selftest(config, repo_root=repo_root)
     failures = [check for check in checks if not check.ok]
     assert failures == [], selftest_report(checks)
-    assert len(checks) == 7
+    assert len(checks) == 9
+    names = {check.name for check in checks}
+    assert {"membership floors", "sector map"} <= names
 
 
 def test_config_example_divergence_is_caught_at_LOAD_not_only_by_selftest(repo_root, tmp_path):

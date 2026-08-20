@@ -35,6 +35,7 @@ from .signals.levels import build_level_store, levels_near
 from .signals.setup import GATE_NAMES, anchor_grid, evaluate_setups
 from .store.db import Database
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
+from .universe import BELOW, THIN, tier_badge
 
 __all__ = [
     "Board",
@@ -70,6 +71,8 @@ class TypeBrief:
     type_name: str | None = None
     watched: bool = False
     tracked: bool | None = None
+    tier: str | None = None
+    median_unit_volume: float | None = None
     median_isk_value: float | None = None
     bars: int = 0
     last_bar: str | None = None
@@ -103,6 +106,8 @@ class TypeBrief:
             "type_name": self.type_name,
             "watched": self.watched,
             "tracked": self.tracked,
+            "tier": self.tier,
+            "median_unit_volume": self.median_unit_volume,
             "median_isk_value": self.median_isk_value,
             "bars": self.bars,
             "last_bar": self.last_bar,
@@ -208,11 +213,14 @@ def build_brief(
         is not None
     )
     universe_row = db.conn.execute(
-        "SELECT tracked, median_isk_value FROM universe WHERE type_id=? AND region_id=?",
+        "SELECT tracked, tier, median_unit_volume, median_isk_value FROM universe"
+        " WHERE type_id=? AND region_id=?",
         (int(type_id), region),
     ).fetchone()
     if universe_row is not None:
         brief.tracked = bool(universe_row["tracked"])
+        brief.tier = universe_row["tier"]
+        brief.median_unit_volume = _finite(universe_row["median_unit_volume"])
         brief.median_isk_value = _finite(universe_row["median_isk_value"])
 
     if frame is None or frame.empty:
@@ -331,10 +339,15 @@ def render_brief(brief: TypeBrief) -> str:
     badges = []
     if brief.watched:
         badges.append("WATCHLIST")
-    if brief.tracked is True:
+    if brief.tier == THIN:
+        # The THIN badge is louder than "tracked" because it is the one the
+        # operator has to price in: this name is carried, but it is not one
+        # you get out of at size (§11 D3, amended).
+        badges.append("THIN")
+    elif brief.tracked is True:
         badges.append("tracked")
-    elif brief.tracked is False:
-        badges.append("below the liquidity floor")
+    elif brief.tier == BELOW or brief.tracked is False:
+        badges.append("BELOW FLOOR — not tradeable")
     header = f"# {name} (type {brief.type_id})" + (f" — {' · '.join(badges)}" if badges else "")
     lines = [header, ""]
     if brief.note:
@@ -346,6 +359,12 @@ def render_brief(brief: TypeBrief) -> str:
         + (f" ({change})" if change else "")
         + f" · {brief.bars} bars, last {brief.last_bar}"
     )
+    if brief.median_unit_volume is not None:
+        floor_note = {
+            THIN: " — THIN: carried and charted, excluded from FORGE",
+            BELOW: " — below the absolute floor; direct lookup only, not tradeable",
+        }.get(brief.tier or "", "")
+        lines.append(f"median daily volume {brief.median_unit_volume:,.0f} units{floor_note}")
     if brief.median_isk_value is not None:
         lines.append(f"median daily turnover {format_isk(brief.median_isk_value)} ISK")
     lines.append("")
@@ -431,6 +450,12 @@ def build_board(
     groups = dict(tuple(bars.groupby("type_id", sort=True)))
     board.universe = len(groups)
     names = db.type_names(list(groups))
+    tiers = {
+        int(row["type_id"]): row["tier"]
+        for row in db.conn.execute(
+            "SELECT type_id, tier FROM universe WHERE region_id=?", (board.region_id,)
+        )
+    }
     rows: list[dict] = []
     for type_id, group in groups.items():
         work = group.sort_values("datetime").reset_index(drop=True)
@@ -470,6 +495,7 @@ def build_board(
                 "participation": _finite(last["participation"]),
                 "friction_pct": friction,
                 "is_setup": bool(last["is_setup"]),
+                "tier": tiers.get(int(type_id)),
             }
         )
     board.measured = len(rows)
@@ -504,7 +530,7 @@ def render_board(board: Board) -> str:
         "printed beside every row and never used to hide one (plan.md §18).",
         "",
         f"   {'name':<30} {'close':>10} {'Δ1d%':>7} {'dipσ':>7} {'RRS':>7} "
-        f"{'part':>6} {'frict%':>7}  setup",
+        f"{'part':>6} {'frict%':>7} {'thin':>5}  setup",
     ]
 
     def cell(value, spec: str) -> str:
@@ -517,7 +543,8 @@ def render_board(board: Board) -> str:
             f" {marker} {name:<30} {format_isk(row['close']):>10} "
             f"{cell(row['day_change_pct'], '+7.2f'):>7} {cell(row['dip_sigma'], '+7.2f'):>7} "
             f"{cell(row['rrs'], '+7.2f'):>7} {cell(row['participation'], '6.2f'):>6} "
-            f"{cell(row['friction_pct'], '7.2f'):>7}  {'✓' if row['is_setup'] else '·'}"
+            f"{cell(row['friction_pct'], '7.2f'):>7} {tier_badge(row.get('tier')):>5}  "
+            f"{'✓' if row['is_setup'] else '·'}"
         )
     if not board.rows:
         lines.append("  (nothing measurable — is the lake ingested and the census run?)")

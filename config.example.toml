@@ -81,8 +81,16 @@ book_staleness_minutes = 60
 annual_capital_cost_pct = 0.0
 
 [universe]
-# Pre-census floor; Phase 1's census re-derives these and writes the measured
-# values back into plan.md §11 D3.
+# Membership floor (plan.md §11 D3, amended). MEDIAN 30-day UNIT volume, never
+# mean: one wash-trade day must not lift a dead item over the floor.
+#   >= min_median_unit_volume        tradeable, index-eligible
+#   >= absolute_min_unit_volume      tradeable but THIN — badged on every
+#                                    surface and excluded from FORGE
+#   below that                       not tradeable; direct lookup only
+min_median_unit_volume = 1000.0
+absolute_min_unit_volume = 100.0
+# Measured, and the index WEIGHTING input (turnover = units x price). These no
+# longer gate membership; the census still reports the floor grid it derives.
 min_median_isk_value = 100000000.0
 min_median_order_count = 30
 liquidity_lookback_days = 30

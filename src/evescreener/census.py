@@ -72,6 +72,8 @@ class CensusResult:
     spoof_share: float | None = None
     structure_share: dict = field(default_factory=dict)
     book_sweep_ts: str | None = None
+    unit_volume_percentiles: dict = field(default_factory=dict)
+    membership: dict = field(default_factory=dict)
     floor_grid: list[dict] = field(default_factory=list)
     derived_floor: dict = field(default_factory=dict)
     market_group_breakdown: list[dict] = field(default_factory=list)
@@ -95,6 +97,8 @@ class CensusResult:
             "spoof_share": self.spoof_share,
             "structure_share": self.structure_share,
             "book_sweep_ts": self.book_sweep_ts,
+            "unit_volume_percentiles": self.unit_volume_percentiles,
+            "membership": self.membership,
             "floor_grid": self.floor_grid,
             "derived_floor": self.derived_floor,
             "market_group_breakdown": self.market_group_breakdown,
@@ -350,22 +354,28 @@ async def run_census(
     table = liquidity_table(lake, region, lookback_days=config.universe.liquidity_lookback_days)
     grid = score_floor_grid(table)
     derived = derive_floor(grid)
-    if derived.get("resolved"):
-        min_isk = float(derived["min_median_isk_value"])
-        min_orders = float(derived["min_median_order_count"])
-    else:
-        min_isk = config.universe.min_median_isk_value
-        min_orders = config.universe.min_median_order_count
-        notes.append("derived floor unresolved; fell back to the configured floor")
-    scored = apply_floor(table, min_isk_value=min_isk, min_order_count=min_orders)
-    sync_universe(
+    # The turnover grid is still measured and still reported — it is how the
+    # weighting input is understood — but it no longer decides membership.
+    # The floor is the operator's stated unit-volume rule (§11 D3, amended
+    # 2026-08-20): a name you cannot move 1,000 units of a day is not a name
+    # you can get out of, whatever ISK it prints on its good days.
+    min_units = float(config.universe.min_median_unit_volume)
+    absolute_units = float(config.universe.absolute_min_unit_volume)
+    scored = apply_floor(table, min_unit_volume=min_units, absolute_min_unit_volume=absolute_units)
+    universe = sync_universe(
         db,
         region,
         ids,
         table,
-        min_isk_value=min_isk,
-        min_order_count=min_orders,
+        min_unit_volume=min_units,
+        absolute_min_unit_volume=absolute_units,
         source="census",
+    )
+    notes.append(
+        f"membership floor: median 30d units >= {min_units:,.0f} "
+        f"({universe.index_eligible} types), THIN band "
+        f"{absolute_units:,.0f}-{min_units:,.0f} ({universe.thin} types, badged and "
+        f"excluded from FORGE), below floor {universe.below}"
     )
 
     book = BookLake(config.paths).latest(region)
@@ -383,6 +393,10 @@ async def run_census(
         total_bars=int(len(frame)),
         lookback_days=config.universe.liquidity_lookback_days,
         ingest=ingest.as_dict(),
+        unit_volume_percentiles=_percentiles(table["median_unit_volume"])
+        if not table.empty
+        else {},
+        membership=universe.as_dict(),
         turnover_percentiles=_percentiles(table["median_isk_value"]) if not table.empty else {},
         order_count_percentiles=_percentiles(table["median_order_count"])
         if not table.empty
@@ -495,6 +509,49 @@ def render_census(result: CensusResult) -> str:
                 "you do not have."
             )
     lines.append("")
+    lines.append("## Membership (the floor that decides who is tradeable)")
+    lines.append("")
+    membership = result.membership
+    if membership:
+        lines.append(
+            "Rule: **median 30-day UNIT volume**. Median, never mean — one wash-trade "
+            "day must not lift a dead item over the floor. Turnover decides how much a "
+            "name *counts* in the index; units decide whether it is in at all."
+        )
+        lines.append("")
+        lines.append("| tier | rule | types |")
+        lines.append("|---|---|---:|")
+        lines.append(
+            f"| OK | >= {membership.get('floor_unit_volume', 0):,.0f} units/day | "
+            f"{membership.get('index_eligible', 0) + membership.get('price_pinned', 0)} |"
+        )
+        lines.append(
+            "| — of which NPC-price-seeded | price did not move across the window; carried "
+            f"and charted, never an index member | {membership.get('price_pinned', 0)} |"
+        )
+        lines.append(
+            f"| THIN | {membership.get('absolute_floor_unit_volume', 0):,.0f}-"
+            f"{membership.get('floor_unit_volume', 0):,.0f} units/day, badged everywhere, "
+            f"excluded from FORGE | {membership.get('thin', 0)} |"
+        )
+        lines.append(
+            f"| below floor | under {membership.get('absolute_floor_unit_volume', 0):,.0f} "
+            f"units/day, direct lookup only | {membership.get('below', 0)} |"
+        )
+        lines.append("")
+        lines.append(f"Tradeable universe (OK + THIN): **{membership.get('tracked', 0)}** types.")
+    else:
+        lines.append("UNKNOWN — the universe was not synced on this run.")
+    if result.unit_volume_percentiles:
+        lines.append("")
+        lines.append("Median daily unit volume, percentiles across measured types:")
+        lines.append("")
+        lines.append("| " + " | ".join(result.unit_volume_percentiles) + " |")
+        lines.append("|" + "---:|" * len(result.unit_volume_percentiles))
+        lines.append(
+            "| " + " | ".join(f"{v:,.0f}" for v in result.unit_volume_percentiles.values()) + " |"
+        )
+    lines.append("")
     lines.append("## Liquidity floor grid")
     lines.append("")
     lines.append("| min ISK/day | min order_count | types | % of types | % of turnover |")
@@ -505,7 +562,14 @@ def render_census(result: CensusResult) -> str:
             f"| {row['types']} | {row['share_of_types']:.1%} | {row['share_of_turnover']:.1%} |"
         )
     lines.append("")
-    lines.append("## Derived floor")
+    lines.append("## Derived turnover floor (superseded as a membership rule)")
+    lines.append("")
+    lines.append(
+        "Kept because it is still the honest read of where the region's ISK is, and "
+        "because the weighting input is turnover. It no longer decides membership — "
+        "the unit-volume rule above does (§11 D3, amended 2026-08-20)."
+    )
+    lines.append("")
     derived = result.derived_floor
     lines.append(f"Rule (stated before measurement): {derived.get('rule')}")
     if derived.get("resolved"):

@@ -88,6 +88,13 @@ class CostsConfig:
 
 @dataclass(frozen=True, slots=True)
 class UniverseConfig:
+    # The membership rule (§11 D3, amended 2026-08-20): a MEDIAN 30-day unit
+    # volume floor decides who is tradeable. Median, never mean — one
+    # wash-trade day must not lift a dead item over the floor. The ISK/order
+    # keys below are retained as measurements and as the index *weighting*
+    # input; they no longer gate membership.
+    min_median_unit_volume: float
+    absolute_min_unit_volume: float
     min_median_isk_value: float
     min_median_order_count: float
     liquidity_lookback_days: int

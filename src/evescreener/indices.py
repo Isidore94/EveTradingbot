@@ -283,14 +283,21 @@ def build_index_set(
     bars: pd.DataFrame,
     *,
     member_ids=None,
+    unit_volume: dict[int, float] | None = None,
     sectors: list[Sector] | None = None,
     sectors_path: Path | None = None,
 ) -> IndexSet:
     """Build FORGE, FORGE-EW and every sector index from one lake read.
 
-    `member_ids` is the eligible universe — the types that cleared the unit
-    floor (§11 D3). Passing it explicitly keeps the index honest about the
-    difference between "tradeable" and "index member".
+    `member_ids` is the index-eligible universe — the OK-tier types, THIN
+    excluded (§11 D3, amended). Passing it explicitly keeps the index honest
+    about the difference between "tradeable" and "index member": a name you
+    are allowed to chart is not automatically a name allowed to move the
+    market read.
+
+    `unit_volume` is median 30-day units per type, needed only by sectors that
+    set their own `min_unit_volume`. A sector that asks for a floor and is
+    given no measurements says so rather than quietly applying no floor.
     """
     signals = config.signals
     notes: list[str] = []
@@ -331,6 +338,23 @@ def build_index_set(
             **sector.as_dict(),
             "candidate_members": len(members),
         }
+        if sector.min_unit_volume is not None:
+            if not unit_volume:
+                meta[sector.ticker]["status"] = "UNKNOWN"
+                meta[sector.ticker]["reason"] = (
+                    f"sector sets min_unit_volume={sector.min_unit_volume:,.0f} but no unit "
+                    "volumes were supplied; a floor that cannot be applied is UNKNOWN, not "
+                    "silently skipped"
+                )
+                continue
+            before = len(members)
+            members = [
+                type_id
+                for type_id in members
+                if float(unit_volume.get(type_id, 0.0)) >= sector.min_unit_volume
+            ]
+            meta[sector.ticker]["candidate_members"] = len(members)
+            meta[sector.ticker]["excluded_by_sector_floor"] = before - len(members)
         if len(members) < sector.min_members:
             meta[sector.ticker]["status"] = "UNKNOWN"
             meta[sector.ticker]["reason"] = (

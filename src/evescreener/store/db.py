@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..timeutil import iso, parse_iso, utcnow
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -86,8 +86,16 @@ CREATE TABLE IF NOT EXISTS universe (
     region_id INTEGER NOT NULL,
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
+    -- Membership is decided on median UNIT volume; the ISK figure is the index
+    -- WEIGHTING input, not a gate (§11 D3, amended).
+    median_unit_volume REAL,
     median_isk_value REAL,
     median_order_count REAL,
+    -- 1 when the price has not moved across the window: an NPC vendor is
+    -- holding it. Tradeable and chartable, never an index member.
+    price_pinned INTEGER NOT NULL DEFAULT 0,
+    -- OK / THIN / BELOW. THIN is carried and badged; BELOW is lookup-only.
+    tier TEXT,
     tracked INTEGER NOT NULL DEFAULT 0,
     dropped_at TEXT,
     source TEXT NOT NULL DEFAULT 'census',
@@ -160,6 +168,14 @@ CREATE TABLE IF NOT EXISTS killmail_ingest (
 );
 """
 
+# (table, column, declaration) pairs applied to databases that predate them.
+# Append only; never reorder, never remove.
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("universe", "median_unit_volume", "REAL"),
+    ("universe", "tier", "TEXT"),
+    ("universe", "price_pinned", "INTEGER NOT NULL DEFAULT 0"),
+)
+
 
 class Database:
     """Thin sqlite3 wrapper. No ORM; the schema above is the whole model."""
@@ -177,7 +193,22 @@ class Database:
         self.conn.execute("PRAGMA busy_timeout=15000")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._add_missing_columns()
         self.set_meta("schema_version", str(SCHEMA_VERSION))
+
+    def _add_missing_columns(self) -> None:
+        """Additive migration for databases created by an earlier schema.
+
+        `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it
+        was, so a column added to SCHEMA never reaches a lake the operator
+        already built. Rebuilding is not an option — the state database holds
+        the paper ledger and the watchlist, and those are not regenerable.
+        Adding the column and letting the next census fill it is.
+        """
+        for table, column, decl in ADDED_COLUMNS:
+            existing = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # -- lifecycle ---------------------------------------------------------
     def close(self) -> None:

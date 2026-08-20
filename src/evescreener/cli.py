@@ -166,20 +166,29 @@ def _composite_and_bars(config: Config, db, region: int):
     The third element carries the unfiltered lake: watchlist names live outside
     the tracked universe by design, and their bars must not vanish with the floor.
     """
-    from .signals.composite import build_composite
+    from .indices import FORGE
+    from .signals.composite import TURNOVER, build_composite
     from .store.lake import BarLake
-    from .universe import tracked_type_ids
+    from .universe import index_eligible_type_ids, tracked_type_ids
 
     all_bars = BarLake(config.paths).read(region)
     bars = all_bars
     tracked = tracked_type_ids(db, region)
     if tracked and not bars.empty:
         bars = bars[bars["type_id"].isin(tracked)]
+    # FORGE holds OK-tier names only. THIN names stay in `bars` — they are
+    # charted, scanned and briefed — but a name you cannot get out of at size
+    # does not get to move the market read (§11 D3, amended).
+    eligible = index_eligible_type_ids(db, region)
     composite = build_composite(
         bars,
         members=config.signals.composite_members,
         single_cap=config.signals.composite_single_weight_cap,
         rebalance_days=config.signals.composite_rebalance_days,
+        weighting=TURNOVER,
+        member_ids=eligible or None,
+        ticker=FORGE,
+        name="Forge Composite",
     )
     return bars, composite, all_bars
 

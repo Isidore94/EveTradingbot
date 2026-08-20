@@ -64,6 +64,25 @@ def compatibility_date_check(pinned: str, moment: datetime | None = None) -> Che
     )
 
 
+def optional_config_keys() -> set[str]:
+    """`section.key` for every config field that declares a default.
+
+    Mirrors `config.build_section`, which requires only fields with no default.
+    Keeping the two in step is what lets a later phase add an optional setting
+    without breaking an operator's existing `config.toml`.
+    """
+    from dataclasses import MISSING, fields
+
+    from .config import _SECTIONS
+
+    optional: set[str] = set()
+    for name, section_type in _SECTIONS.items():
+        for field in fields(section_type):
+            if field.default is not MISSING or field.default_factory is not MISSING:
+                optional.add(f"{name}.{field.name}")
+    return optional
+
+
 def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
     checks: list[Check] = []
     root = repo_root or Path.cwd()
@@ -80,10 +99,18 @@ def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
 
             with config.source_path.open("rb") as stream:
                 live_keys = key_set(tomllib.load(stream))
-            missing = sorted(example_keys - live_keys)
+            # A field that declares a default is an OPTIONAL setting, and the
+            # loader already tolerates its absence (§21 R2). Parity must use the
+            # same rule, or every optional key added later fails this check on
+            # an operator config that is perfectly valid.
+            optional = optional_config_keys()
+            missing = sorted(example_keys - live_keys - optional)
+            absent_optional = sorted((example_keys - live_keys) & optional)
             extra = sorted(live_keys - example_keys)
             ok = not missing and not extra
             detail = "identical key sets" if ok else f"missing={missing} extra={extra}"
+            if ok and absent_optional:
+                detail = f"identical apart from optional keys using defaults: {absent_optional}"
             checks.append(Check("config parity", ok, detail))
     except Exception as exc:  # noqa: BLE001 - selftest reports, never raises
         checks.append(Check("config parity", False, f"{type(exc).__name__}: {exc}"))

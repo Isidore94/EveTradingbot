@@ -39,7 +39,7 @@ evidence.
 ## §21 remediation track — ALL PHASES IMPLEMENTED + GREEN, NONE LIVE_VALIDATED
 
 R1 through R8 are code-complete and the offline gate is green:
-**716 passed, 7 deselected**, ruff check + format clean.
+**717 passed, 7 deselected**, ruff check + format clean, `selftest` **12/12**.
 
 **That is not the same as correct.** Every phase carries an owed live gate, and
 none has been run. The build cannot self-certify — a machine's confidence in

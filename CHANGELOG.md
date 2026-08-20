@@ -8,7 +8,8 @@ recorded, `PROMOTED` = explicit operator decision.
 ## 2026-08-20 — Isolation proved, parity restored, a retracted number removed (§21 R8)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R8. `uv run pytest -q` ->
-**716 passed, 7 deselected**, ruff check + format clean. This completes R1-R8;
+**717 passed, 7 deselected**, ruff check + format clean, `selftest` **12/12**.
+This completes R1-R8;
 **none of them is LIVE_VALIDATED** and every phase still owes its live gate.
 
 - **GUI isolation is proved by the import graph.** The old AST guard saw only
@@ -31,6 +32,11 @@ recorded, `PROMOTED` = explicit operator decision.
   quoted it as fact; §17 D-10 withdrew it as a circuit-breaker cascade mistaken
   for data. They state the measured 241 of 17,325 (1.3%) and name the
   withdrawal.
+- **`selftest` config parity learned about optional keys.** R2's defaulted
+  settings made a perfectly valid operator `config.toml` fail parity, because
+  the check required every example key while the loader did not.
+  `optional_config_keys()` mirrors `build_section`, so drift still fails loudly
+  and optional settings no longer do.
 
 ## 2026-08-20 — The threading contract, held structurally (§21 R7)
 

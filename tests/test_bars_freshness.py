@@ -176,6 +176,17 @@ def test_stale_bars_make_the_measurable_gate_unknown(config):
     assert fresh.flags == []
 
 
+def test_config_parity_treats_a_defaulted_key_as_optional():
+    """R2 added optional keys; selftest must not call a valid config broken."""
+    from evescreener.selftest import optional_config_keys
+
+    optional = optional_config_keys()
+    assert "screen.max_bar_age_days" in optional
+    assert "screen.max_refresh_age_hours" in optional
+    # A field with no default is still required, and still fails loudly.
+    assert "screen.max_candidates" not in optional
+
+
 def test_iso_roundtrip_of_the_refresh_stamp():
     frame = _frame(["2026-08-19"], fetched_at=NOW)
     assert frame["fetched_at"].iloc[0] == iso(NOW)

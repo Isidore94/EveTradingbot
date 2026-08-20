@@ -8,11 +8,13 @@ contract, and the cost model's arithmetic. It never touches the network.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .config import Config, key_set, load_example
 from .store.db import Database
 from .store.lake import EVE_DAILY_BAR_COLUMNS
+from .timeutil import esi_compatibility_today
 
 
 @dataclass(slots=True)
@@ -23,6 +25,43 @@ class Check:
 
     def render(self) -> str:
         return f"[{'PASS' if self.ok else 'FAIL'}] {self.name}: {self.detail}"
+
+
+def compatibility_date_check(pinned: str, moment: datetime | None = None) -> Check:
+    """The `X-Compatibility-Date` pin must name a fully-past day (plan.md §17 D-21).
+
+    ESI rejects a pin that is still in the future on its UTC-11 clock with a
+    plain HTTP 400 on *every* route — measured 2026-08-18 on branch
+    `claude/phase-0-gate-checklist-oucoil` (commit a7f5872), where the D2 pin
+    of `2026-08-18` took down every request until it was corrected. ESI itself
+    would accept a pin equal to its own UTC-11 date; this check demands one
+    full day more margin, so a pin cannot pass here and then start failing
+    mid-run as the UTC-11 clock rolls over.
+
+    A pin that is safely past only ever gets safer, so this can never become a
+    flaky check on an unchanged config.
+    """
+    try:
+        pinned_day = date.fromisoformat(pinned)
+    except ValueError:
+        return Check("compatibility date", False, f"not an ISO-8601 date: {pinned!r}")
+
+    esi_today = esi_compatibility_today(moment)
+    newest_safe = esi_today - timedelta(days=1)
+    if pinned_day > newest_safe:
+        return Check(
+            "compatibility date",
+            False,
+            f"pin {pinned_day} is not a full day past CCP's UTC-11 clock (today "
+            f"{esi_today} there); ESI answers a future pin with HTTP 400 on every "
+            f"route. Newest safe pin: {newest_safe}",
+        )
+    return Check(
+        "compatibility date",
+        True,
+        f"pin {pinned_day} is {(esi_today - pinned_day).days} day(s) past CCP's "
+        f"UTC-11 clock (today {esi_today} there)",
+    )
 
 
 def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
@@ -189,6 +228,10 @@ def run_selftest(config: Config, repo_root: Path | None = None) -> list[Check]:
         )
     except Exception as exc:  # noqa: BLE001
         checks.append(Check("reason vocabulary", False, f"{type(exc).__name__}: {exc}"))
+
+    # 12. The `X-Compatibility-Date` pin must already have passed on CCP's
+    #     UTC-11 clock, or every ESI route answers HTTP 400 (§17 D-21).
+    checks.append(compatibility_date_check(config.app.compatibility_date))
 
     return checks
 

@@ -26,6 +26,24 @@ def ensure_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+ESI_COMPATIBILITY_CLOCK_OFFSET_HOURS = 11
+"""CCP evaluates `X-Compatibility-Date` against a UTC-11 clock, not UTC."""
+
+
+def esi_compatibility_today(moment: datetime | None = None) -> date:
+    """The date CCP's compatibility clock reads at `moment`.
+
+    Measured against live ESI on 2026-08-18 (branch
+    `claude/phase-0-gate-checklist-oucoil`, commit a7f5872): a pin of
+    `2026-08-18` was rejected on every route with
+    `HTTP 400 {"error":"Compatibility date (2026-08-18) is in the future.
+    Current date (UTC-11) is 2026-08-17."}`. A date is only sendable once it
+    has passed on *this* clock, which lags UTC by eleven hours.
+    """
+    moment = ensure_utc(moment or utcnow())
+    return (moment - timedelta(hours=ESI_COMPATIBILITY_CLOCK_OFFSET_HOURS)).date()
+
+
 def bar_datetime(day: date | str) -> datetime:
     """The canonical tz-aware timestamp of an ESI history date.
 

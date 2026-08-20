@@ -38,6 +38,15 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
+- **Latest — deployed to the operator's Windows desk; compatibility-date guard
+  salvaged (plan.md §17 D-21):** `uv run pytest -q` → **509 passed, 7
+  deselected** on Windows (Python 3.12.13, uv 0.12.3), ruff check + format
+  clean, `python -m evescreener selftest` → **12/12** against the real
+  `config.toml`. Two changes only: the new `compatibility date` check, and a
+  Windows path-escaping fix in the parity test that had been failing the
+  offline gate on this machine and nowhere else. Config is Accounting **V** /
+  Broker Relations **IV** → sales tax 3.375%, broker fee 1.300%; the Discord
+  webhook is deliberately empty, so delivery reports `unconfigured`.
 - **Latest — the desk, indices, setups and the learning loop (plan.md §19,
   §17 D-14…D-20):** `uv run pytest -q` → **509 passed, 7 deselected**, ruff
   check + format clean, `python -m evescreener selftest` → **11/11**. The desk

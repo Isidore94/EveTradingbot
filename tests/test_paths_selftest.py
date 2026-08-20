@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date, datetime
 
 import pytest
 
@@ -16,7 +17,8 @@ from evescreener.paths import (
     read_jsonl,
     resolve_data_dir,
 )
-from evescreener.selftest import run_selftest, selftest_report
+from evescreener.selftest import compatibility_date_check, run_selftest, selftest_report
+from evescreener.timeutil import esi_compatibility_today
 
 # -- the failed-publish invariant -------------------------------------------
 
@@ -98,9 +100,15 @@ def test_selftest_passes_on_a_coherent_install(config, repo_root, monkeypatch, t
     checks = run_selftest(config, repo_root=repo_root)
     failures = [check for check in checks if not check.ok]
     assert failures == [], selftest_report(checks)
-    assert len(checks) == 11
+    assert len(checks) == 12
     names = {check.name for check in checks}
-    assert {"membership floors", "sector map", "setups", "reason vocabulary"} <= names
+    assert {
+        "membership floors",
+        "sector map",
+        "setups",
+        "reason vocabulary",
+        "compatibility date",
+    } <= names
 
 
 def test_config_example_divergence_is_caught_at_LOAD_not_only_by_selftest(repo_root, tmp_path):
@@ -130,8 +138,11 @@ def test_selftest_parity_check_passes_on_a_matching_file(repo_root, tmp_path, mo
     monkeypatch.delenv(ENV_DATA_DIR, raising=False)
     live = tmp_path / "config.toml"
     body = (repo_root / "config.example.toml").read_text()
+    # `as_posix()` because a Windows tmp_path lands backslashes inside a TOML
+    # basic string, where `\U` is an escape sequence and not a drive path.
+    data_dir = (tmp_path / "data").as_posix()
     live.write_text(
-        body.replace('data_dir = "./data"', f'data_dir = "{tmp_path / "data"}"'),
+        body.replace('data_dir = "./data"', f'data_dir = "{data_dir}"'),
         encoding="utf-8",
     )
     checks = run_selftest(load_config(live), repo_root=repo_root)
@@ -144,6 +155,58 @@ def test_selftest_report_counts_passes(config, repo_root):
     text = selftest_report(run_selftest(config, repo_root=repo_root))
     assert "checks passed" in text
     assert text.count("[PASS]") >= 6
+
+
+# -- the X-Compatibility-Date pin (plan.md §17 D-21) ------------------------
+#
+# Salvaged from branch `claude/phase-0-gate-checklist-oucoil` (commit a7f5872),
+# which measured the failure against live ESI: a pin still in the future on
+# CCP's UTC-11 clock is answered with HTTP 400 on every route, so a bad pin is
+# not a degraded run — it is a total outage, and it must be caught offline.
+
+
+def _at(text: str) -> datetime:
+    return datetime.fromisoformat(text)
+
+
+def test_a_future_pin_fails_because_esi_rejects_it_outright():
+    check = compatibility_date_check("2026-08-25", _at("2026-08-20T12:00:00+00:00"))
+    assert not check.ok
+    assert "Newest safe pin: 2026-08-19" in check.detail
+
+
+def test_a_pin_on_todays_utc11_date_fails_even_though_esi_would_take_it():
+    """One full day of margin, so the UTC-11 rollover cannot break a live run."""
+    moment = _at("2026-08-20T12:00:00+00:00")
+    assert esi_compatibility_today(moment) == date(2026, 8, 20)
+    assert not compatibility_date_check("2026-08-20", moment).ok
+
+
+def test_the_utc11_clock_is_what_is_measured_not_utc():
+    """At 05:00 UTC it is still yesterday at CCP, and the pin must follow."""
+    moment = _at("2026-08-20T05:00:00+00:00")
+    assert esi_compatibility_today(moment) == date(2026, 8, 19)
+    # Safe under a UTC reading of the clock, rejected under the real one.
+    assert not compatibility_date_check("2026-08-19", moment).ok
+    assert compatibility_date_check("2026-08-18", moment).ok
+
+
+def test_a_fully_past_pin_passes_and_says_how_far_past():
+    check = compatibility_date_check("2026-08-17", _at("2026-08-20T12:00:00+00:00"))
+    assert check.ok
+    assert "3 day(s) past" in check.detail
+
+
+def test_a_malformed_pin_is_a_named_failure_not_a_crash():
+    check = compatibility_date_check("soon", _at("2026-08-20T12:00:00+00:00"))
+    assert not check.ok
+    assert "ISO-8601" in check.detail
+
+
+def test_the_shipped_pin_is_sendable_right_now(config):
+    """Guards the committed value itself, on the real clock."""
+    check = compatibility_date_check(config.app.compatibility_date)
+    assert check.ok, check.detail
 
 
 def test_checkpoint_truncates_the_wal(paths):

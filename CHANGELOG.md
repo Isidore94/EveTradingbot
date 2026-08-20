@@ -5,6 +5,45 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The compatibility-date guard, salvaged from the parallel Phase-0 build
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §17 D-21. `uv run pytest -q` →
+**509 passed, 7 deselected** on Windows, ruff check + format clean, selftest
+**12/12**.
+
+Branch `claude/phase-0-gate-checklist-oucoil` was a parallel Phase-0 build
+from another session, not an ancestor of this line. Before it was retired it
+measured one thing this line did not know, and that measurement is now here.
+
+### The guard
+
+- **A pinned `X-Compatibility-Date` that is still in the future on CCP's
+  UTC-11 clock is rejected on every ESI route** with a plain HTTP 400. The
+  parallel branch hit it on 2026-08-18 (commit a7f5872) and lost every request
+  until the pin was corrected. It is not a degraded run; it is a total outage
+  caused by one config value, and it is invisible offline.
+- **`timeutil.esi_compatibility_today`** is now the single place that clock is
+  computed — UTC minus eleven hours, as a date.
+- **`selftest` check 12, `compatibility date`**, fails any pin that is not at
+  least **one full day** past on that clock. ESI itself would accept a pin
+  equal to its own UTC-11 date; the extra day exists so a pin cannot clear
+  offline and then start failing mid-run as the clock rolls over. A malformed
+  pin is a named failure, never a crash. `selftest` is 11 checks → **12**.
+- **The §11 D2 decision is untouched** — pinned, never floated — and so is the
+  pinned value `2026-08-18`, which the guard measures as two days past and
+  therefore sendable.
+- The retired branch is preserved as tag **`archive/phase-0-first-light`**.
+
+### Test-gate portability (Windows)
+
+- `test_selftest_parity_check_passes_on_a_matching_file` interpolated a
+  `tmp_path` straight into a TOML basic string. On Windows that lands
+  backslashes where TOML reads escape sequences, and a `\U` inside
+  `C:\Users\...` aborts the parse — the offline gate failed on the operator's
+  own machine and nowhere else. The path is now written with `as_posix()`.
+  Same class as the preceding GL-less-machine fix: the gate has to be green
+  where it is actually run.
+
 ## 2026-08-20 — The desk: indices, operator setups, and the learning loop (third + fourth directives)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §19 and its §17 D-14…D-20 rows.

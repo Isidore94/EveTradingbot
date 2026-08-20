@@ -373,12 +373,30 @@ def _headline(census, backtest, lead_lag, paper) -> str:
             "**The question is not yet answered.** Every horizon returned UNKNOWN — the "
             "sample was too small to judge, which is not the same as a negative result."
         )
-    return (
+    # Why it failed changes what the operator would do next, so say which.
+    contexts = [
+        judgement.get("gross_context", "")
+        for judgement in ((backtest or {}).get("verdicts") or {}).values()
+        if isinstance(judgement, dict) and judgement.get("gross_context")
+    ]
+    friction = any("frictions are larger than the edge" in text for text in contexts)
+    base = (
         "**The setup class did not clear its own pre-stated bar on history.** The verdict "
         "rule was frozen before the measurement and the measurement did not meet it. That "
         "is a real answer, and it argues against spending more time here — not for "
         "loosening the rule."
     )
+    if friction:
+        return (
+            base + " **It failed on friction, not on direction**: the setup's pre-cost returns "
+            "are positive, and EVE's spreads, depth cost and sales tax are several times "
+            "larger than the edge at the notionals measured. That distinction matters — it "
+            "says the remaining question is whether any *subset* of the universe has "
+            "spreads narrow enough to leave the edge intact, not whether the read is "
+            "wrong. Answering that is a new study with its own pre-stated rule, not a "
+            "re-run of this one with the losers removed."
+        )
+    return base + edge
 
 
 def build_viability_report(

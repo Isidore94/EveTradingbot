@@ -257,3 +257,50 @@ def test_cross_region_zero_is_reported_as_valid(config, paths):
     text = render_viability(report)
     assert "valid, expected result" in text
     assert "no quote, no row" in text
+
+
+def test_a_friction_failure_is_distinguished_from_a_direction_failure(config, paths):
+    """Why the backtest failed changes what the operator would do next."""
+    report = build_viability_report(
+        config,
+        census={"generated_at": "x", "derived_floor": {}, "turnover_percentiles": {}},
+        backtest={
+            "generated_at": "x",
+            "verdicts": {
+                "10": {
+                    "verdict": "NOT PLAUSIBLE",
+                    "reason": "expectancy negative",
+                    "gross_context": "before costs +3.08% ... the frictions are larger "
+                    "than the edge.",
+                }
+            },
+            "cells": [],
+            "limitations": [],
+        },
+        reports_dir=paths.reports,
+    )
+    assert "failed on friction, not on direction" in report.headline
+    assert "new study with its own pre-stated rule" in report.headline
+    assert "not a" in report.headline and "re-run of this one" in report.headline
+
+
+def test_a_direction_failure_does_not_claim_a_friction_excuse(config, paths):
+    report = build_viability_report(
+        config,
+        census={"generated_at": "x", "derived_floor": {}, "turnover_percentiles": {}},
+        backtest={
+            "generated_at": "x",
+            "verdicts": {
+                "10": {
+                    "verdict": "NOT PLAUSIBLE",
+                    "reason": "expectancy negative",
+                    "gross_context": "before costs -1.20% ... no pre-cost edge to lose.",
+                }
+            },
+            "cells": [],
+            "limitations": [],
+        },
+        reports_dir=paths.reports,
+    )
+    assert "failed on friction" not in report.headline
+    assert "did not clear its own pre-stated bar" in report.headline

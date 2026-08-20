@@ -182,6 +182,8 @@ class CrossRegionRow:
     breakeven_move_pct: float | None
     buy_sweep_ts: str
     sell_sweep_ts: str
+    sell_side_station_share: float | None = None
+    flags: tuple[str, ...] = ()
 
     def as_dict(self) -> dict:
         return {
@@ -203,6 +205,8 @@ class CrossRegionRow:
             "breakeven_move_pct": self.breakeven_move_pct,
             "buy_sweep_ts": self.buy_sweep_ts,
             "sell_sweep_ts": self.sell_sweep_ts,
+            "sell_side_station_share": self.sell_side_station_share,
+            "flags": list(self.flags),
         }
 
 
@@ -228,6 +232,35 @@ class CrossRegionScan:
             "dropped_negative": self.dropped_negative,
             "notes": self.notes,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _Candidate:
+    """One priced hub pair, before freight. Named fields, not a 15-tuple."""
+
+    gross_edge: float
+    type_id: int
+    type_name: str | None
+    buy_region: int
+    sell_region: int
+    buy_system: str
+    sell_system: str
+    buy_price: float
+    sell_price: float
+    units: float
+    volume_m3: float
+    gross_sale: float
+    buy_sweep: str
+    sell_sweep: str
+    sell_station_share: float | None
+
+
+def _as_float(value) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result == result else None
 
 
 def _walk(row, tier_index: int) -> float | None:
@@ -277,7 +310,7 @@ def scan_cross_region(
         asks[region] = frame[frame["side"] == "sell"].set_index("type_id")
         bids[region] = frame[frame["side"] == "buy"].set_index("type_id")
 
-    candidates: list[CrossRegionRow] = []
+    candidates: list[_Candidate] = []
     for buy_region in regions:
         for sell_region in regions:
             if buy_region == sell_region:
@@ -316,51 +349,36 @@ def scan_cross_region(
                     scan.dropped_no_depth += 1
                     continue
                 candidates.append(
-                    (
-                        gross_sale - notional,
-                        int(type_id),
-                        type_row["name"] if type_row else None,
-                        buy_region,
-                        sell_region,
-                        buy_system,
-                        sell_system,
-                        buy_price,
-                        sell_price,
-                        units,
-                        volume_m3,
-                        gross_sale,
-                        str(ask_row.get("sweep_ts")),
-                        str(bid_row.get("sweep_ts")),
+                    _Candidate(
+                        gross_edge=gross_sale - notional,
+                        type_id=int(type_id),
+                        type_name=type_row["name"] if type_row else None,
+                        buy_region=buy_region,
+                        sell_region=sell_region,
+                        buy_system=buy_system,
+                        sell_system=sell_system,
+                        buy_price=buy_price,
+                        sell_price=sell_price,
+                        units=units,
+                        volume_m3=volume_m3,
+                        gross_sale=gross_sale,
+                        buy_sweep=str(ask_row.get("sweep_ts")),
+                        sell_sweep=str(bid_row.get("sweep_ts")),
+                        sell_station_share=_as_float(bid_row.get("station_volume_share")),
                     )
                 )
 
     # Quote freight only for the best candidates: each quote is a third-party
     # API call, and quoting thousands of losers would be rude and pointless.
-    candidates.sort(key=lambda item: -item[0])
+    candidates.sort(key=lambda item: -item.gross_edge)
     rows: list[CrossRegionRow] = []
     for candidate in candidates[: max_rows * 4]:
-        (
-            _gross_edge,
-            type_id,
-            type_name,
-            buy_region,
-            sell_region,
-            buy_system,
-            sell_system,
-            buy_price,
-            sell_price,
-            units,
-            volume_m3,
-            gross_sale,
-            buy_sweep,
-            sell_sweep,
-        ) = candidate
         quote = quote_fn(
             config,
             db,
-            start_system=buy_system,
-            end_system=sell_system,
-            volume_m3=volume_m3,
+            start_system=candidate.buy_system,
+            end_system=candidate.sell_system,
+            volume_m3=candidate.volume_m3,
             collateral=notional * config.freight.collateral_multiple,
             client=client,
             now=now,
@@ -369,23 +387,35 @@ def scan_cross_region(
             scan.dropped_no_freight += 1
             continue
         freight = quote.effective_price or 0.0
-        net_sale = costs.sell_proceeds(gross_sale, maker=False)
-        tax = gross_sale - net_sale
+        net_sale = costs.sell_proceeds(candidate.gross_sale, maker=False)
+        tax = candidate.gross_sale - net_sale
         net = net_sale - notional - freight
         if net <= 0:
             scan.dropped_negative += 1
             continue
+        flags: list[str] = []
+        share = candidate.sell_station_share
+        if share is not None and share < 0.9:
+            # Measured 2026-08-20 across all five hubs: every visible ASK sits in
+            # an NPC station, while bids are 9%-98% structure-resident (Amarr is
+            # 98.3%). The exposure is always on the SELL leg of a haul.
+            flags.append(
+                f"{1 - share:.0%} of the sell-side book is in player structures — "
+                "this exit needs docking rights"
+            )
+        if quote.cached:
+            flags.append("freight quote is cached and haircut for staleness")
         rows.append(
             CrossRegionRow(
-                type_id=type_id,
-                type_name=type_name,
-                buy_region=buy_region,
-                sell_region=sell_region,
+                type_id=candidate.type_id,
+                type_name=candidate.type_name,
+                buy_region=candidate.buy_region,
+                sell_region=candidate.sell_region,
                 notional_isk=notional,
-                buy_price=buy_price,
-                sell_price=sell_price,
-                units=units,
-                packaged_volume_m3=volume_m3,
+                buy_price=candidate.buy_price,
+                sell_price=candidate.sell_price,
+                units=candidate.units,
+                packaged_volume_m3=candidate.volume_m3,
                 freight_isk=freight,
                 freight_route=quote.route,
                 freight_cached=quote.cached,
@@ -393,12 +423,14 @@ def scan_cross_region(
                 net_isk=net,
                 net_pct=net / notional * 100.0,
                 breakeven_move_pct=costs.breakeven_move_pct(
-                    entry_price=buy_price,
-                    exit_price=sell_price,
-                    reference_price=(buy_price + sell_price) / 2.0,
+                    entry_price=candidate.buy_price,
+                    exit_price=candidate.sell_price,
+                    reference_price=(candidate.buy_price + candidate.sell_price) / 2.0,
                 ),
-                buy_sweep_ts=buy_sweep,
-                sell_sweep_ts=sell_sweep,
+                buy_sweep_ts=candidate.buy_sweep,
+                sell_sweep_ts=candidate.sell_sweep,
+                sell_side_station_share=share,
+                flags=tuple(flags),
             )
         )
         if len(rows) >= max_rows:
@@ -426,14 +458,15 @@ def render_cross_region(scan: CrossRegionScan) -> str:
     if not scan.rows:
         lines.append("**Nothing clears costs today.** That is a valid, expected result.")
     else:
-        lines.append("| type | route | buy | sell | m³ | freight | net ISK | net % |")
-        lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        lines.append("| type | route | buy | sell | m³ | freight | net ISK | net % | flags |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---|")
         for row in scan.rows:
             lines.append(
                 f"| {row['type_name'] or row['type_id']} | {row['freight_route']} "
                 f"| {row['buy_price']:,.2f} | {row['sell_price']:,.2f} "
                 f"| {row['packaged_volume_m3']:,.0f} | {row['freight_isk']:,.0f} "
-                f"| {row['net_isk']:,.0f} | {row['net_pct']:.2f}% |"
+                f"| {row['net_isk']:,.0f} | {row['net_pct']:.2f}% "
+                f"| {'; '.join(row.get('flags') or []) or '—'} |"
             )
     if scan.notes:
         lines.extend(["", "## Notes"])

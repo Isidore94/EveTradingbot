@@ -172,16 +172,36 @@ class SweepResult:
     pages_expected: int = 0
     pages_fetched: int = 0
     skipped_fresh: bool = False
+    not_modified: bool = False
     structure_volume_share: float | None = None
 
     @property
     def complete(self) -> bool:
         return self.pages_expected > 0 and self.pages_fetched == self.pages_expected
 
+    @property
+    def outcome(self) -> str:
+        """One word for what happened. "nothing changed" is not "we got nothing".
+
+        A 304 means the stored sweep is still current — a success. Reporting it
+        the same way as an empty or failed sweep would be exactly the kind of
+        collapsed distinction this system exists to avoid.
+        """
+        if self.not_modified:
+            return "not_modified"
+        if self.skipped_fresh:
+            return "skipped_fresh"
+        if self.complete:
+            return "complete"
+        if self.orders_seen:
+            return "partial"
+        return "empty"
+
     def as_dict(self) -> dict:
         return {
             "region_id": self.region_id,
             "sweep_ts": self.sweep_ts,
+            "outcome": self.outcome,
             "orders_seen": self.orders_seen,
             "duplicate_order_ids": self.duplicate_order_ids,
             "types": self.types,
@@ -189,6 +209,7 @@ class SweepResult:
             "pages_fetched": self.pages_fetched,
             "complete": self.complete,
             "skipped_fresh": self.skipped_fresh,
+            "not_modified": self.not_modified,
             "structure_volume_share": self.structure_volume_share,
         }
 
@@ -332,6 +353,7 @@ async def sweep_region(
             pages_expected=paged.pages_expected,
             pages_fetched=paged.pages_fetched,
             skipped_fresh=paged.first.skipped,
+            not_modified=paged.first.not_modified,
         )
     if persist_raw_to is not None:
         # The single debug escape hatch, for fixture-building only.

@@ -279,3 +279,53 @@ def test_an_unconfigured_hub_is_skipped_not_guessed(config, seeded_db):
     books = {10000002: book(10000002), 99999999: book(99999999)}
     scan = scan_cross_region(config, seeded_db, books, now=NOW, quote_fn=quoted(0))
     assert any("no hub system configured" in note for note in scan.notes)
+
+
+def test_a_structure_resident_sell_side_is_flagged(config, seeded_db):
+    """Measured across all five hubs: every ask is in an NPC station, but bids
+    are 9%-98% structure-resident. The exposure is always on the sell leg."""
+    books = {
+        10000002: book(10000002, ask_fill=100.0, bid_fill=99.0),
+        10000043: book(10000043, ask_fill=140.0, bid_fill=138.0),
+    }
+    amarr = books[10000043]
+    amarr.loc[amarr["side"] == "buy", "station_volume_share"] = 0.017  # Amarr, measured
+    scan = scan_cross_region(config, seeded_db, books, now=NOW, quote_fn=quoted(1_000_000))
+    assert scan.rows
+    row = scan.rows[0]
+    assert row["sell_side_station_share"] == pytest.approx(0.017)
+    assert any("needs docking rights" in flag for flag in row["flags"])
+    assert "98% of the sell-side book" in " ".join(row["flags"])
+
+
+def test_an_npc_station_exit_carries_no_structure_flag(config, seeded_db):
+    books = {
+        10000002: book(10000002, ask_fill=100.0, bid_fill=99.0),
+        10000043: book(10000043, ask_fill=140.0, bid_fill=138.0),
+    }
+    scan = scan_cross_region(config, seeded_db, books, now=NOW, quote_fn=quoted(1_000_000))
+    assert scan.rows
+    assert not any("docking rights" in flag for flag in scan.rows[0]["flags"])
+
+
+def test_a_cached_freight_quote_is_flagged_in_the_row(config, seeded_db):
+    def cached_quote(
+        config, db, *, start_system, end_system, volume_m3, collateral, client=None, now=None
+    ):
+        return FreightQuote(
+            route=f"{start_system}->{end_system}",
+            volume_m3=volume_m3,
+            collateral=collateral,
+            price=1_000_000,
+            quoted_at=NOW.isoformat(),
+            cached=True,
+            haircut_pct=10.0,
+        )
+
+    books = {
+        10000002: book(10000002, ask_fill=100.0, bid_fill=99.0),
+        10000043: book(10000043, ask_fill=140.0, bid_fill=138.0),
+    }
+    scan = scan_cross_region(config, seeded_db, books, now=NOW, quote_fn=cached_quote)
+    assert any("cached" in flag for flag in scan.rows[0]["flags"])
+    assert scan.rows[0]["freight_isk"] == pytest.approx(1_100_000), "haircut applied"

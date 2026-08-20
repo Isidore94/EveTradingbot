@@ -164,3 +164,65 @@ def test_book_lake_round_trips_and_keeps_the_latest_sweep(paths):
     latest = lake.latest(10000002)
     assert len(latest) == 1
     assert latest.iloc[0]["best_price"] == 6.0
+
+
+def test_a_304_is_not_modified_not_an_empty_sweep(config, db):
+    """ "Nothing changed" and "we got nothing" must never look the same.
+
+    Measured on a live daemon tick: two secondary hubs answered 304 and were
+    reported with orders_seen=0 and complete=false — indistinguishable from a
+    failed sweep.
+    """
+    import asyncio
+
+    import httpx
+
+    from evescreener.books import sweep_region
+    from evescreener.esi.client import EsiClient
+    from evescreener.store.lake import BookLake
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(
+                200,
+                json=[order(1, 34, 5.0, 1_000_000_000)],
+                headers={
+                    "expires": "Thu, 20 Aug 2026 03:00:00 GMT",
+                    "etag": 'W/"a"',
+                    "x-pages": "1",
+                },
+            )
+        return httpx.Response(304, headers={"expires": "Fri, 21 Aug 2026 03:00:00 GMT"})
+
+    client = EsiClient(
+        config,
+        db,
+        client=httpx.AsyncClient(
+            base_url=config.esi.base_url, transport=httpx.MockTransport(handler)
+        ),
+    )
+    lake = BookLake(config.paths.ensure())
+    first = asyncio.run(sweep_region(config, client, lake, 10000002))
+    assert first.outcome == "complete"
+
+    # Force the stored expiry into the past so the next call actually asks.
+    db.conn.execute("UPDATE etags SET expires_at='2020-01-01T00:00:00+00:00'")
+    second = asyncio.run(sweep_region(config, client, lake, 10000002))
+    assert second.not_modified
+    assert second.outcome == "not_modified"
+    assert not second.skipped_fresh
+    assert second.as_dict()["outcome"] == "not_modified"
+
+
+def test_sweep_outcomes_are_named_not_inferred():
+    from evescreener.books import SweepResult
+
+    assert SweepResult(1, "t", skipped_fresh=True).outcome == "skipped_fresh"
+    assert SweepResult(1, "t").outcome == "empty"
+    assert (
+        SweepResult(1, "t", orders_seen=5, pages_expected=2, pages_fetched=1).outcome == "partial"
+    )
+    assert SweepResult(1, "t", pages_expected=2, pages_fetched=2).outcome == "complete"

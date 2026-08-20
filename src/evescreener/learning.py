@@ -83,6 +83,9 @@ class SetupRecord:
     name: str
     notes: str = ""
     closed: int = 0
+    #: Closed trades that actually carry a realized R. Shrinkage uses this,
+    #: not `closed`, because a close with no R is not an outcome (§21 R6).
+    eligible: int = 0
     open_now: int = 0
     wins: int = 0
     win_rate: float | None = None
@@ -91,6 +94,9 @@ class SetupRecord:
     median_r: float | None = None
     average_net_pct: float | None = None
     expected_r: float | None = None
+    #: `expected_r` after freshness decay. This is the ranked value; the raw
+    #: blend stays visible beside it so the decay can be audited (§21 R6).
+    effective_expected_r: float | None = None
     prior_r: float | None = None
     blend_weight: float | None = None
     freshness: float | None = None
@@ -103,11 +109,16 @@ class SetupRecord:
     def known(self) -> bool:
         return self.state != UNKNOWN
 
+    def apply_freshness(self) -> None:
+        """Fold decay into the value that will be ranked (§21 R6)."""
+        self.effective_expected_r = effective_expected_r(self.expected_r, self.freshness)
+
     def as_dict(self) -> dict:
         return {
             "name": self.name,
             "notes": self.notes,
             "closed": self.closed,
+            "eligible": self.eligible,
             "open_now": self.open_now,
             "wins": self.wins,
             "win_rate": self.win_rate,
@@ -116,6 +127,7 @@ class SetupRecord:
             "median_r": self.median_r,
             "average_net_pct": self.average_net_pct,
             "expected_r": self.expected_r,
+            "effective_expected_r": self.effective_expected_r,
             "prior_r": self.prior_r,
             "blend_weight": self.blend_weight,
             "freshness": self.freshness,
@@ -236,6 +248,52 @@ def _days_since(stamp: str | None, now) -> float | None:
     if parsed is None:
         return None
     return max(0.0, (now - parsed).total_seconds() / 86400.0)
+
+
+def effective_expected_r(expected_r: float | None, freshness: float | None) -> float | None:
+    """The one expected-R contract: what is ranked is what freshness touched.
+
+    `freshness_factor` was computed, stored on the record, and then ignored by
+    the ranking — so a setup last measured a year ago sorted level with one
+    measured yesterday. Decay must reach the number that decides order, or it
+    is decoration.
+
+    It scales rather than penalises, so a **negative** expected R decays toward
+    zero rather than deeper: a stale loss is a less certain claim, not a larger
+    one. Either input missing is UNKNOWN, and UNKNOWN never reads as 1.0 (§4).
+    """
+    if expected_r is None or freshness is None:
+        return None
+    return float(expected_r) * float(freshness)
+
+
+def eligible_outcomes(rows) -> int:
+    """How many closed trades actually carry a realized R.
+
+    Shrinkage used every closed trade as its sample size while the mean R was
+    computed only over rows that have one. A setup with twenty closes and two
+    scored outcomes was therefore shrunk as though it held twenty facts, which
+    understates the prior's pull exactly where the evidence is thinnest.
+    """
+    return sum(1 for row in rows if row.get("realized_r") is not None)
+
+
+def rank_setups(records: list) -> list:
+    """Evidence-weighted order, on the freshness-adjusted value (§21 R6).
+
+    UNKNOWN still never outranks MEASURED, and a small sample is still ranked
+    on its lower bound rather than its lucky point estimate. What changed is
+    that the primary key is now the number freshness has already scaled.
+    """
+    return sorted(
+        records,
+        key=lambda record: (
+            record.state == UNKNOWN,
+            -(record.effective_expected_r if record.effective_expected_r is not None else 0.0),
+            -(record.win_rate_lower or 0.0),
+            record.name,
+        ),
+    )
 
 
 def _score(rows: list[dict]) -> tuple[int, int, float | None, float | None, float | None]:
@@ -398,23 +456,21 @@ def build_learning_report(
             record.win_rate_lower = _wilson(wins, closed)
         # The prior is 0R: an unproven setup is worth nothing until its own
         # outcomes say otherwise. Shrinkage pulls a small sample back toward it.
-        blended = blend_expected_r(0.0, mean_r, closed)
+        # Shrinkage is weighted by outcomes that HAVE an R, not by every close.
+        eligible = eligible_outcomes(rows)
+        record.eligible = eligible
+        blended = blend_expected_r(0.0, mean_r, eligible)
         record.expected_r = blended["expected_r"]
         record.prior_r = blended["prior_r"]
         record.blend_weight = blended["blend_weight"]
+        record.apply_freshness()
         record.state = "MEASURED" if closed >= MIN_SAMPLES_FOR_A_READ else UNKNOWN
         report.setups.append(record)
 
-    # Evidence-weighted: an UNKNOWN setup never outranks a measured one, and a
-    # small sample is ranked on its lower bound, not its lucky point estimate.
-    report.setups.sort(
-        key=lambda record: (
-            record.state == UNKNOWN,
-            -(record.expected_r or 0.0),
-            -(record.win_rate_lower or 0.0),
-            record.name,
-        )
-    )
+    # Evidence-weighted: an UNKNOWN setup never outranks a measured one, a
+    # small sample is ranked on its lower bound rather than its lucky point
+    # estimate, and the primary key is the value freshness has already scaled.
+    report.setups = rank_setups(report.setups)
 
     by_tag: dict[str, list[dict]] = {}
     for trade in trades:

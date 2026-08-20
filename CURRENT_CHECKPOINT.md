@@ -54,8 +54,8 @@ adjacent.
 | **R3** | Backtest price bounds, statistics and friction labels | **IMPLEMENTED + GREEN** |
 | **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
 | **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
-| **R6** | Learning freshness and eligible-sample handling | **NEXT** |
-| R7 | Desk threading, invalidation and worker lifecycle | not started |
+| **R6** | Learning freshness and eligible-sample handling | **IMPLEMENTED + GREEN** |
+| **R7** | Desk threading, invalidation and worker lifecycle | **NEXT** |
 | R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
 
 ### R1 owed live gate

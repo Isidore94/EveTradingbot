@@ -1605,7 +1605,7 @@ it is adjacent.**
 | **R3** | Backtest price bounds, statistics and friction labels | **IMPLEMENTED + GREEN** |
 | **R4** | Maker analysis and location-specific cost semantics | **IMPLEMENTED + GREEN** |
 | **R5** | Killmail lead-lag hypothesis fidelity | **IMPLEMENTED + GREEN** |
-| R6 | Learning freshness and eligible-sample handling | not started |
+| **R6** | Learning freshness and eligible-sample handling | **IMPLEMENTED + GREEN** |
 | R7 | Desk threading, invalidation and worker lifecycle | not started |
 | R8 | GUI network isolation, chart parity, regional data, stale docs | not started |
 
@@ -1833,3 +1833,35 @@ rather than over it. In summary:
 **Nothing was retrofitted.** The frozen pass rule text is asserted unchanged by
 a test, and no recorded result was regenerated — the confirmatory H2 run does
 not exist yet and is owed.
+
+### §21 R6 — Freshness must change the number that is ranked — **IMPLEMENTED + GREEN**
+
+**The defect.** `learning.py` computed `freshness_factor(days_since_last)`,
+stored it on the record, and then ranked on `expected_r`, which never saw it.
+A setup last measured a year ago sorted exactly level with one measured
+yesterday. The existing tests established only that the field *changed value* —
+which is how a decorative number survives a test suite.
+
+**One expected-R contract.** `effective_expected_r(expected_r, freshness)` is
+the single definition, and it is what `rank_setups()` orders on. The raw blend
+stays visible beside it so the decay can be audited rather than trusted. It
+**scales** rather than penalises, so a negative expected R decays toward zero
+rather than deeper: a stale loss is a less certain claim, not a larger one.
+Either input missing is UNKNOWN, and UNKNOWN never reads as 1.0.
+
+**The eligible denominator.** Shrinkage used `closed = len(rows)` — every
+closed trade — while the mean R was computed only over rows that carry a
+realized R. A setup with twenty closes and two scored outcomes was shrunk as
+though it held twenty facts, understating the prior's pull exactly where the
+evidence is thinnest. `eligible_outcomes()` counts outcomes that have an R, and
+records report `eligible` beside `closed` so a reader can see the gap.
+
+**Nothing was bought with authority.** The pre-existing invariants survive: an
+UNKNOWN setup still never outranks a MEASURED one, small samples are still
+ranked on their lower bound, and a test asserts the module still never writes
+`setups.jsonl`, promotes, or mutates a setup.
+
+**Owed live gate (§21 R6).** No setup has a backtest read or a single tagged
+closed trade, so every LEARNING row is still UNVALIDATED and every number on it
+UNKNOWN — correctly. The ranking change cannot be observed until real closed
+trades exist.

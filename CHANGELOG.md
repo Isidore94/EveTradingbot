@@ -5,6 +5,29 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Freshness must change the number that is ranked (§21 R6)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §21 R6. `uv run pytest -q` ->
+**689 passed, 7 deselected**, ruff check + format clean.
+
+- **Decay reached nothing.** `freshness_factor` was computed, stored on the
+  record, and ignored by the ranking, so a setup last measured a year ago
+  sorted level with one measured yesterday. The old tests only asserted the
+  field changed value — which is how a decorative number survives.
+  `effective_expected_r()` is now the single expected-R contract and is what
+  `rank_setups()` orders on; the raw blend stays visible beside it.
+- **Decay scales rather than penalises**, so a negative expected R moves toward
+  zero rather than deeper — a stale loss is a less certain claim, not a larger
+  one. A missing input is UNKNOWN and never reads as 1.0.
+- **Shrinkage now uses the eligible denominator.** It weighted by every closed
+  trade while the mean R came only from rows carrying a realized R, so twenty
+  closes with two scored outcomes were shrunk as twenty facts.
+  `eligible_outcomes()` counts real outcomes and records report `eligible`
+  beside `closed`.
+- **No authority was added.** UNKNOWN still never outranks MEASURED, small
+  samples are still ranked on their lower bound, and a test asserts the loop
+  still never writes `setups.jsonl`, promotes, or mutates a setup.
+
 ## 2026-08-20 — The study must test the hypothesis that was frozen (§21 R5)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §21 R5, method amendment at §14.4.

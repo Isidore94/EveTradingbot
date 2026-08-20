@@ -89,6 +89,16 @@ the ≤15k budget (§1) even with the added studies.
   fresh-anchor ambiguity flag and truncation marking.
 - `signals/setup.py` — the mechanical setup definition shared by screen and
   backtest. Tri-state gates; UNKNOWN always fails. No momentum branch exists.
+- `scoring.py` — the bridge from the vendored expected-R engine to EVE inputs.
+  Quality points come only from what this system measures, **including the net
+  edge**, so the ranked quantity is net-expected-R (§5). Realized R comes from
+  the operator's own closed paper trades; with an empty ledger the blend weight
+  is 0 and every row says "structural prior only" rather than presenting a
+  guess as a measurement.
+- `patchnotes.py` — the patch-notes watcher (§2's one surviving `market_prep`
+  idea, §9 R9's tripwire). It appends **candidates** and can never anchor. The
+  third-party feed is size-capped and any document declaring a DOCTYPE or
+  ENTITY is refused rather than parsed.
 - `vendored/` — `expected_r.py` and `indicators/`, with `VENDORED.md`.
 
 ### Costs, screen, delivery (§5, §11 D6)
@@ -139,6 +149,60 @@ the ≤15k budget (§1) even with the added studies.
 - The network smoke module carried a `pytestmark` but markers alone do not
   deselect, so live tests were running in the default gate. `addopts` now
   excludes them.
+- **The screen's ranking metric flattered wide books.** `net_edge` was
+  `expected_move_pct − breakeven_move_pct`, but those percentages are measured
+  against *different* references (the close and the bid), so subtracting them
+  understated the cost of a wide spread — the exact §9 R5 failure the metric
+  existed to prevent. On a real candidate with a 44% spread it scored +16.0%
+  and ranked first; priced multiplicatively it scores +8.6% and ranks third.
+- **`screen.py` flagged the wrong side of the structure exposure.** It warned
+  when the *ask* book was structure-resident, which is always 0%; the exposure
+  is entirely on the bid.
+- **A 304 reported identically to a failed sweep** (`orders_seen=0`,
+  `complete=false`). `SweepResult` now carries `not_modified` and a named
+  `outcome`.
+- **Per-type history 404s were only persisted at the end of a ~2h crawl**, so a
+  killed run rediscovered thousands of them. They now flush every 200.
+- **`find_instances` and `run_screen` masked the whole lake per type**, O(n×m)
+  at census scale. One `groupby` up front.
+- SQLite gained `busy_timeout`; without it a manual sweep during a crawl failed
+  instantly with "database is locked".
+- The backtest's half-split was by instance count; §13.6 says "sample
+  **period**", so it is now by date.
+- The viability report rendered an untouched paper ledger as "0 closed, 0 ISK"
+  — an absence of evidence presented as a measurement. It reads UNKNOWN now.
+
+### What the measurements said
+
+The point of the build. All recorded in `plan.md` §17.
+
+- **The universe is not what it looks like.** 19,152 Forge-active types, but
+  16,789 of them have no history at all, and the median spread across the
+  16,706 two-sided books is **98.8%**. Only ~932 types (5.6%) trade inside a 5%
+  spread — anywhere near the 3.375% tax floor.
+- **Depth is the binding constraint.** 77.1% / 55.8% / 39.6% of sell books can
+  absorb 0.25B / 1.0B / 2.5B ISK. A quarter of sell books have one order
+  holding more than half the resting volume.
+- **The structure blind spot runs the opposite way from §9 R3's worry.** Across
+  all five trade hubs, **0.0% of visible ask volume** is in player structures
+  and **8.8%–98.3% of bid volume** is (Amarr is 98.3%). What you can buy is
+  fully visible; part of what you would sell into may need docking rights.
+- **CCP does not filter outlier prints.** `high/close` reaches 1,940,777×.
+  Without TR winsorization **20.5% of tracked types would carry a risk unit
+  more than twice too large**.
+- **The backtest says NOT PLAUSIBLE at every horizon — on friction, not
+  direction.** The setup returns **+3.08% gross** over 10 days (53.7% win rate)
+  against **~16% friction at 1× haircut**. The measured round-trip haircut
+  distribution (p1 2.17%, p50 33.6%) plus 3.375% tax exceeds the 20-day gross
+  edge of 4.15% even at the **first percentile**.
+- **The destruction lead-lag effect does not survive.** ρ=0.052 at a 1-day lag
+  (p=3e-65, n=108,586) against a 0.10 threshold, and the within-day placebo
+  reproduces 61% of it. Destruction ships as an annotation only.
+- **Cross-region is the one bright spot.** Of 151,123 hub pairs, 14 clear real
+  PushX freight and tax at 0.25B; best +14.44% net. It is a snapshot, not an
+  edge — the haul takes days and the scan prices both legs simultaneously.
+- **Rate-limit discipline held.** Zero 429s and zero 420s across 16,590+
+  requests; the orders sweep used 830 of a 6,000-token self-cap.
 
 ## 2026-08-18 — Planning complete, decisions locked
 

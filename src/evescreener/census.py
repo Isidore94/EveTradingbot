@@ -62,6 +62,7 @@ class CensusResult:
     turnover_percentiles: dict = field(default_factory=dict)
     order_count_percentiles: dict = field(default_factory=dict)
     spread_percentiles: dict = field(default_factory=dict)
+    haircut_percentiles: dict = field(default_factory=dict)
     depth_coverage: dict = field(default_factory=dict)
     spoof_share: float | None = None
     structure_share: dict = field(default_factory=dict)
@@ -84,6 +85,7 @@ class CensusResult:
             "turnover_percentiles": self.turnover_percentiles,
             "order_count_percentiles": self.order_count_percentiles,
             "spread_percentiles": self.spread_percentiles,
+            "haircut_percentiles": self.haircut_percentiles,
             "depth_coverage": self.depth_coverage,
             "spoof_share": self.spoof_share,
             "structure_share": self.structure_share,
@@ -167,6 +169,26 @@ def derive_floor(grid: list[dict], *, target_turnover_share: float = 0.95) -> di
     }
 
 
+def _haircut_percentiles(book: pd.DataFrame, tiers: Sequence[float]) -> dict:
+    """Percentiles of the measured taker round-trip cost at the smallest tier."""
+    from .backtest import measure_haircuts
+
+    haircuts = measure_haircuts(book, tuple(float(value) for value in tiers))
+    if not haircuts:
+        return {}
+    smallest = float(tiers[0])
+    values = pd.Series(
+        [entry[smallest]["round_trip"] for entry in haircuts.values() if smallest in entry]
+    )
+    if values.empty:
+        return {}
+    return {
+        "tier_isk": smallest,
+        "types_measured": int(len(values)),
+        **{f"p{int(q * 100)}": round(float(values.quantile(q)) * 100.0, 4) for q in PERCENTILES},
+    }
+
+
 def _volume_weighted_structure_share(side: pd.DataFrame) -> float | None:
     """Share of one side's resting volume that sits in player structures."""
     if side.empty:
@@ -202,6 +224,11 @@ def book_statistics(book: pd.DataFrame, tiers: Sequence[float]) -> dict:
             if f"depth_fill_price_{index}" in sells.columns
         },
         "spoof_flagged_share": round(float((sells["top_order_volume_share"] > 0.5).mean()), 4),
+        # The round-trip haircut a taker actually pays at the smallest tier —
+        # half the spread in, half out, before tax. This is the number any
+        # strategy's edge has to clear, so it belongs in the opportunity map
+        # rather than inside a study.
+        "round_trip_haircut_percentiles": _haircut_percentiles(book, tiers),
         # A bid above the ask is a data-quality event, not an arbitrage: the
         # pages of one sweep are not a perfectly atomic snapshot (§0 check #2).
         "crossed_books": int((view["spread_pct"] < 0).sum()) if not view.empty else 0,
@@ -350,6 +377,7 @@ async def run_census(
         if not table.empty
         else {},
         spread_percentiles=book_stats.get("spread_percentiles", {}),
+        haircut_percentiles=book_stats.get("round_trip_haircut_percentiles", {}),
         depth_coverage=book_stats.get("depth_coverage", {}),
         spoof_share=book_stats.get("spoof_flagged_share"),
         structure_share=book_stats.get("structure_share", {}),
@@ -400,6 +428,18 @@ def render_census(result: CensusResult) -> str:
             lines.append("Spread, best ask vs best bid, by percentile:")
             for key, value in result.spread_percentiles.items():
                 lines.append(f"- {key}: {value:,.2f}%")
+        if result.haircut_percentiles:
+            lines.append("")
+            lines.append(
+                "**Round-trip taker haircut** at "
+                f"{result.haircut_percentiles.get('tier_isk', 0) / 1e9:.2f}B "
+                f"({result.haircut_percentiles.get('types_measured', 0):,} types measured) "
+                "— half the spread in, half out, BEFORE the 3.375% sales tax. "
+                "Any strategy's edge has to clear this:"
+            )
+            for key, value in result.haircut_percentiles.items():
+                if key.startswith("p"):
+                    lines.append(f"- {key}: {value:,.2f}%")
         if result.depth_coverage:
             lines.append("")
             lines.append(

@@ -189,10 +189,13 @@ def _backtest_section(payload: dict | None) -> Section:
             [
                 "",
                 "**Sensitivity at the smallest tier** (the tier that matters: a setup "
-                "needing size to work is not one to start with):",
+                "needing size to work is not one to start with). `gross %` is the "
+                "pre-cost return of the same instances, so the gap between it and "
+                "`net %` is what EVE's frictions take:",
                 "",
-                "| horizon | haircut | n | Wilson LB | breakeven WR | expectancy % |",
-                "|---:|---:|---:|---:|---:|---:|",
+                "| horizon | haircut | n | gross % | friction % | Wilson LB "
+                "| breakeven WR | net % |",
+                "|---:|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
         for cell in sensitivity:
@@ -202,7 +205,8 @@ def _backtest_section(payload: dict | None) -> Section:
 
             body.append(
                 f"| {cell['horizon_days']}d | {cell['haircut_multiple']:.0f}x "
-                f"| {cell['samples']:,} | {fmt(cell['wilson_lb'])} "
+                f"| {cell['samples']:,} | {fmt(cell.get('gross_expectancy_pct'))} "
+                f"| {fmt(cell.get('round_trip_haircut_pct'))} | {fmt(cell['wilson_lb'])} "
                 f"| {fmt(cell['breakeven_win_rate'])} | {fmt(cell['expectancy_pct'])} |"
             )
     limitations = payload.get("limitations") or []

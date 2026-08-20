@@ -51,8 +51,22 @@ roadmap, status, or handoff files.
 - **No detector/scoring change without golden fixtures first** (from Phase 2).
 - **A failed publish never destroys the last verified output.** Atomic writes;
   operator-entered watchlist names are never auto-removed.
-- **No momentum/breakout-continuation logic.** EVE supply is elastic; spikes
-  arbitrage flat. Do not re-introduce it by habit (plan.md §6).
+- **No momentum/breakout-continuation logic *in the system's own recommendation
+  engine*.** EVE supply is elastic; spikes arbitrage flat. Do not re-introduce
+  it by habit (plan.md §6). **Narrowed 2026-08-20 (§17 D-15): operator-defined
+  setups in `config/setups.jsonl` may express anything, including trend and
+  continuation.** The machinery's job is to measure them honestly, not to
+  argue with them.
+- **Membership is decided on median UNIT volume; weighting on ISK turnover**
+  (§11 D3, amended). THIN names (100–999 units/day) are carried, charted,
+  scanned and badged everywhere — and excluded from FORGE.
+- **No decision is recorded without its reasons.** An opening needs a thesis, a
+  setup tag and a like tag; a pass needs a dislike tag. No tags, no record —
+  and the refusal itself goes in the ledger (§19.4).
+- **The learning loop never edits a setup, changes a frozen formula, or
+  promotes anything.** It correlates and reports; the operator promotes.
+- **Nothing under `src/evescreener/gui/` may import an ESI client.** The desk
+  refreshes on a timer; it shows staleness rather than curing it (§19.2).
 - **No coupling to TradingBotV3.** No imports, no submodules; vendored files
   under `src/evescreener/vendored/` may diverge and are tracked in
   `VENDORED.md`.
@@ -60,19 +74,26 @@ roadmap, status, or handoff files.
 ## Tech stack (locked, plan.md §11 D1–D2)
 
 Python ≥3.12, uv-managed (`pyproject.toml` + `uv.lock`). Runtime deps:
-`httpx[http2]`, `pandas`, `pyarrow`, `numpy` — nothing else in v1. Dev:
-`pytest`, `ruff` (lint + format, no per-file exemptions ever). Config:
-`config.toml` (gitignored) mirrored by a committed `config.example.toml`;
+`httpx[http2]`, `pandas`, `pyarrow`, `numpy` — nothing else in v1. **Optional
+`gui` extra: `pyside6`** — the desk (plan.md §19.2). The core must run
+headless: `daemon`, `digest` and every CLI subcommand import without Qt, and
+`tests/test_headless.py` enforces it by walking the import graph. Dev:
+`pytest`, `ruff` (lint + format, no per-file exemptions ever), `pytest-qt`
+(GUI tests run offscreen). Config: `config.toml` (gitignored) mirrored by a
+committed `config.example.toml`, plus three committed operator-editable data
+files — `config/sectors.jsonl`, `config/setups.jsonl`, `config/reasons.jsonl`;
 `EVESCREENER_DATA_DIR` is the only env override. Storage: Parquet lake +
 SQLite `state.db` + JSONL streams under `./data/`. Entry:
 `python -m evescreener <selftest|sde|census|ingest-history|sweep-books|anchors|
-digest|backtest|killmails|cross-region|paper|report|daemon>`.
-All timestamps tz-aware UTC.
+screen|digest|backtest|killmails|cross-region|paper|watch|brief|board|scan|
+setups|reasons|learning|gui|report|daemon>`, or `launch_gui.py` for a Windows
+shortcut. All timestamps tz-aware UTC.
 
 ## Commands (gate before every commit)
 
 - `uv run pytest -q` — must be fully green; offline by default, live calls
-  only under `@pytest.mark.network`.
+  only under `@pytest.mark.network`. GUI tests run offscreen and are part of
+  the default gate.
 - `uv run ruff check . && uv run ruff format --check .` — clean.
 - Commit small and green; push after each commit.
 

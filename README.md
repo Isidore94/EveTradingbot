@@ -40,7 +40,8 @@ Then the studies and the experiment:
 uv run python -m evescreener backtest              # plan.md §13
 uv run python -m evescreener killmails --backfill 365 --study   # §14
 uv run python -m evescreener cross-region          # §15
-uv run python -m evescreener paper open --type-id 34 --thesis "..."
+uv run python -m evescreener paper open --type-id 34 --thesis "..." \
+    --setup "Dip into value, strength intact" --like clean_dip_below_value
 uv run python -m evescreener paper report          # §12.4 verdict tracker
 uv run python -m evescreener report                # §16 viability report
 ```
@@ -57,6 +58,42 @@ uv run python -m evescreener board --sort value        # the D1 strength board
 The board and the brief are observation, not opportunity: they show friction
 beside every row and never hide a type for failing to clear costs. Watchlist
 names render in every digest, and only `watch remove` — you — removes one.
+
+Your own setups, the scanner that runs them, and what they have been worth
+(plan.md §19):
+
+```bash
+uv run python -m evescreener setups                    # validated on load
+uv run python -m evescreener scan                      # every enabled setup
+uv run python -m evescreener backtest --setup "Cloud reclaim"
+uv run python -m evescreener paper pass --name "Ishtar" --dislike spread_too_wide
+uv run python -m evescreener learning                  # what earns, what bleeds
+```
+
+Setups live in `config/setups.jsonl` and are data, not code: a typed condition
+vocabulary validated loudly on load, long-only, all of it from daily
+high/low/close/volume. A setup stays **UNVALIDATED** until it has a backtest
+read or 20 tagged closed trades — that label is information, not a lock.
+
+Reasons live in `config/reasons.jsonl` and are required in both directions. An
+opening needs a thesis, a setup tag and a "why I like it" tag; a pass needs a
+"why I don't like it" tag. No tags, no record. Passes are then measured
+forward on the backtest's cost terms, so `learning` can tell you which of your
+*reasons* are predictive — in both directions.
+
+And the desk itself (plan.md §19.2):
+
+```bash
+uv sync --extra gui                    # Qt is optional; the core never needs it
+uv run python -m evescreener gui       # or double-click launch_gui.py
+```
+
+Eight pages — MARKET, CHARTS, BOARD, FOCUS, SCANNER, PAPER, LEARNING, HEALTH —
+over the local lake only. The refresh timer re-reads what is on disk and
+cannot cause a fetch before `Expires`; the desk *shows* staleness rather than
+curing it. Paper Buy is on every surface a name appears, through one prefilled
+form that calls the same ledger the CLI does, with the same refusals. There
+are no candlesticks, because there is no `open`.
 
 ```bash
 uv run python -m evescreener daemon    # every cadence in one process
@@ -87,7 +124,9 @@ Before the anchor calendar is confirmed, `anchors --list` shows what is pending
 - **Every study's hypothesis and pass rule was frozen in `plan.md` before the
   study ran** (§12.4, §13.6, §14.3), so a disappointing result cannot be argued
   away afterwards.
-- **No momentum or breakout-continuation logic.** EVE supply is player-produced
+- **No momentum or breakout-continuation logic in the system's own
+  recommendation engine** — though your own setups may express it, and the
+  machinery will measure them honestly. EVE supply is player-produced
   and elastic; spikes get arbitraged flat by industrialists. The tradeable read
   is dips below anchored value with intact demand.
 

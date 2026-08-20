@@ -486,7 +486,7 @@ Consequences the screen enforces:
 | **Level/pivot system** (`levels.py`: pivots, HV levels, clustering, touch stats, conviction) | Same, on EVE bars | **YES** | Uses only H/L/C/V. Re-tune: relvol green/red thresholds (3.0/2.0) against EVE volume distributions; ATR-fraction cluster tolerance stands. EVE-specific bonus: psychological round numbers (1M, 100M, 1B ISK) are strong player anchors — add a round-number level family, weight it via touch statistics like any other. |
 | **Expected-R scoring** (`expected_r.py`: Wilson LB, shrinkage, isotonic calibration, freshness decay) | Identical | **YES — lift** | Pure math over (setup, outcome) samples. Calibration restarts at zero: prior anchors re-seeded from the first ~60 recorded EVE decisions; freshness decay is *more* important here (patches reshape items overnight). |
 | **RVOL / volume thrust** (breakout confirmation) | participation events: `volume` and `order_count` vs own 20-day baselines | **REPURPOSED** | Survives as a *demand-event detector* (doctrine changes, patch announcements, war mobilization show up as participation spikes), feeding the catalyst/anchor layer. It does **not** survive as breakout confirmation — see below. |
-| **Momentum / breakout continuation** (D1 band-walk continuation, trend-following entries, five-day breakout flags) | — | **NO — actively misleading** | EVE supply is elastic and player-produced: a price spike is an *invitation to industrialists*, who respond within days; blueprints don't sleep and there is no float. Spikes are arbitraged flat, not continued. Chasing a breakout means buying at the top of a supply response. The screen inverts the read: strength into a value zone is distribution risk; the tradeable pattern is **dips below anchored value with intact demand** (RRS holding, participation stable, destruction support once Phase 5 lands). Breakout-continuation logic is not ported and must not be re-introduced by habit. |
+| **Momentum / breakout continuation** (D1 band-walk continuation, trend-following entries, five-day breakout flags) | — | **NO — actively misleading** | EVE supply is elastic and player-produced: a price spike is an *invitation to industrialists*, who respond within days; blueprints don't sleep and there is no float. Spikes are arbitraged flat, not continued. Chasing a breakout means buying at the top of a supply response. The screen inverts the read: strength into a value zone is distribution risk; the tradeable pattern is **dips below anchored value with intact demand** (RRS holding, participation stable, destruction support once Phase 5 lands). Breakout-continuation logic is not ported and must not be re-introduced by habit. **NARROWED 2026-08-20 (third directive; §17 D-15): this row governs the SYSTEM's recommendation engine, which stays the frozen dip-below-value class. An OPERATOR-DEFINED setup (§19.3) may express trend or continuation, and one of the shipped examples deliberately does. The elasticity argument above is a claim about EVE, and a claim is something to measure, not something to make unexpressible.** |
 | **M5 bounce stack** (BounceBot detectors, session VWAP, focus gating, strength boards) | — | **NO** | No intraday bars exist; the 5-minute cache is the same for everyone, so there is no microstructure edge to detect. Building pseudo-M5 bars from book snapshots would be modeling the cache, not the market. |
 | **Earnings-proximity blocks** (`RECENT_EARNINGS_SESSION_BLOCK=12`) | patch-proximity handling | **YES — inverted default** | Equities block *entering* near earnings (binary risk). EVE patches are published in advance with readable patch notes: the analogue is a patch-week state on affected market groups — wider risk units and an explicit "thesis must reference the patch" flag, rather than a hard block. Hard-block only the unread case: patch affects the item's group and no thesis note exists. |
 | **Shorting / short-side symmetry** (side-signed engines) | — | **NO** | No shorting, no leverage, 100% buy escrow. All side-symmetric code paths port long-only; the side dimension collapses at the contract level (keeps `side` in identity for future sell-order analytics, hardcodes `long` in v1). |
@@ -657,8 +657,12 @@ are permanent, not deferred:
 5. **No market-maker strategy layer.** The operator is a taker-entry D1 swing
    trader; 0.01-ISK order games, station-trading margin harvesting, and
    maker-queue modeling beyond the advisory exit comparison (§5) are out.
-6. **No GUI desktop application.** Discord digest + repo artifacts. The 42k-LOC
-   lesson is learned once.
+6. ~~**No GUI desktop application.** Discord digest + repo artifacts. The
+   42k-LOC lesson is learned once.~~ **REVOKED by operator directive
+   2026-08-20 (third); see §19.2 and §17 D-14.** The PySide6 desk ships. The
+   42k-LOC lesson is now enforced structurally instead of by abstention: Qt is
+   an optional dependency tier, the core must run headless, and a test walks
+   the import graph to prove it does. The desk is 2,972 LOC.
 7. **No maintenance coupling to TradingBotV3.** No imports, no submodules, no
    shared state, no upstreaming obligations; vendored files may diverge freely.
 8. **No authenticated ESI in v1.** Public endpoints only; the structure-market
@@ -679,12 +683,13 @@ mirrors the source repo's decision-record discipline, ADR-style, in one table.)
 | Decision | Value |
 |---|---|
 | Language / version | Python ≥ 3.12 |
-| Package manager | **uv** (`pyproject.toml` + `uv.lock` committed; no requirements.txt layering — there is no GUI tier to layer) |
+| Package manager | **uv** (`pyproject.toml` + `uv.lock` committed). ~~no requirements.txt layering — there is no GUI tier to layer~~ — **amended 2026-08-20 (third directive, §17 D-14): there is now a GUI tier, and it is an optional extra rather than a layer.** `uv sync --extra gui` installs it; nothing outside `src/evescreener/gui/` may import it. |
 | Package name / layout | `src/evescreener/` package; vendored files under `src/evescreener/vendored/` with `VENDORED.md` at repo root |
 | Runtime deps | `httpx[http2]`, `pandas`, `pyarrow`, `numpy` — and nothing else in v1. No ORM, no pydantic; config is stdlib `tomllib` into frozen dataclasses |
-| Dev deps | `pytest`, `ruff` (lint **and** format) |
+| Optional deps | **`gui` extra: `pyside6`** (§19.2). The daemon, the digest and every CLI subcommand must run on a headless box with no Qt installed, and `tests/test_headless.py` enforces it by walking the import graph — a stray module-scope Qt import would otherwise fail no other test |
+| Dev deps | `pytest`, `ruff` (lint **and** format), `pytest-qt` (GUI tests run offscreen under `QT_QPA_PLATFORM=offscreen`) |
 | Lint policy | ruff defaults + `I` (isort); no per-file exemptions — this repo never grows a lint-exempt monolith |
-| Entry point | `python -m evescreener <cmd>`; subcommands: `daemon`, `ingest-history`, `sweep-books`, `census`, `digest`, `selftest` |
+| Entry point | `python -m evescreener <cmd>`. Subcommands, after §17 D-5 and this build: `selftest`, `sde`, `census`, `ingest-history`, `sweep-books`, `anchors`, `screen`, `digest`, `backtest [--setup NAME]`, `killmails`, `cross-region`, `paper {open,close,pass,mark,report,real-fill}`, `watch {add,remove,list}`, `brief`, `board`, **`scan`**, **`setups`**, **`reasons`**, **`learning`**, **`gui`**, `report`, `daemon`. Additive only; nothing was removed or renamed |
 | Process model | One asyncio scheduler process (`daemon`) owning all cadences (§3.2). Individual subcommands run the same jobs once, for manual/backfill use |
 | Host | The always-on mini-PC, in its own directory and venv, fully isolated from TradingBotV3. Registered via Windows Task Scheduler at logon; the code stays OS-agnostic (no Windows-only APIs) |
 | Timezone rule | All internal timestamps tz-aware UTC. EVE time *is* UTC; the digest displays UTC only |
@@ -1135,6 +1140,13 @@ this document's prior text is recorded here with its reason.
 | D-12 | **A per-item 404 no longer trips the per-feed circuit breaker.** | The breaker treated each 404 as a feed failure and latched open permanently, turning a 1.3% catalogue gap into a total ingest outage after 2,363 of 19,152 types — and producing the false 16,789 figure above. Protection against the legacy 100-errors/minute limit moved to the error-limit guard, which yields at 25 remaining. Measured across the completed crawl: zero 429, zero 420. |
 | D-11 | **The census floor grid gained looser corners** (a no-floor row, 1M ISK, 0 and 1 order_count). | Measured 2026-08-20: the original grid's loosest corner (10M ISK / 5 orders) captured only 88.2% of median daily turnover, so §8 Phase 1's derive rule could not resolve at its 95% target. The **rule is unchanged**; only its candidate set widened downward. |
 | D-13 | **Operator workflow surfaces added**: `watch`, `brief`, `board` subcommands and the digest's watchlist section (§18). | Second operator directive 2026-08-20: "I want my TradingBotV3 moved to EVE with relevant changes" — the analytical core alone is not the daily product; the desk workflow is. Additive only, observation-only by the §18.1 rule. LOC after: **18,296** (11,575 product, 1,435 vendored, 5,286 tests) — the D-9 exception grows by 1,162 and §1's budget still stands for future work. |
+| D-14 | **§10.6's "no GUI" non-goal is REVOKED.** A full PySide6 desk ships as §19 Part 2. | Third operator directive 2026-08-20: "Build the full desktop desk modelled on TradingBotV3." §2's lesson — that the 42k-LOC Qt desk was the thing that made the source repo unmaintainable — is answered structurally rather than by abstention: Qt is an **optional dependency tier**, the core must run headless, and `tests/test_headless.py` walks the import graph to prove that `daemon`, `digest` and every CLI subcommand import without PySide6. The desk is 2,972 LOC of product against the source repo's 42,000. |
+| D-15 | **§6's "no momentum/breakout-continuation logic" row is NARROWED, not deleted.** The row still governs the **system's** recommendation engine, which stays the frozen dip-below-value class. **Operator-defined setups (§19 Part 3) may express anything, including trend and continuation.** | Third operator directive 2026-08-20: *"The machinery's job is not to argue with my setups — it is to measure them honestly and tell me which ones earn."* The elasticity argument that motivated §6 is a claim about EVE, and a claim is a thing to measure, not a thing to make unexpressible. One of the three shipped example setups is deliberately continuation-shaped so the machinery is seen measuring one. |
+| D-16 | **The membership floor changes from derived turnover to operator unit volume** (§11 D3, rewritten with the old rule left visible as superseded text). | Fourth operator directive 2026-08-20 (Amendment 1). The measured cost is recorded beside the rule: the OK tier carries **33.1%** of the region's median daily ISK turnover and THIN another **9.9%**. That ISK is real and it is given up on purpose, buying exit-ability with coverage. |
+| D-17 | **A price-pinned type is excluded from the index** — a type whose close did not move at all across the window (tolerance 1e-7, ≥5 bars). Measured: **163 pinned of 12,143**, of which **3 sit inside the OK tier**, leaving 999 index-eligible names. | Fourth directive: "NPC-price-seeded excluded". The zero-dispersion test is a **proxy** for NPC seeding, chosen because it is measurable from the bar contract alone and because it targets the property that actually matters to an index — a member that cannot move contributes no information while absorbing weight. Recorded as a proxy, not as ground truth about which items CCP seeds. |
+| D-18 | **Opening a paper position now requires a setup tag and at least one like tag**; passing requires at least one dislike tag. Both refusals are recorded in the ledger. | Fourth directive (Amendment 3). This is a **behaviour change to an existing surface**: every prior `paper open` call site had to gain the new arguments, and a trade that could previously be recorded with only a thesis can no longer be recorded at all. That is the point — a trade whose reason is not recorded is a trade the learning loop can never attribute in either direction. |
+| D-19 | **`near_level` conditions cannot be backtested and produce zero instances**, rather than being approximated or silently dropped from the setup. | The level store is built from the whole series, so evaluating "was price near a level on day 40" against a store that knows about day 300 is lookahead. Silently reducing the setup to its other conditions would score a **different setup** than the one written down, which is the specific way a backtest becomes worse than no backtest. |
+| D-20 | **The `≤15k LOC` budget is exceeded further, as authorized.** **Final: 27,399 LOC — 18,049 product (of which 2,972 is the desk), 1,435 vendored, 7,880 tests, 35 launcher.** | Third operator directive granted the desk its own ~12,000 LOC budget including its tests, on top of the count at the time (18,296). The desk plus its tests plus the launcher came to **3,477** of that 12,000. The whole third-and-fourth-directive delta is 9,103 LOC, of which 2,594 is tests. §1's budget stands for future work; this remains an authorized exception rather than a new ceiling. |
 
 ### §0 named checks — status after this build
 
@@ -1185,3 +1197,187 @@ VWAP, auto-adoption and pick staging (nothing here adopts anything: every
 watchlist entry is operator-typed), alert sounds, phone price alerts, and the
 review-learning loop. The board and the brief are pull surfaces the operator
 runs when looking; the only push channel remains the daily webhook (§11 D6).
+
+---
+
+## 19. The desk — indices, setups, and the learning loop (operator directives 2026-08-20, third and fourth)
+
+The third directive: build the desk the operator actually works at, and make
+the machinery measure **his** setups rather than argue with them. The fourth
+amended the membership rule and required that every decision — taken *and*
+passed — carry its reasons.
+
+The hard line does not move. **No order execution and no client automation,
+ever** (§10.1–.2). EVE has no order-entry API and automating the client is
+bannable. "Execute" in this build means: run the operator's setups, chart
+them, surface them, record his decision, and learn from the outcome. The paper
+ledger and real-fill recording are the execution surface, and they are the
+whole of it.
+
+### 19.1 The index layer (`src/evescreener/indices.py`)
+
+One engine (`signals/composite.py`) serves every index, so there is no second
+construction path to drift.
+
+| Index | What it is |
+|---|---|
+| **FORGE** | The market read. Members are the OK-tier, non-price-pinned types; weights are **median ISK turnover** with the §11 D3 single-name cap, chain-linked across monthly rebalances, base 1000. |
+| **FORGE-EW** | Same membership, exactly, equal weights, same chain-link schedule. |
+| **FORGE-EW − FORGE** | The **breadth** read, rendered wherever FORGE is. Positive means the average member is outrunning the turnover-weighted market. |
+| Sector indices | From the committed, operator-editable `config/sectors.jsonl`: nine seeded sectors defined by market-group subtree roots read from the live SDE. Each may set its own `min_unit_volume`. |
+
+Three things the module refuses to do:
+
+* **Weight by raw unit volume.** "Weighted by daily volume" would mean units,
+  and units make the index ~100% Tritanium — 5 billion units a day at 4 ISK.
+  Turnover is the only common denominator across twelve orders of magnitude of
+  unit price. **The unit floor decides who is IN; turnover decides how much
+  they COUNT.**
+* **Merge a thin sector.** A sector below its minimum member count renders
+  UNKNOWN with its reason and its candidate count. Folding it into a
+  neighbour would produce a number with no honest label.
+* **Substitute a scope.** `sector_for_type` returns `None` — UNKNOWN — for a
+  type it cannot resolve. It never falls back to the market index. Every RRS
+  is reported against FORGE *and* against the type's own sector, and an
+  unresolvable one says so.
+
+Golden fixtures landed **before** anything consumed the new math (§11 D5),
+including an adversarial composition-churn case: a member joining at bar 60
+priced 1,000× the rest, with dominant turnover, leaves the chain-linked level
+at exactly 1000.0 across all four rebalances. Composition churn is not an
+index move. Diagnostics — members, top weight, weight entropy, rebalances —
+render beside every index. The monthly MER cross-check is unchanged.
+
+### 19.2 The desk (`src/evescreener/gui/`, PySide6)
+
+Eight pages in the operator's priority order: **MARKET · CHARTS · BOARD ·
+FOCUS · SCANNER · PAPER · LEARNING · HEALTH.**
+
+**Qt is optional and the core proves it.** PySide6 is a `gui` extra;
+`tests/test_headless.py` walks the import graph of `src/evescreener/**` and
+fails if anything outside `gui/` can reach it, and a subprocess check asserts
+that importing the CLI never puts PySide6 into `sys.modules`. §2's lesson —
+the source repo's 42k-LOC Qt desk is what made it unmaintainable — is answered
+structurally, not by abstention. The desk is 2,972 LOC.
+
+**The refresh timer is safe by construction.** `gui/data.py` reads the Parquet
+lake, the state database and the book snapshot; it has no ESI client and no
+way to acquire one, and a test proves no module under `gui/` imports `httpx`,
+`urllib` or anything named `esi`. A UI timer may re-read local data freely;
+nothing on the desk can cause a fetch before `Expires` (§3.2). The desk
+therefore **shows** staleness rather than curing it.
+
+**No candlesticks.** The bar contract has no `open` and none is synthesized
+(§4). Price is a line with the measured high/low envelope — the honest
+substitute for a body. Drawn on top: the frozen anchored-VWAP σ ladder,
+configurable SMA/EMA overlays, the EMA cloud as a shaded two-EMA ribbon, and
+the **high-volume levels, pivots and round-ISK levels that `levels.py` has
+computed since Phase 2 and that nothing had ever drawn**. Volume and
+participation subpanes; setup markers; open paper positions with their entry,
+stop and target.
+
+**One chart window, re-pointed.** Every page emits `chart_requested`; the
+window aims the single panel. No page can open a second one.
+
+**Blanks at the bottom whichever way a column sorts** (§18.1). This required
+the table to order its own rows: Qt reverses its comparator for a descending
+sort, so any comparator that keeps blanks last ascending puts them first
+descending. Sorting is a pure view operation and never refetches.
+
+**Focus never auto-removes** (§11 D4). The only removal path is a button
+behind a confirm; a refresh, a pass or a floor change cannot reach it.
+
+The backtest NOT-PLAUSIBLE banner sits at the top of MARKET and SCANNER in the
+digest's **exact wording** — one function, because a banner phrased
+differently in two places reads as two different findings. No sounds and no
+urgency styling in v1.
+
+Launch: `python -m evescreener gui`, or `launch_gui.py` for a Windows
+shortcut.
+
+### 19.3 The operator setup engine (`src/evescreener/setups.py`, `config/setups.jsonl`)
+
+Setups are **data**, long-only, and validated loudly on load. Nine typed
+condition kinds, all from daily high/low/close/volume/order_count — nothing
+needs an `open`:
+
+`price_vs_ma` · `cloud` · `ma_cross` · `band_zone` · `dip_sigma` · `rrs` ·
+`participation` · `near_level` · `change`
+
+* **An unknown condition kind, a misspelled parameter, a bad enum or an
+  out-of-range value stops the load and names the file and line.** The failure
+  this guards against is the expensive one: a DSL that ignores what it does
+  not understand produces a setup that *looks tested* and is not.
+* **Evaluation is tri-state.** Any UNKNOWN condition sinks the setup; each
+  result carries the reason it came out as it did, so a setup that never fires
+  can be debugged rather than guessed at.
+* **A setup is UNVALIDATED** until it has a backtest read or ≥20 tagged closed
+  trades. The label is information, not a lock — it still scans, charts and
+  tags.
+
+Every setup is evaluated by the scanner, drawable on charts, taggable on paper
+trades, and runnable as `backtest --setup NAME` with the same cost realism,
+horizons and limitations statement as the built-in rule. That required a
+per-bar evaluator, pinned to the last-bar evaluator by a parametrised test
+over every condition kind. `near_level` is refused over history rather than
+approximated (§17 D-19).
+
+SMA/EMA/cloud were new indicator code and got golden fixtures first (§11 D5),
+including the seeding decision: an EMA is seeded on the **SMA of its first
+`length` bars**, not on bar 1 as `pandas.ewm(adjust=True)` does, so "price
+above the rising 21 EMA" cannot fire on bar 2.
+
+Three example setups ship, all marked `"example": true`. Nothing shipped is
+passed off as something shown to earn.
+
+### 19.4 Qualified reasons and the learning loop (`config/reasons.jsonl`, `src/evescreener/learning.py`)
+
+**Both directions of a decision are recorded with the same rigour.** An
+opening requires a thesis, a setup tag and at least one *like* tag. A pass
+(`not_today` / `bad_signal`) requires at least one *dislike* tag. **No tags,
+no record** — and the refusal itself is written to the ledger, because a
+decision the operator started and did not qualify is information too. A typo'd
+tag is a loud error, not a dropped one: a decision recorded with a misspelled
+reason is a reason that can never be measured.
+
+`not_today` clears a name from today's queue only. It **never** touches Focus.
+
+Per setup and per tag, calibrated through the vendored `expected_r` engine:
+sample count, win rate with a **Wilson lower bound**, average and median net R,
+expected R by **shrinkage toward a zero prior**, and freshness decay. Ranking
+is evidence-weighted, so 3-for-3 cannot outrank 40-for-70, and every UNKNOWN
+sorts below every measured setup. Below **20** closed trades — the same
+threshold §12.4 draws — everything reads UNKNOWN, which is a statement about
+the sample and not about the setups.
+
+**Regret tracking.** Every recorded pass is measured forward on the backtest's
+horizons with the backtest's cost realism: a pass is "right" only when the
+avoided trade would have lost money net of entry haircut, exit haircut **and**
+sales tax. Judging passes on gross moves would flatter every pass in a market
+whose median spread is 98.8% — and flatter it in the wrong direction, since
+the names that look best gross are usually the widest. A pass whose window has
+not elapsed is pending; a pass on a type with no measurable haircut is
+UNKNOWN, never scored as a good call.
+
+The digest may name a best and worst setup, but only once the ledger has 20
+closed trades.
+
+**What the learning loop never does:** silently edit a setup definition,
+change a frozen formula, or promote, demote or disable anything. It correlates
+and reports; the operator promotes. A system that quietly retunes itself on 14
+samples of its own output has a backtest that means nothing, because the thing
+measured is no longer the thing running.
+
+### 19.5 What is owed before any of this is trusted
+
+The §17 checklist still stands in full, and this build adds to it rather than
+replacing it. Everything in §19 is **IMPLEMENTED and GREEN offline**; nothing
+here is LIVE_VALIDATED. In particular:
+
+* FORGE and FORGE-EW have never been eyeballed against Adam4EVE or the MER.
+* The sector membership has never been skimmed by a human for obvious
+  misfiling.
+* No setup has a backtest read or a single tagged closed trade, so **every
+  setup on the LEARNING page is UNVALIDATED and every number on it is
+  UNKNOWN** — correctly.
+* The regret-tracking arithmetic is tested against synthetic ledgers only.

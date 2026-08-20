@@ -5,9 +5,11 @@ verification stamp. `plan.md` owns the roadmap; `CHANGELOG.md` owns history.
 
 ## Active item
 
-**The consolidated live-validation gate** (plan.md §17 D-1). The v1 system is
-**IMPLEMENTED + GREEN**. Nothing is `LIVE_VALIDATED`, and nothing may be
-promoted to real ISK until the checklist below is worked through.
+**The consolidated live-validation gate** (plan.md §17 D-1), now covering the
+desk and the operator setup engine as well (plan.md §19, checklist section I).
+Everything is **IMPLEMENTED + GREEN**. Nothing is `LIVE_VALIDATED`, and
+nothing may be promoted to real ISK until the checklist below is worked
+through.
 
 **The system already has an answer to the question it was built for, and it is
 a negative one.** Measured on the full lake — 3,116,848 bars, 2,654 tracked
@@ -36,7 +38,16 @@ evidence.
 
 ## Verification baseline (2026-08-20)
 
-- **Later the same day — operator workflow port (plan.md §18, §17 D-13):**
+- **Latest — the desk, indices, setups and the learning loop (plan.md §19,
+  §17 D-14…D-20):** `uv run pytest -q` → **509 passed, 7 deselected**, ruff
+  check + format clean, `python -m evescreener selftest` → **11/11**. The desk
+  was opened against the real data directory: all eight pages rendered on
+  2,001 tracked types, with a 223-minute-old book correctly shown as STALE and
+  every friction column correctly UNKNOWN because of it. LOC now **27,399**
+  (18,049 product / 1,435 vendored / 7,880 tests / 35 launcher); the desk plus
+  its tests plus the launcher is **3,477** of the 12,000 the third directive
+  authorized for it.
+- **Earlier the same day — operator workflow port (plan.md §18, §17 D-13):**
   `watch`/`brief`/`board` and the digest watchlist section landed;
   `uv run pytest -q` → **358 passed, 7 deselected**, ruff check + format
   clean, selftest 7/7. LOC now 18,296 (11,575 product / 1,435 vendored /
@@ -49,9 +60,13 @@ evidence.
   one real day of EVE Ref killmails, and a live PushX quote.
 - `uv run ruff check .` → clean. `uv run ruff format --check .` → clean.
 - `python -m evescreener selftest` → 7/7 checks passed.
-- **17,134 LOC** (10,751 product + 1,435 vendored + 4,948 tests) — 2,134 over
-  §1's budget, authorized by operator directive 2026-08-20 and recorded in
-  §17 D-9.
+- **17,134 LOC** at the v1 build (10,751 product + 1,435 vendored + 4,948
+  tests) — superseded by the count above; the budget exception is recorded in
+  §17 D-9 and D-20.
+- **Environment note for a Linux box only:** PySide6 needs system libraries
+  that a bare container lacks (`libegl1 libgl1 libxkbcommon0 libdbus-1-3
+  libfontconfig1`, after `apt-get update`). The operator's Windows machine
+  needs none of this — `uv sync --extra gui` is the whole install there.
 
 ## The consolidated live-validation checklist
 
@@ -177,6 +192,48 @@ something:
 - [ ] **Accept that `FALSIFIED` is a real possible outcome.** The rule was
       frozen before the first trade precisely so that a negative answer cannot
       be argued away afterwards. Given the backtest, it is the likely one.
+
+### I. The desk and the operator setups (plan.md §19) — NEW
+
+Everything in §19 is IMPLEMENTED and GREEN offline. Nothing in it is
+LIVE_VALIDATED, and the LEARNING page is correctly showing UNKNOWN for
+everything because there is not one tagged closed trade yet.
+
+- [ ] **Open the desk on the real data directory.** `uv sync --extra gui`,
+      then `python -m evescreener gui` (or double-click `launch_gui.py`). Walk
+      all eight pages. The thing to look for is not "does it render" — it did
+      here — but whether any number on it disagrees with the same number from
+      the CLI (`board`, `brief`, `scan`, `paper report`, `learning`). They read
+      the same code, so a disagreement is a real bug.
+- [ ] **Eyeball FORGE against Adam4EVE or the MER.** The index has never been
+      compared to an outside source. It does not need to match — different
+      membership, different weighting — but it must not disagree in *shape*.
+      If FORGE rises through a month the MER shows falling, something is wrong
+      with membership or with the chain-link, and the diagnostics beside the
+      chart (members, top weight, entropy) are where to start.
+- [ ] **Skim the sector membership.** Open each sector on MARKET and check the
+      member count and top weight look like the sector's name. A sector is a
+      subtree of market groups read from the SDE; a plausible failure is a
+      root that pulls in far more than intended. `config/sectors.jsonl` is
+      yours to edit — that is what it is for.
+- [ ] **Check the THIN band by hand.** Pick three THIN names off the board and
+      look at them in-game. The claim is "100–999 units a day — you may not
+      get out of this at size". If that reads wrong for EVE, the floor in
+      `config.toml` is one number and §11 D3 records what the old one was.
+- [ ] **Define one setup end to end.** Write it in `config/setups.jsonl`, run
+      `setups` to see it validate, `scan --setup "<name>"` to see it fire (or
+      honestly not), chart a hit, `paper` buy it with a setup tag and a like
+      tag, close it, and confirm it appears on LEARNING. **That single loop is
+      the acceptance test for the whole of §19** — everything else in this
+      section is inspection.
+- [ ] **Pass on something, deliberately.** Use "not today" with a dislike tag
+      on a name you would genuinely skip. In 5, 10 and 20 days the LEARNING
+      page will tell you whether that reason was a good one. This half of the
+      record is the half nobody keeps, and it is the half that is cheap.
+- [ ] **Run `backtest --setup NAME`** for the setup you defined. Note that a
+      setup containing a `near_level` condition will correctly produce **zero**
+      instances and say why — that is not a bug, it is the refusal to
+      backtest a condition that would need lookahead.
 
 ## Notes for the next session
 

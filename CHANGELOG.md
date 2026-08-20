@@ -5,6 +5,141 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — The desk: indices, operator setups, and the learning loop (third + fourth directives)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §19 and its §17 D-14…D-20 rows.
+**509 offline tests green** (151 new, including 31 GUI tests run offscreen),
+ruff clean, selftest **11/11**. LOC: **27,399** — 18,049 product (2,972 of it
+the desk), 1,435 vendored, 7,880 tests, 35 launcher.
+
+The hard line did not move: **no order execution, no client automation**. The
+paper ledger and real-fill recording remain the whole execution surface.
+
+### The index layer — `indices.py`, `config/sectors.jsonl`
+
+- **One index engine.** `signals/composite.py` gained turnover/equal weighting,
+  explicit membership and a ticker, and now serves FORGE, FORGE-EW and every
+  sector index — no second construction path to drift.
+- **FORGE** is turnover-weighted, chain-linked, base 1000, OK-tier members
+  only. **Weighting is ISK turnover (units × price), never raw units** — raw
+  units would make the index ~100% Tritanium. **FORGE-EW** inherits FORGE's
+  membership exactly; `FORGE-EW − FORGE` is the breadth read and renders
+  wherever FORGE does.
+- **Nine seeded sectors** with real market-group subtree roots read from the
+  live SDE, each able to set its own unit floor. A sector under its minimum
+  member count renders **UNKNOWN with its reason**, never merged into a
+  neighbour. `sector_for_type` returns None rather than falling back to the
+  market index, so an unresolvable RRS scope is UNKNOWN.
+- **Golden fixtures first** (§11 D5), including an adversarial churn case: a
+  member joining at bar 60 priced 1,000× the rest, with dominant turnover,
+  leaves the level at exactly 1000.0 across all four rebalances.
+
+### Membership and trading floors (Amendment 1)
+
+- The gate is **median 30-day UNIT volume**; turnover stays the weighting
+  input. Three tiers: **OK** (≥1,000/day), **THIN** (100–999/day — carried,
+  charted, scanned, badged on the board and the brief, excluded from FORGE),
+  **below** (lookup only).
+- **Price-pinned types are excluded from the index**: a close that did not move
+  at all across the window is held by an NPC vendor, and a flat line absorbs
+  index weight while reporting nothing. Still tradeable, still chartable.
+- Rebuilt against the full lake and recorded in `plan.md` §11 D3 with the old
+  derived floor left visible as superseded text: **OK 1,002 · THIN 999 ·
+  below 17,151**, tradeable universe **2,001**, index-eligible **999** after
+  3 pinned names came out; added 1,418, dropped 2,071.
+- The cost is recorded beside the rule: the OK tier carries **33.1%** of the
+  region's median daily ISK turnover, THIN another 9.9%. That ISK is given up
+  on purpose, buying exit-ability with coverage.
+- `state.db` gained an additive column migration (schema v2) — it holds the
+  paper ledger and the watchlist, so it is migrated, never rebuilt.
+
+### The operator setup engine — `setups.py`, `config/setups.jsonl`
+
+- Nine typed condition kinds, all from daily H/L/C/V/order_count. Long-only.
+  Validated loudly on load: an unknown kind, a misspelled parameter, a bad
+  enum or an out-of-range value **stops the load and names the file and line**.
+- Evaluation is tri-state; any UNKNOWN sinks the setup, and every result
+  carries the reason it came out as it did.
+- `backtest --setup NAME` measures an operator setup on the built-in rule's
+  cost realism, horizons and limitations statement. The per-bar evaluator this
+  needed is pinned to the last-bar evaluator by a parametrised test over every
+  condition kind.
+- `near_level` is **refused over history** rather than approximated: the level
+  store is built from the whole series, so evaluating it per-bar is lookahead.
+  The setup produces zero instances and the study says why.
+- SMA/EMA/`ema_cloud`/`cross_within` are new indicator code and got golden
+  fixtures first. An EMA is seeded on the SMA of its first `length` bars, not
+  on bar 1, so "above the rising 21 EMA" cannot fire on bar 2.
+- Three example setups ship, all marked `"example": true`.
+
+### The scanner — `scanner.py`, `scan` / `setups` CLI
+
+Built-in rule plus every enabled operator setup, grouped, with **honest zero
+per setup next to its examined count**, UNKNOWN counted separately from
+rejection, friction and book age on every hit, and the THIN badge. The
+backtest banner is now one function in `backtest.py`, used verbatim by the
+digest, MARKET and SCANNER.
+
+### Qualified reasons — `reasons.py`, `config/reasons.jsonl`
+
+- An opening requires a thesis, a setup tag and **at least one like tag**; a
+  pass (`not_today` / `bad_signal`) requires **at least one dislike tag**. No
+  tags, no record — and the refusal itself lands in the ledger.
+- A typo'd tag is a loud error, not a dropped one.
+- `not_today` clears today's queue only and **never** touches Focus.
+- New CLI: `paper pass`, `reasons`. **Breaking:** every `paper open` call site
+  now requires `--setup` and `--like`.
+
+### The learning loop — `learning.py`, `learning` CLI
+
+- Per setup and per tag: sample count, win rate with **Wilson lower bound**,
+  average and median net R, expected R by shrinkage toward a **zero prior**,
+  freshness decay — through the vendored `expected_r` engine.
+- Ranking is evidence-weighted: 3-for-3 cannot outrank 40-for-70, and every
+  UNKNOWN sorts below every measured setup. Below 20 closed trades everything
+  reads UNKNOWN.
+- **Regret tracking**: every recorded pass is measured forward on the
+  backtest's horizons and cost realism. A pass is "right" only when the
+  avoided trade would have lost money net of both haircuts and sales tax.
+  Pending windows are pending; unpriceable passes are UNKNOWN.
+- The digest may name a best and worst setup, gated at 20 closed trades.
+- It never edits a setup, changes a frozen formula, or promotes anything.
+
+### The desk — `src/evescreener/gui/`, `gui` CLI, `launch_gui.py`
+
+- Eight pages: **MARKET · CHARTS · BOARD · FOCUS · SCANNER · PAPER ·
+  LEARNING · HEALTH**.
+- **Qt is optional and proven so**: `tests/test_headless.py` walks the import
+  graph and a subprocess check asserts the CLI never puts PySide6 in
+  `sys.modules`. §10.6's no-GUI non-goal is revoked (§17 D-14); §2's 42k-LOC
+  lesson is now enforced structurally. The desk is 2,972 LOC.
+- **The refresh timer is safe by construction**: `gui/data.py` has no ESI
+  client, and a test proves nothing under `gui/` imports `httpx`, `urllib` or
+  anything named `esi`. The desk shows staleness rather than curing it.
+- **No candlesticks** — the bar contract has no `open`. Price is a line with
+  the measured high/low envelope, over the frozen AVWAP σ ladder, SMA/EMA
+  overlays, a shaded EMA-cloud ribbon, and the **HV levels, pivots and
+  round-ISK levels `levels.py` has computed since Phase 2 and nothing had ever
+  drawn**. Volume and participation subpanes, setup markers, open positions.
+- **One chart window that re-points**, never a stack.
+- **Blanks at the bottom whichever way a column sorts** — the table orders its
+  own rows, because Qt's comparator reverses under a descending sort. Sorting
+  never refetches.
+- **Focus never auto-removes**; the only path is a button behind a confirm.
+- **Paper Buy on every surface** through one prefilled form (live ask walk with
+  book age, ATR stop, anchored-value target, setup tag from whichever setup
+  fired) calling the same `PaperLedger` methods the CLI calls — a stale-book
+  refusal renders inline *and* is recorded. A prefill that could not be
+  computed is left empty with its reason.
+- Verified on the live data directory: all eight pages open against 2,001
+  tracked types with a 223-minute-old book correctly rendered as STALE.
+
+### Config
+
+New `[gui]` section (refresh, chart bars, SMA/EMA lengths, cloud lengths,
+overlay toggles) and two new `[universe]` keys. `selftest` grew from 7 checks
+to **11**: membership floors, sector map, setups, reason vocabulary.
+
 ## 2026-08-20 — Operator workflow port: watch, brief, board (second directive)
 
 **Status: IMPLEMENTED + GREEN.** The desk surfaces the operator lives in on

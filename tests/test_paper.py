@@ -406,3 +406,36 @@ def test_a_nonsense_actual_price_is_refused(ledger):
         ledger.close_position(
             position_id=opened["position_id"], book=book(), now=NOW, actual_price=0.0
         )
+
+
+def test_the_report_says_how_the_exits_were_priced(ledger):
+    """Half the exits priced by the operator is a different tally from none."""
+    for index in range(2):
+        moment = NOW + timedelta(days=index)
+        opened = ledger.open_position(
+            type_id=34 + index,
+            type_name=f"T{index}",
+            notional_isk=TIER,
+            book=book(type_id=34 + index, sweep=moment),
+            thesis="t",
+            now=moment,
+        )
+        ledger.close_position(
+            position_id=opened["position_id"],
+            book=book(type_id=34 + index, sweep=moment, bid_fill=120.0),
+            now=moment,
+            actual_price=125.0 if index == 0 else None,
+        )
+    report = ledger.report(now=NOW + timedelta(days=3))
+    assert report.priced_from == {"operator_actual_fill": 1, "book_walk": 1}
+    assert "1x operator_actual_fill" in render_report(report)
+
+
+def test_an_all_book_priced_tally_needs_no_note(ledger):
+    opened = ledger.open_position(
+        type_id=34, type_name="X", notional_isk=TIER, book=book(), thesis="t", now=NOW
+    )
+    ledger.close_position(position_id=opened["position_id"], book=book(), now=NOW)
+    report = ledger.report(now=NOW)
+    assert report.priced_from == {"book_walk": 1}
+    assert "Exits priced from" not in render_report(report)

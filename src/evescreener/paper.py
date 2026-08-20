@@ -127,6 +127,7 @@ class PaperReport:
     verdict: dict = field(default_factory=dict)
     fill_accuracy: dict = field(default_factory=dict)
     self_impact_flags: int = 0
+    priced_from: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -144,6 +145,7 @@ class PaperReport:
             "verdict": self.verdict,
             "fill_accuracy": self.fill_accuracy,
             "self_impact_flags": self.self_impact_flags,
+            "priced_from": self.priced_from,
         }
 
 
@@ -525,6 +527,11 @@ class PaperLedger:
                 1 for position in positions.values() if position.get("self_impact")
             ),
         )
+        # A tally where half the exits were priced by the operator means
+        # something different from one where every exit came off a live book.
+        for record in closed:
+            key = str(record.get("priced_from") or "book_walk")
+            report.priced_from[key] = report.priced_from.get(key, 0) + 1
         real_fills = [record for record in self.records() if record.get("event") == "real_fill"]
         if real_fills:
             within = [record for record in real_fills if record.get("within_tolerance") is True]
@@ -687,6 +694,11 @@ def render_report(report: PaperReport) -> str:
                 if report.breakeven_win_rate is not None
                 else ", breakeven UNKNOWN)"
             )
+        )
+    if report.priced_from and set(report.priced_from) != {"book_walk"}:
+        lines.append(
+            "- Exits priced from: "
+            + ", ".join(f"{count}x {kind}" for kind, count in sorted(report.priced_from.items()))
         )
     if report.r_distribution:
         distribution = report.r_distribution

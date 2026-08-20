@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from evescreener.cli import HANDLERS, build_parser, main
@@ -204,3 +206,42 @@ def test_an_unresolvable_name_is_a_loud_error_not_a_guess(tmp_path, monkeypatch,
     )
     assert code == 2
     assert "no type named 'Rifter Mk III'" in capsys.readouterr().err
+
+
+# -- console encoding (Windows) ---------------------------------------------
+
+
+def test_the_cli_forces_utf8_because_a_windows_console_defaults_to_cp1252(monkeypatch):
+    """A legacy codepage must not be able to kill a finished command.
+
+    `backtest` on the operator's desk computed 125,254 setup instances, wrote
+    both report files, and then raised UnicodeEncodeError printing them,
+    because cp1252 has no mapping for `→`. Every renderer here emits
+    UTF-8; the entry point states that instead of inheriting the locale.
+    """
+    import io
+
+    from evescreener.cli import _force_utf8_console
+
+    legacy = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", legacy)
+    with pytest.raises(UnicodeEncodeError):
+        legacy.write("gross → net")
+        legacy.flush()
+
+    _force_utf8_console()
+    assert sys.stdout.encoding.lower().replace("-", "") == "utf8"
+    sys.stdout.write("gross → net")  # the character that killed the command
+    sys.stdout.flush()
+
+
+def test_forcing_utf8_tolerates_a_stream_that_cannot_reconfigure(monkeypatch):
+    """pytest's capture object has no `reconfigure`; that is not an error."""
+    from evescreener.cli import _force_utf8_console
+
+    class Bare:
+        pass
+
+    monkeypatch.setattr(sys, "stdout", Bare())
+    monkeypatch.setattr(sys, "stderr", Bare())
+    _force_utf8_console()

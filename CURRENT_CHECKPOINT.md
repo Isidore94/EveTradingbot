@@ -94,14 +94,18 @@ schedules anything under `C:\Users\Aaron\TradingBotV3` or `C:\TradingBotData`.
 | `sde` | Build **3475087** — 52,863 types, 2,106 market groups, 8,490 systems. |
 | `census` | **RUNNING** at the 150 req/min self-cap, ~2h10m expected. Notably it is already past **2,363** history requests — the exact point where the pre-D-12 circuit breaker latched open — with `history_missing` still empty, so the D-12 fix holds against live ESI rather than only against fixtures. |
 | `anchors` | Run. 8 posts in the feed, 1 new candidate. **See the duplicate below.** |
-| `sweep-books`, `ingest-history`, `digest --dry-run` | **NOT RUN** — deliberately sequenced after the census so two processes never hold independent self-cap state against one IP. |
+| `census` result | **COMPLETE, 2h07m.** 19,150 active types · 18,946 fetched · **201** no-history 404s · 3 failed · **4,052,335 bars** across 17,638 types. Zero 429, zero 420, no breaker trip. Membership: OK **1,633** (9 price-pinned), THIN **1,314**, below floor 16,203 → tradeable universe **2,947**. |
+| `sweep-books` | **COMPLETE.** 413/413 pages, 412,972 orders, 19,149 types, **0 duplicate `order_id`s**, structure volume share 14.0%. |
+| `ingest-history` | **2,947 requested, 2,947 skipped-fresh, 0 fetched.** The never-fetch-before-expiry rule doing exactly its job on a lake an hour old. |
+| `backtest` | **COMPLETE. NOT PLAUSIBLE at 5, 10 and 20 days**, reproduced independently on this machine's own lake: 2,947 types, **125,254** instances, friction 61.9–62.2% against gross edges of the same order. The banner is restored on MARKET and SCANNER. |
+| `digest --dry-run` | **COMPLETE.** Banner present, honest zero ("Nothing clears costs today"), and all 50 watchlist names render — PLEX correctly saying it has no bars, which is §17's known Forge-cannot-price-PLEX finding showing up on its own. |
 | `backtest` | **NOT RUN on this machine, and it must be.** `data/` is gitignored, so the previous build's `reports/backtest-*.json` did not come with the clone, and `verdict_banner` returns an **empty string** when no stored verdict exists. Until `backtest` runs here, MARKET and SCANNER show **no NOT-PLAUSIBLE banner at all** — the system's own headline finding is invisible on the desk. Run it after `ingest-history`; it reads the lake and costs no ESI traffic. |
 | Killmail backfill | **SKIPPED** by operator decision (1.3 GB, and §14's lead-lag already returned negative). |
 | The desk | Constructed offscreen against the **real** data directory: all eight pages built, `window.refresh()` fed them one local read, all eight selected without error. `book_age_minutes` is `None` and the book renders **STALE**, which is correct with no sweep yet. This is a smoke test of the Qt stack on this machine, **not** checklist I — that is still the operator's to walk. |
 | Desktop shortcut | `EVE Screener Desk.lnk` → `.venv\Scripts\pythonw.exe launch_gui.py`, working dir the repo. |
 | Daemon task | Registered as **`\EveScreener daemon`**, currently **Disabled**. Logon trigger for this operator, `PT2M` delay, action `uv.exe run python -m evescreener daemon` in the repo directory, `MultipleInstancesPolicy=IgnoreNew`, no execution time limit. **Enable it once the bootstrap finishes** — while the census runs, a logon would start a second independent ESI consumer against one IP. Distinct from all three TradingBotV3 tasks in name, executable and working directory. |
 
-### Two defects found during deployment
+### Defects found during deployment
 
 #### 1. The §11 D4 seed watchlist never reaches a fresh install
 
@@ -144,7 +148,71 @@ deliberately `watch remove`d would come back, which is the never-auto-removed
 rule failing in the other direction. A one-shot seed on an empty watchlist is
 probably the right shape, but that is a call to make deliberately.
 
-#### 2. The anchor watcher can double-count one event
+#### 2. A legacy console codepage could kill a finished command — FIXED
+
+`backtest` computed 125,254 instances, wrote **both** report files, and then
+died on `print(render_backtest(result))` with `UnicodeEncodeError`: this
+console is **cp1252** and the report contains `→`. Every renderer in the
+package emits UTF-8, so `cli.main` now calls `_force_utf8_console()` before
+anything else. The same crash was waiting in `digest`, `board`, `brief` and
+`learning`, which all emit `→`, `σ` or `≥`.
+
+Note what saved the run: `write_backtest` happens **before** the `print`, so
+the reports survived the crash. That ordering is the failed-publish invariant
+earning its keep by accident.
+
+#### 3. The anchor watcher can double-count one event
+
+### 3. FORGE is broken, and it takes RRS down with it — BLOCKING
+
+**Found by the first digest against real data.** Every RRS in the watchlist
+section printed between **−1474.8 and −1487.3**: a spread of 12 riding on a
+constant offset of about −1479. That constant is the reference term.
+
+`real_relative_strength` is `Δsym/ATR_sym − power_index`, where
+`power_index = Δref/ATR_ref` is measured on the FORGE composite. Measured
+here:
+
+* index 20-bar move **+67,141**, index ATR(20) **45.4** → **power_index = 1,478**;
+* the index level itself has run **1,000 → 69,243** (69×) since 2025-07-01;
+* median daily index move is **0.029%**, but the series contains
+  **+1,661% on 2026-08-02** (2,126 → 37,456), **+94% on 2026-05-17**, and
+  **+57% on 2026-08-18**.
+
+A turnover-weighted index of 100 capped members does not move 1,661% in a
+day. Those jumps are **composition artifacts leaking into the level** — the
+chain-link is not neutralising a basket change. §19.1's golden fixture asserts
+exactly this cannot happen ("a member joining at bar 60 priced 1,000× the
+rest leaves the level at exactly 1000.0 across all four rebalances"), and it
+passes; real data reaches the failure by some path the fixture does not model.
+
+Contributing, and worth checking first: the composite frame carries
+**`high == low == close` on every bar**. An index has no intraday range, so
+its "true range" collapses to |Δclose| and ATR(20) measures drift rather than
+range. That makes `power_index` structurally large even before the level bug;
+upstream this term is computed against SPY, which has a real range.
+
+**Consequences, stated plainly:**
+
+* **FORGE, FORGE-EW and every sector index are wrong** — §19.1 deliberately
+  routes them all through one engine, so there is no second path that escaped.
+  The desk's MARKET page is wrong.
+* **Every RRS the system prints is meaningless** — digest, `board`, `brief`,
+  and the desk columns — because a per-day constant of ~−1,479 swamps the
+  per-type signal.
+* **RRS is one of the four gates** in the built-in setup, so `screen`, `scan`
+  and the digest's candidate selection are affected.
+* **The NOT PLAUSIBLE verdict is NOT affected.** It rests on measured
+  round-trip friction (61.9% against a gross edge of the same order), which
+  comes from the live book and never touches RRS. The headline answer stands.
+
+**Not fixed here, deliberately.** This is the frozen-formula and
+detector/scoring surface, where the standing rule is golden fixtures first and
+operator sign-off with them. What it needs is a fixture that reproduces the
+2026-08-02 rebalance from real bars, *then* the fix.
+
+This is gate I's "eyeball FORGE against Adam4EVE — it must not disagree in
+**shape**" item, answered before it was walked. It disagrees in shape.
 
 ## The consolidated live-validation checklist
 

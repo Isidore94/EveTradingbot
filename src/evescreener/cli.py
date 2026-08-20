@@ -1137,7 +1137,28 @@ HANDLERS = {
 }
 
 
+def _force_utf8_console() -> None:
+    """Render UTF-8 regardless of the console's legacy codepage.
+
+    Windows consoles still default to an ANSI codepage — cp1252 on the
+    operator's desk — and this package renders arrows, sigmas and box rules
+    into ordinary reports. `backtest` computed its whole result, wrote both
+    files, and then died on `print(render_backtest(result))` because a single
+    `→` has no cp1252 mapping. The output is UTF-8; say so rather than
+    trusting the locale to guess it.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # pytest capture, pipes to non-text sinks
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):  # pragma: no cover - exotic streams
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_console()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

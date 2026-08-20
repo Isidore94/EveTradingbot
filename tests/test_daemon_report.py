@@ -304,3 +304,45 @@ def test_a_direction_failure_does_not_claim_a_friction_excuse(config, paths):
     )
     assert "failed on friction" not in report.headline
     assert "did not clear its own pre-stated bar" in report.headline
+
+
+def test_an_untouched_ledger_reads_as_not_started_not_as_a_zero_result(config, paths):
+    """A ledger with nothing in it has not measured anything.
+
+    Rendering "0 closed trades, 0 ISK" would present an absence of evidence as
+    a measurement; the section says the experiment has not started instead.
+    """
+    report = build_viability_report(
+        config,
+        paper={
+            "generated_at": "x",
+            "refused": 0,
+            "closed_count": 0,
+            "open_positions": [],
+            "cumulative_net_isk": 0.0,
+            "verdict": {"verdict": "TOO_EARLY", "detail": "d", "rule": "r"},
+        },
+        reports_dir=paths.reports,
+    )
+    paper_section = report.sections[-1]
+    assert paper_section.unknown_reason is not None
+    assert "has not started" in paper_section.unknown_reason
+
+
+def test_a_ledger_with_only_refusals_HAS_started(config, paths):
+    """Refusing to price things is the system working, and it is evidence."""
+    report = build_viability_report(
+        config,
+        paper={
+            "generated_at": "x",
+            "refused": 4,
+            "closed_count": 0,
+            "open_positions": [],
+            "cumulative_net_isk": 0.0,
+            "verdict": {"verdict": "TOO_EARLY", "detail": "d", "rule": "r"},
+        },
+        reports_dir=paths.reports,
+    )
+    paper_section = report.sections[-1]
+    assert paper_section.unknown_reason is None
+    assert any("refused rather than priced: **4**" in line for line in paper_section.body)

@@ -300,7 +300,14 @@ def _cross_region_section(payload: dict | None) -> Section:
 
 
 def _paper_section(payload: dict | None) -> Section:
-    if not payload:
+    started = bool(payload) and any(
+        (
+            payload.get("closed_count"),
+            payload.get("refused"),
+            payload.get("open_positions"),
+        )
+    )
+    if not started:
         return Section(
             "5. Paper trading — the running experiment",
             "data/streams/paper.jsonl (`python -m evescreener paper report`)",

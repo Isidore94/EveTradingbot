@@ -21,7 +21,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from ..work import PageJob, pool
+from ..work import Generation, PageJob, pool
 
 __all__ = ["DeskPage"]
 
@@ -73,8 +73,12 @@ class DeskPage(QWidget):
         #: The widget state the running job was dispatched with, and the state
         #: that arrived while it ran. Comparing them is what stops a result
         #: computed from superseded input being painted (§21 R7).
-        self._running_input = None
-        self._queued_input = None
+        #: The generation in flight, and the one owed after it. A generation
+        #: carries token, input key, data AND widget input together, because R7
+        #: queued only the widget input — so a data refresh that touched no
+        #: widget compared equal and scheduled no follow-up (§22 S3).
+        self._running = None
+        self._owed = None
         self._shutdown = False
         if self.heavy:
             self.work_stamp = QLabel("")
@@ -90,14 +94,19 @@ class DeskPage(QWidget):
         """Lay out widgets. MUST NOT compute — see the module docstring."""
         raise NotImplementedError
 
-    def compute(self, data):  # pragma: no cover - overridden by heavy pages
+    def compute(self, data, job_input=()):  # pragma: no cover - overridden by heavy pages
         """Pure, off-thread. **No Qt object may be touched in here.**
 
         Widgets are not thread-safe and their value can change mid-read, so
         anything a computation needs from one is captured by `job_input()` on
         the GUI thread first. A test walks the AST of every `compute()` in this
-        package and fails on any widget access, because a rule this easy to
-        forget has to be held structurally (§21 R7).
+        package and fails on any widget access, on any `self._running*` read,
+        and on any attribute lookup that could hide one — a rule this easy to
+        forget has to be held structurally.
+
+        **The worker is handed everything; it never reaches back into the
+        page.** R7 passed the input to the job and then read it off `self`,
+        which left the same cross-thread read in place (§22 S3).
         """
         raise NotImplementedError
 
@@ -114,7 +123,8 @@ class DeskPage(QWidget):
         """Stop accepting results. Called when the window closes (§21 R7)."""
         self._shutdown = True
         self._running_token = None
-        self._queued_input = None
+        self._running = None
+        self._owed = None
         job = self._job
         if job is not None:
             job.cancel()
@@ -145,41 +155,51 @@ class DeskPage(QWidget):
         self.data = data
 
     def ensure_current(self, *, force: bool = False) -> bool:
-        """Bring the page up to date if its inputs moved.
+        """Bring the page up to date if anything it depends on moved.
 
         Returns True when background work was started, so a caller (and a
         test) can tell "already current" apart from "now computing".
+
+        **A generation, not a widget tuple.** R7 compared only the captured
+        widget input while a job was running, so refreshing to a newer
+        `input_key` without touching a control compared *equal* to what was in
+        flight: the queue stayed empty, the older result painted, and no
+        follow-up was scheduled. The comparison is over token/key/data/input
+        together now, and whatever is owed always runs (§22 S3).
         """
         if self._shutdown:
             return False
         key = getattr(self.data, "input_key", None)
         captured = self.job_input()
+
+        if not self.heavy:
+            self._computed_key = key
+            self._running = Generation(0, key, self.data, captured)
+            self.repopulate()
+            return False
+
         current = (
-            key is not None
-            and key == self._computed_key
-            and captured == self._running_input
+            self._running is not None
+            and self._running.key == key
+            and self._running.job_input == captured
+            and self._running.data is self.data
             and self._error is None
         )
         if current and not force:
             return False
-        if not self.heavy:
-            self._computed_key = key
-            self._running_input = captured
-            self.repopulate()
-            return False
         if self._running_token is not None and not force:
-            # A job is already in flight. Remember what changed rather than
-            # declining it: the old code dropped the newer input and then
-            # painted the older result over it (§21 R7).
-            self._queued_input = captured
+            # A job is in flight. Record what is owed rather than declining it.
+            self._owed = Generation(self._token + 1, key, self.data, captured)
             return False
+
         self._token += 1
+        generation = Generation(self._token, key, self.data, captured)
         self._running_token = self._token
         self._pending_key = key
-        self._running_input = captured
-        self._queued_input = None
+        self._running = generation
+        self._owed = None
         self._show_working()
-        job = PageJob(self.compute, self.data, self._token, job_input=captured)
+        job = PageJob(self.compute, generation)
         job.signals.finished.connect(self._work_finished)
         # Held so the runnable (and the signal object living on it) outlives
         # the worker thread that emits from it.
@@ -189,18 +209,12 @@ class DeskPage(QWidget):
 
     # -- worker results ----------------------------------------------------
 
-    def _work_finished(self, token, result) -> None:
+    def _work_finished(self, generation, result) -> None:
         if self._shutdown:
             return  # the page is going away; nothing may paint into it
+        token = getattr(generation, "token", generation)
         if token != self._running_token:
             return  # a newer job overtook this one; this answer is the stale one
-        if self._running_input != self.job_input():
-            # The operator moved a control while this ran. The answer is about
-            # a question nobody is asking any more.
-            self._running_token = None
-            self._queued_input = None
-            self.ensure_current(force=True)
-            return
         self._running_token = None
         self._computed_key = self._pending_key
         if isinstance(result, Exception):
@@ -214,15 +228,24 @@ class DeskPage(QWidget):
                 else " — nothing has computed yet"
             )
             self._show_stamp(f"could not compute: {type(result).__name__}: {result}{tail}")
+            self._run_owed()
             return
         self._error = None
         self._result = result
         self._result_at = self._stamp_time()
         self._hide_stamp()
         self.paint(result)
-        if self._queued_input is not None and self._queued_input != self._running_input:
-            # Something changed while this job ran; it is owed its own answer.
-            self._queued_input = None
+        self._run_owed()
+
+    def _run_owed(self) -> None:
+        """Run whatever arrived while the last job was in flight.
+
+        Unconditional: if a generation was recorded as owed, it is owed. R7
+        re-checked the widget tuple here and dropped anything whose controls
+        happened to match — exactly how a data-only refresh was lost.
+        """
+        owed, self._owed = self._owed, None
+        if owed is not None and not self._shutdown:
             self.ensure_current(force=True)
 
     # -- the stamp ---------------------------------------------------------

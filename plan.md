@@ -2023,8 +2023,8 @@ is listed as **CONFIRMED** only where the wrong output was observed directly.
 | **S2b** | Production pricing bypasses `load_validated_book()` | claimed; reproduction owed at phase start | queued with S2a |
 | **S4** | Pooled exploratory lead-lag rendered as if H2 had been tested | claimed; reproduction owed at phase start | queued |
 | **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | **IMPLEMENTED + GREEN** |
-| **S3** | Worker reads page state; a same-input key change schedules no follow-up | claimed; reproduction owed at phase start | **NEXT** |
-| **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | queued |
+| **S3** | Worker reads page state; a same-input key change schedules no follow-up | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | **NEXT** |
 | **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | queued |
 | **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | queued |
 | **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | queued |
@@ -2232,3 +2232,39 @@ values remain in git history; no stored report was rewritten.
 the reported `total_friction_pct` against the headline 14.7% recorded in §17.
 If the corrected figure differs materially, §17's number is a historical
 snapshot of the old formula and must be labelled as one rather than replaced.
+
+### §22 S3 — A generation, not a widget tuple — **IMPLEMENTED + GREEN**
+
+**Two defects, both from R7 solving half the problem.**
+
+**1. The worker still read the page.** R7 passed `job_input` to the job and
+then had `SpreadsPage.compute()` read `self._running_input` back off the
+**page**, on a worker thread. `Generation` is now frozen before the job leaves
+the GUI thread — token, input key, data and widget input together — and
+`compute(data, job_input)` receives everything as arguments. The worker never
+reaches back.
+
+**2. A data-only refresh was silently dropped.** R7 queued *only* the widget
+tuple, so:
+
+> a key-1 job is running with widget tuple A; the lake moves to key 2 while no
+> control is touched; the queued tuple is still A; A == A, so nothing is
+> queued, the key-1 result paints, and **no follow-up is scheduled**.
+
+The desk kept showing key-1 data with no indication. The owed generation now
+carries the key and the data too, so a data-only move is a different
+generation, and `_run_owed()` runs it **unconditionally** — including after a
+*failed* job, which previously stranded the owed work.
+
+**The guard is stronger than the defect.** Beyond the existing widget-access
+check, tests now fail on any `self._running*` / `self._owed` / `self.data` read
+inside a `compute()`, and on any `compute()` that omits the `job_input`
+parameter — a page that forgot it would silently fall back to page state.
+
+Cancellation, off-thread execution and last-good-on-failure are unchanged and
+still tested.
+
+**Owed live gate (§22 S3).** With the desk open, switch the SPREADS hub while a
+computation is running and confirm the list that settles matches the hub
+finally selected; then let the refresh timer fire mid-computation and confirm
+the page ends up showing the newer data rather than the older.

@@ -129,7 +129,7 @@ class _CountingPage(DeskPage):
         self.computed = 0
         self.painted = 0
 
-    def compute(self, data):
+    def compute(self, data, job_input=()):
         self.computed += 1
         return {"n": self.computed}
 
@@ -187,7 +187,7 @@ def test_a_background_result_lands_on_the_gui_thread_and_repaints(qtbot, desk):
         def build(self) -> None:
             self.result_seen = None
 
-        def compute(self, data):
+        def compute(self, data, job_input=()):
             seen["worker"] = threading.current_thread().ident
             return "computed"
 
@@ -240,7 +240,7 @@ def test_a_failed_recompute_keeps_the_last_good_result_and_says_so(qtbot, desk):
             self.painted = None
             self.explode = False
 
-        def compute(self, data):
+        def compute(self, data, job_input=()):
             if self.explode:
                 raise RuntimeError("the lake moved under me")
             return "good result"

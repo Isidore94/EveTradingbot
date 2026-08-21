@@ -114,7 +114,7 @@ class PerformersPage(DeskPage):
         if self._result is not None:
             self.paint(self._result)
 
-    def compute(self, data):
+    def compute(self, data, job_input=()):
         """Off-thread. One region's bars, its own names, tiers and volumes.
 
         Nothing here reads a widget: the ranking window and the volume floor

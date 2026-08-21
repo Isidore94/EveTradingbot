@@ -180,7 +180,7 @@ class ScannerPage(DeskPage):
     def set_banner(self, text: str) -> None:
         self.banner.set_banner(text)
 
-    def compute(self, data):
+    def compute(self, data, job_input=()):
         sector_frames = {}
         if data.index_set is not None:
             sector_frames = {

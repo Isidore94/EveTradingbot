@@ -77,7 +77,7 @@ class BoardPage(DeskPage):
         self._watch_only = bool(checked)
         self.ensure_current(force=True)
 
-    def compute(self, data):
+    def compute(self, data, job_input=()):
         frame = data.bars
         if self._watch_only and data.watch_ids and not data.all_bars.empty:
             frame = data.all_bars[data.all_bars["type_id"].isin(sorted(data.watch_ids))]

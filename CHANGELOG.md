@@ -5,6 +5,29 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A generation, not a widget tuple (§22 S3)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S3. `uv run pytest -q` →
+**789 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+R7 solved half of this and the half it left was the dangerous one.
+
+- **The worker still read the page.** It passed `job_input` to the job and then
+  had `compute()` read `self._running_input` back off the page, on a worker
+  thread. `Generation` freezes token, key, data and input before the job leaves
+  the GUI thread, and `compute(data, job_input)` gets everything as arguments.
+- **A data-only refresh was silently dropped.** R7 queued only the widget
+  tuple, so a lake moving from key 1 to key 2 without a control being touched
+  compared equal, queued nothing, painted the key-1 result and scheduled no
+  follow-up. The owed generation carries key and data too, and `_run_owed()`
+  runs it unconditionally — including after a *failed* job, which previously
+  stranded the owed work.
+
+The AST guard now also fails on any `self._running*` / `self._owed` /
+`self.data` read inside a `compute()`, and on any `compute()` missing the
+`job_input` parameter. Cancellation, off-thread execution and
+last-good-on-failure are unchanged.
+
 ## 2026-08-20 — Friction is a ratio of the gross move (§22 S5a)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S5a. `uv run pytest -q` →

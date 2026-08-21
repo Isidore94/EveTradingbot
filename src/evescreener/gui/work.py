@@ -24,9 +24,11 @@ stamps.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
-__all__ = ["DeskWorkSignals", "PageJob", "pool"]
+__all__ = ["DeskWorkSignals", "Generation", "PageJob", "pool"]
 
 
 def pool() -> QThreadPool:
@@ -40,7 +42,24 @@ def pool() -> QThreadPool:
 class DeskWorkSignals(QObject):
     """`QRunnable` is not a `QObject`, so the signals live here."""
 
-    finished = Signal(object, object)  # (token, result-or-Exception)
+    finished = Signal(object, object)  # (Generation, result-or-Exception)
+
+
+@dataclass(frozen=True, slots=True)
+class Generation:
+    """Everything one computation needs, frozen before it leaves the GUI thread.
+
+    R7 passed `job_input` to the job and then had `compute()` read
+    `self._running_input` back off the **page** — so a worker still touched
+    page state, and a newer job could overwrite what an older one was mid-read.
+    A generation is immutable and self-contained: the worker is handed the data
+    and the inputs, and never reaches back (§22 S3).
+    """
+
+    token: int
+    key: object
+    data: object
+    job_input: tuple
 
 
 class PageJob(QRunnable):
@@ -53,7 +72,7 @@ class PageJob(QRunnable):
     opportunity" and a stamped stale result reads as what it is.
     """
 
-    def __init__(self, compute, data, token, job_input=None) -> None:
+    def __init__(self, compute, generation: Generation) -> None:
         super().__init__()
         # NOT auto-delete. Qt would free the runnable as soon as `run` returns,
         # and `signals` is an attribute of it — a queued emit could then be
@@ -61,11 +80,9 @@ class PageJob(QRunnable):
         # instead and drops it when the next job replaces it.
         self.setAutoDelete(False)
         self._compute = compute
-        self._data = data
-        self._token = token
-        #: Immutable snapshot of every widget-derived value this job needs,
-        #: captured on the GUI thread before dispatch (§21 R7).
-        self.job_input = job_input
+        #: The whole immutable job. The worker reads from this and from
+        #: nothing else — in particular, never from the page (§22 S3).
+        self.generation = generation
         self.cancelled = False
         self.signals = DeskWorkSignals()
 
@@ -83,9 +100,9 @@ class PageJob(QRunnable):
         if self.cancelled:
             return
         try:
-            result = self._compute(self._data)
+            result = self._compute(self.generation.data, self.generation.job_input)
         except Exception as exc:  # noqa: BLE001 - delivered to the page, never swallowed
             result = exc
         if self.cancelled:
             return
-        self.signals.finished.emit(self._token, result)
+        self.signals.finished.emit(self.generation, result)

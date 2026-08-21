@@ -81,7 +81,7 @@ class LearningPage(DeskPage):
         self.footer.setWordWrap(True)
         self.layout.addWidget(self.footer)
 
-    def compute(self, data):
+    def compute(self, data, job_input=()):
         from ...backtest import measure_haircuts
         from ...paper import PaperLedger
 

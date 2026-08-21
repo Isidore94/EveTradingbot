@@ -70,6 +70,40 @@ def test_no_page_touches_a_widget_inside_compute():
     assert not offenders, f"compute() must not touch Qt objects: {offenders}"
 
 
+def test_no_compute_reads_the_pages_own_running_state():
+    """§22 S3: R7's `compute` read `self._running_input` off the page.
+
+    Any `self._running*` / `self._owed` read is a cross-thread read of page
+    state, whether it goes through an attribute, a property or a helper. The
+    frozen input arrives as the `job_input` argument and nowhere else.
+    """
+    offenders = []
+    for path, node in _compute_methods():
+        for child in ast.walk(node):
+            if isinstance(child, ast.Attribute) and child.attr in {
+                "_running",
+                "_running_input",
+                "_running_token",
+                "_owed",
+                "_queued_input",
+                "_job",
+                "data",
+            }:
+                if isinstance(child.value, ast.Name) and child.value.id == "self":
+                    offenders.append(f"{path.name}:{child.lineno} self.{child.attr}")
+    assert not offenders, f"compute() must read only its arguments: {offenders}"
+
+
+def test_every_compute_declares_the_job_input_argument():
+    """A page that forgot the parameter would silently read stale page state."""
+    missing = []
+    for path, node in _compute_methods():
+        names = [arg.arg for arg in node.args.args]
+        if "job_input" not in names:
+            missing.append(f"{path.name}:{node.lineno}")
+    assert not missing, f"compute() must accept job_input: {missing}"
+
+
 def test_at_least_one_page_actually_declares_compute():
     """Guard against the check above passing because it found nothing."""
     assert list(_compute_methods()), "no compute() methods found — the scan is broken"
@@ -93,63 +127,108 @@ def test_widget_state_reaches_compute_as_immutable_job_input(qtbot, desk):
 # -- 2. an input change invalidates and re-runs ------------------------------
 
 
-def test_an_input_change_during_a_job_guarantees_a_follow_up(qtbot, desk):
-    """The old code declined the new key and later painted the old result."""
-    from evescreener.gui.pages.base import DeskPage
+class _Recording(
+    DeskPage := __import__("evescreener.gui.pages.base", fromlist=["DeskPage"]).DeskPage
+):
+    """A heavy page that records what it computed and what it painted."""
 
-    class Slow(DeskPage):
-        heavy = True
-        title = "SLOW"
+    heavy = True
+    title = "REC"
 
-        def build(self):
-            self.painted = []
+    def build(self):
+        self.painted = []
+        self.computed = []
+        self.knob = 0
 
-        def compute(self, data):
-            return ("computed", self.captured)
+    def job_input(self):
+        return (self.knob,)
 
-        def job_input(self):
-            return (getattr(self, "knob", 0),)
+    def compute(self, data, job_input=()):
+        self.computed.append((getattr(data, "input_key", None), job_input))
+        return ("result", getattr(data, "input_key", None), job_input)
 
-        def paint(self, result):
-            self.painted.append(result)
+    def paint(self, result):
+        self.painted.append(result)
 
-    page = Slow(desk)
+
+def _settle(qtbot, page, *, timeout=30_000):
+    qtbot.waitUntil(lambda: page._running_token is None, timeout=timeout)
+
+
+def test_a_data_refresh_that_touches_no_widget_still_gets_its_own_computation(qtbot, desk, config):
+    """The S3 defect, stated exactly (§22 S3).
+
+    A key-1 job is running with widget tuple A. The lake moves to key 2 while
+    the widget is untouched, so the queued tuple is still A. R7 compared only
+    the widget input, found it equal, queued nothing, painted the key-1 result,
+    and scheduled no follow-up — the desk silently kept showing key-1 data.
+    """
+    import dataclasses
+
+    page = _Recording(desk)
     qtbot.addWidget(page)
-    page.knob = 1
+    page.data = dataclasses.replace(desk, input_key=("key", 1))
     assert page.ensure_current() is True
-    # A second request while the first is in flight must not be dropped.
+
+    # The lake moves. No control was touched, so job_input() is unchanged.
+    page.data = dataclasses.replace(desk, input_key=("key", 2))
+    page.ensure_current()
+    assert page._owed is not None, "a newer generation must be recorded as owed"
+
+    _settle(qtbot, page)
+    qtbot.waitUntil(lambda: page.painted and page.painted[-1][1] == ("key", 2), timeout=30_000)
+    keys = [key for key, _input in page.computed]
+    assert ("key", 2) in keys, "the newer key must actually be computed"
+    assert page.painted[-1][1] == ("key", 2), "and it must be what is finally shown"
+
+
+def test_a_widget_change_during_a_job_also_gets_its_own_computation(qtbot, desk):
+    import dataclasses
+
+    page = _Recording(desk)
+    qtbot.addWidget(page)
+    page.data = dataclasses.replace(desk, input_key=("key", 1))
+    page.knob = 1
+    page.ensure_current()
     page.knob = 2
     page.ensure_current()
-    assert page._queued_input == (2,), "the newer input must be remembered"
+
+    _settle(qtbot, page)
+    qtbot.waitUntil(lambda: page.painted and page.painted[-1][2] == (2,), timeout=30_000)
+    assert page.painted[-1][2] == (2,), "the hub finally selected is the one shown"
 
 
-def test_a_result_computed_from_superseded_input_is_not_painted(qtbot, desk):
-    from evescreener.gui.pages.base import DeskPage
+def test_the_worker_is_handed_its_input_and_never_reads_the_page(qtbot, desk):
+    """R7 passed job_input to the job and then read it back off `self`."""
+    import inspect
 
-    class Page(DeskPage):
-        heavy = True
-        title = "P"
+    from evescreener.gui import work
 
-        def build(self):
-            self.painted = []
+    source = inspect.getsource(work.PageJob.run)
+    assert "self.generation.data" in source
+    assert "self.generation.job_input" in source
 
-        def compute(self, data):
-            return "result"
+    page = _Recording(desk)
+    qtbot.addWidget(page)
+    page.knob = 7
+    page.ensure_current()
+    _settle(qtbot, page)
+    assert page.computed[-1][1] == (7,), "the frozen tuple reached compute as an argument"
 
-        def job_input(self):
-            return (getattr(self, "knob", 0),)
 
-        def paint(self, result):
-            self.painted.append(result)
-
-    page = Page(desk)
+def test_a_result_computed_from_a_superseded_generation_is_not_painted(qtbot, desk):
+    page = _Recording(desk)
     qtbot.addWidget(page)
     page.knob = 1
     page.ensure_current()
-    running = page._running_token
-    page.knob = 2  # the world moved while the job ran
-    page._work_finished(running, "stale result")
-    assert page.painted == [], "a result from superseded input must be discarded"
+    _settle(qtbot, page)
+    painted = len(page.painted)
+
+    from evescreener.gui.work import Generation
+
+    stale = Generation(token=-1, key=("old",), data=desk, job_input=(1,))
+    page._work_finished(stale, "stale result")
+    assert len(page.painted) == painted, "a superseded generation paints nothing"
 
 
 # -- 3. shutdown is safe -----------------------------------------------------
@@ -166,7 +245,7 @@ def test_a_page_being_destroyed_stops_receiving_results(qtbot, desk):
         def build(self):
             self.painted = []
 
-        def compute(self, data):
+        def compute(self, data, job_input=()):
             return "result"
 
         def paint(self, result):
@@ -195,9 +274,10 @@ def test_the_window_shuts_its_pages_down_on_close(qtbot, desk, config):
 
 def test_a_job_whose_page_has_gone_does_not_raise(qtbot, desk):
     """The RuntimeError seen in teardown: emit into a deleted signal source."""
-    from evescreener.gui.work import PageJob
+    from evescreener.gui.work import Generation, PageJob
 
-    job = PageJob(lambda data: "x", desk, 1)
+    generation = Generation(token=1, key=("k",), data=desk, job_input=())
+    job = PageJob(lambda data, job_input: "x", generation)
     job.cancel()
     job.run()  # must be a no-op rather than an emit
     assert job.cancelled

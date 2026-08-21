@@ -132,7 +132,7 @@ class SpreadsPage(DeskPage):
             return ()
         return tuple(int(region) for region in (self.hub.currentData() or ()))
 
-    def compute(self, data):
+    def compute(self, data, job_input=()):
         """Off-thread. Builds its own name/volume/average maps, per region.
 
         Per region deliberately: judging Amarr's book against Jita's traded
@@ -142,7 +142,7 @@ class SpreadsPage(DeskPage):
         # The hub selection, frozen on the GUI thread by `job_input()` before
         # this job was dispatched. Reading the combo box here would be a
         # cross-thread widget access (§21 R7).
-        regions = [int(region) for region in (self._running_input or ())]
+        regions = [int(region) for region in (job_input or ())]
         volumes: dict[int, dict[int, float]] = {}
         averages: dict[int, dict[int, float]] = {}
         names: dict[int, str] = {}

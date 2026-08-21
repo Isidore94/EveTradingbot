@@ -2029,7 +2029,7 @@ is listed as **CONFIRMED** only where the wrong output was observed directly.
 | **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | **IMPLEMENTED + GREEN** |
 | **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | **IMPLEMENTED + GREEN** |
 | **S7** | Validation failures raise before any refusal is recorded | **CONFIRMED** at the `paper.PaperLedger` boundary | **IMPLEMENTED + GREEN** |
-| **S8** | Import guard too narrow; TOP's aggregate figures are unversioned | claimed; the figure mismatch is itself the finding | **NEXT** |
+| **S8** | Import guard too narrow; TOP's aggregate figures are unversioned | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 
 **Nothing in §21 that the review found correct is being churned.** That list
 is in `SOL_REVIEW_PROMPT.md` §"Findings that appeared correct" and includes
@@ -2401,3 +2401,51 @@ decision.
 
 **Owed live gate (§22 S7).** Attempt one bad pass on the real desk and confirm
 the refusal appears in `paper.jsonl` with the tags that were attempted.
+
+### §22 S8 — A wider guard, and numbers that can be re-derived — **IMPLEMENTED + GREEN**
+
+**The import guard was two exact names.** R8's probe rejected `httpx` and
+`evescreener.esi.client` only, so a GUI module could have reached the network
+through `requests`, `urllib.request`, `urllib3`, `aiohttp`, or **any ESI module
+other than `client`**, and the guard would have passed. It now rejects those by
+name, and any module with an `esi` path component — so a future
+`evescreener.esi.anything` cannot slip in under a new name. Detection is still
+transitive, in a cold subprocess, across every GUI module.
+
+`socket`, `ssl` and `http.client` are **deliberately allowed** and the probe
+says so: Qt and the standard library load them on import regardless of what
+this package does, so flagging them would fail always and prove nothing. The
+list is the set of clients our own code would have to *choose*, which is what
+the invariant is actually about.
+
+**A number in prose is not a measurement.** §20.3 and `performers.py` quoted
+"2,944 tracked types", "0.88 pp median difference", "39/23 readings above
+1000%" and a worst raw reading of "49,699,900%" with no as-of date, no
+membership definition, no denominators and no way to re-run them. An
+independent reproduction disagreed with all of them; a third run disagreed
+again. **None of the three can be shown right or wrong**, because not one
+recorded what it measured. The differing numbers are the symptom; the missing
+provenance is the defect.
+
+`provenance.py` emits a `MeasurementReport` carrying the as-of timestamp, the
+membership sentence, every filter, the identity of each input file, the
+**denominator beside every count**, the command, and the git revision.
+`performers.measure_top_performers()` produces the TOP figures through it.
+
+Two details that keep it honest:
+
+* **A magnitude gets no share.** "worst reading / population size" is not a
+  number about anything, so `is_count` gates the share rather than dividing
+  everything by the denominator.
+* **The file identity says what it is not.** Hashing multi-gigabyte Parquet
+  would take minutes, so the digest is over `(name, size, mtime_ns)` — enough
+  to notice the inputs changed, and explicitly **not** a claim that equal
+  digests mean equal bytes.
+
+**The old figures are labelled a historical snapshot and left in place.** Their
+inputs cannot be recovered, so replacing them with a newer set would repeat the
+mistake with fresher numbers.
+
+**Owed live gate (§22 S8).** Run the TOP measurement report on the operator's
+lake and commit its output under `data/reports/`, so §20.3's prose can cite a
+dated artefact instead of a floating number.

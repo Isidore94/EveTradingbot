@@ -5,6 +5,32 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — A wider guard, and numbers that can be re-derived (§22 S8)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S8. `uv run pytest -q` →
+**825 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+This completes §22 S1–S8; **none is LIVE_VALIDATED**.
+
+- **The import guard was two exact names.** R8 rejected `httpx` and
+  `evescreener.esi.client` only, so a GUI module could have reached the network
+  through `requests`, `urllib.request`, `urllib3`, `aiohttp`, or any ESI module
+  other than `client`. The probe now rejects those and any module with an `esi`
+  path component. `socket`, `ssl` and `http.client` are deliberately allowed
+  and the probe says why: Qt and the stdlib load them regardless, so flagging
+  them would fail always and prove nothing.
+- **A number in prose is not a measurement.** §20.3 quoted figures with no
+  as-of date, membership, denominator or command. An independent reproduction
+  disagreed with all of them and a third run disagreed again — and none can be
+  shown right or wrong, because none recorded what it measured.
+  `provenance.py` emits a `MeasurementReport` with as-of, membership, filters,
+  input identity, denominators, command and git revision;
+  `measure_top_performers()` produces the TOP figures through it. A magnitude
+  gets no share, and the file digest states that it is over
+  `(name, size, mtime_ns)` and **not** over the contents.
+- **The old figures are labelled a historical snapshot and left in place** —
+  their inputs cannot be recovered, and replacing them would repeat the mistake
+  with fresher numbers.
+
 ## 2026-08-20 — Broker overrides reach production; a refusal is a record (§22 S6, S7)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S6/S7. `uv run pytest -q` →

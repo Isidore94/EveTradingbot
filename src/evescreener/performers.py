@@ -166,6 +166,104 @@ def _robust_return(
     return float((end / start - 1.0) * 100.0)
 
 
+def measure_top_performers(
+    bars,
+    *,
+    now=None,
+    volumes=None,
+    tiers=None,
+    min_units: float = DEFAULT_MIN_UNITS,
+    command: str = "python -m evescreener report --top-performers",
+    input_paths=(),
+):
+    """Re-derivable provenance for the figures this module's prose quotes.
+
+    §22 S8: the docstring numbers below carried no as-of date, no membership
+    definition and no denominators, and an independent reproduction against the
+    same lake disagreed with every one of them. There was no way to tell which
+    run was wrong, because neither recorded what it measured. This emits the
+    statistics with enough provenance to be repeated or contradicted.
+    """
+    import numpy as np
+
+    from .provenance import MeasurementReport, Statistic, file_identity
+
+    report = MeasurementReport.start(
+        "TOP performers — measured aggregates",
+        command=command,
+        membership=(
+            "tracked types in one region with both a raw and a robust 7-day "
+            f"reading, at a {min_units:.0f} unit/day floor"
+        ),
+        now=now,
+    )
+    report.filters = {
+        "min_units": min_units,
+        "week_days": WEEK_DAYS,
+        "month_days": MONTH_DAYS,
+        "endpoint_days": ENDPOINT_DAYS,
+        "min_endpoint_bars": MIN_ENDPOINT_BARS,
+    }
+    report.inputs = file_identity(input_paths)
+
+    frame = top_performers(bars, now=now, volumes=volumes, tiers=tiers, min_units=min_units)
+    total = int(len(frame))
+    raw = frame["week_pct_raw"]
+    robust = frame["week_pct"]
+    both = frame[raw.notna() & robust.notna()]
+    denominator = int(len(both))
+
+    report.add(Statistic("names after the volume floor", total, denominator=total, is_count=True))
+    report.add(
+        Statistic(
+            "names with BOTH a raw and a robust week",
+            denominator,
+            denominator=total,
+            is_count=True,
+        )
+    )
+    if denominator:
+        gap = (both["week_pct_raw"] - both["week_pct"]).abs()
+        report.add(
+            Statistic(
+                "median |raw - robust|",
+                round(float(gap.median()), 5),
+                unit="pp",
+                denominator=denominator,
+            )
+        )
+        report.add(
+            Statistic(
+                "raw readings above 1000%",
+                int((both["week_pct_raw"] > 1000).sum()),
+                denominator=denominator,
+                is_count=True,
+            )
+        )
+        report.add(
+            Statistic(
+                "robust readings above 1000%",
+                int((both["week_pct"] > 1000).sum()),
+                denominator=denominator,
+                is_count=True,
+            )
+        )
+        report.add(
+            Statistic(
+                "worst raw week reading",
+                round(float(np.nanmax(both["week_pct_raw"])), 2),
+                unit="%",
+                denominator=denominator,
+            )
+        )
+    report.notes.append(
+        "Figures quoted in plan.md §20.3 and in this module's docstrings before "
+        "2026-08-20 are a HISTORICAL SNAPSHOT whose inputs cannot be recovered. "
+        "They are not replaced by this report and are labelled as such (§22 S8)."
+    )
+    return report
+
+
 def top_performers(
     bars: pd.DataFrame,
     *,

@@ -39,10 +39,11 @@ evidence.
 ## ACTIVE — plan.md §22 remediation track (operator-authorized, post-Sol)
 
 An independent adversarial review found defects in the §21 remediation itself
-and older ones §21 did not reach. **S1 is done; S2 is next.** Every §21 owed
-live gate and the consolidated checklist below remain owed in full.
+and older ones §21 did not reach. **All §22 phases are now IMPLEMENTED + GREEN,
+and none is LIVE_VALIDATED.** Every §21 owed live gate, every §22 owed live
+gate, and the consolidated checklist below remain owed in full.
 
-**Gate stamp:** `uv run pytest -q` → **802 passed, 7 deselected**, ruff check +
+**Gate stamp:** `uv run pytest -q` → **825 passed, 7 deselected**, ruff check +
 format clean, `selftest` **12/12**.
 
 | id | finding | disposition | state |
@@ -57,7 +58,7 @@ format clean, `selftest` **12/12**.
 | **S5d** | Two-observation median ranked as print-resistant | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 | **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 | **S7** | Validation failures raise before any refusal is recorded | **CONFIRMED** (paper ledger) | **IMPLEMENTED + GREEN** |
-| **S8** | Import guard too narrow; TOP figures unversioned | claimed | **NEXT** |
+| **S8** | Import guard too narrow; TOP figures unversioned | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 
 ### S2 owed live gate
 
@@ -66,6 +67,12 @@ format clean, `selftest` **12/12**.
       above the executable ask, a sell fill at or below the executable bid.
 - [ ] Confirm `exec_reachable_volume_share` is high at Jita 4-4 and visibly
       lower for a type whose bids rest elsewhere.
+
+### S8 owed live gate
+
+- [ ] Run the TOP measurement report on the real lake and commit its output
+      under `data/reports/`, so §20.3's prose can cite a dated artefact rather
+      than a floating number.
 
 ### S6/S7 owed live gates
 

@@ -36,6 +36,36 @@ Every item on it is an **operator action**. The build cannot self-certify: the
 whole point of the ladder is that a machine's confidence in itself is not
 evidence.
 
+## ACTIVE — plan.md §22 remediation track (operator-authorized, post-Sol)
+
+An independent adversarial review found defects in the §21 remediation itself
+and older ones §21 did not reach. **S1 is done; S2 is next.** Every §21 owed
+live gate and the consolidated checklist below remain owed in full.
+
+**Gate stamp:** `uv run pytest -q` → **753 passed, 7 deselected**, ruff check +
+format clean, `selftest` **12/12**.
+
+| id | finding | disposition | state |
+|---|---|---|---|
+| **S1** | `Expires` did not fail closed on the 304/200 paths | **CONFIRMED** (2 requests where 1 was correct) | **IMPLEMENTED + GREEN** |
+| **S2** | Regional depth on an executable quote; pricing bypasses the validator | claimed | **NEXT — reproduce first** |
+| **S4** | Pooled exploratory lead-lag rendered as if H2 were tested | claimed | queued |
+| **S5a** | `friction_breakdown` 100% where 66.667% is correct | **CONFIRMED** | queued |
+| **S3** | Worker reads page state; same-input key change schedules no follow-up | claimed | queued |
+| **S5b** | `effective_samples` returned 3 where at most 2 holds | **CONFIRMED** | queued |
+| **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** | queued |
+| **S5d** | Two-observation median ranked as print-resistant | **CONFIRMED** | queued |
+| **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | queued |
+| **S7** | Validation failures raise before any refusal is recorded | **NARROWED** | queued |
+| **S8** | Import guard too narrow; TOP figures unversioned | claimed | queued |
+
+### S1 owed live gate
+
+- [ ] Against live ESI, confirm a response with no `Expires` produces a wait
+      rather than an immediate refetch.
+- [ ] Confirm `expiry_unknown` is **rare** in the telemetry ledger. If it is
+      common, our header parsing is wrong rather than the server being silent.
+
 ## §21 remediation track — ALL PHASES IMPLEMENTED + GREEN, NONE LIVE_VALIDATED
 
 R1 through R8 are code-complete and the offline gate is green:

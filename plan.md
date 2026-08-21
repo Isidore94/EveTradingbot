@@ -1999,3 +1999,89 @@ name the withdrawal, so the correction cannot be lost again.
 one exists, and confirm its rows are priced against that region's own traded
 averages. Separately, confirm against live ESI that a response with no
 `Expires` results in a wait rather than an immediate refetch.
+
+## §22 — Second remediation track (operator-authorized 2026-08-20, post-Sol)
+
+**Why this exists.** An independent adversarial review (Sol) of the §21
+remediation found defects in the remediation itself, plus older ones §21 did
+not reach. The operator authorized this track. It is **append-only**: it does
+not change a locked decision, the frozen AVWAP formula, or a frozen verdict
+rule, and every historical claim it corrects keeps its original wording.
+
+**One phase per session.** Every §21 owed live gate and the consolidated
+live-validation checklist remain owed in full and are untouched by this track.
+
+### Disposition of the review's findings
+
+Reproduced from their concrete inputs before anything was written. A finding
+is listed as **CONFIRMED** only where the wrong output was observed directly.
+
+| id | finding | disposition | state |
+|---|---|---|---|
+| **S1** | `Expires` does not fail closed on the 304 and 200 production paths | **CONFIRMED** — 2 transport requests where 1 was correct | **IMPLEMENTED + GREEN** |
+| **S2a** | Executable best quote carries **regional** depth, p5 and concentration | claimed; reproduction owed at phase start | **NEXT** |
+| **S2b** | Production pricing bypasses `load_validated_book()` | claimed; reproduction owed at phase start | queued with S2a |
+| **S4** | Pooled exploratory lead-lag rendered as if H2 had been tested | claimed; reproduction owed at phase start | queued |
+| **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | queued |
+| **S3** | Worker reads page state; a same-input key change schedules no follow-up | claimed; reproduction owed at phase start | queued |
+| **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | queued |
+| **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | queued |
+| **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | queued |
+| **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | queued |
+| **S7** | Validation failures raise before any refusal is recorded | **NARROWED** — `_refuse` is not in `reasons.py`; locate the real boundary first | queued |
+| **S8** | Import guard too narrow; TOP's aggregate figures are unversioned | claimed; the figure mismatch is itself the finding | queued |
+
+**Nothing in §21 that the review found correct is being churned.** That list
+is in `SOL_REVIEW_PROMPT.md` §"Findings that appeared correct" and includes
+R2's 11:05 boundary, R3's stressed-exit clamp, R4's overclaim correction, R5's
+calendar lag join, R6's eligible denominator, R7's cancellation and
+last-good-on-failure, GUI network isolation, and TOP's 7/30 calendar windows.
+
+### §22 S1 — `Expires` fails closed on every production path — **IMPLEMENTED + GREEN**
+
+**Reproduced first, through real `EsiClient.get()` calls against a counting
+transport.** R8's tests exercised `fallback_expiry()` in isolation, which is
+exactly why they passed while the branches around it did not:
+
+| | before | after |
+|---|---|---|
+| stored expiry after a malformed 304 at 12:01 | **12:00 — already past** | 13:01 |
+| second call skipped as still-fresh | **no** | yes |
+| **transport requests** | **2** | **1** |
+| history 200 with no `Expires` | 300 s (borrowed from orders) | 83,100 s — the next 11:05 roll |
+
+**The 304 defect.** R8 restored `db.expires_at(url)` when the header was
+unusable. That value has *necessarily lapsed* — its lapsing is why the request
+happened at all — so restoring it left a past timestamp and made the very next
+call legal. Fetching before `Expires` is the one rule CCP bans accounts for.
+
+**The 200 defect.** A single 300-second fallback was applied to every feed.
+History rolls **once a day at 11:05 UTC**; a five-minute TTL would re-ask 288
+times a day for a resource that changes once. A number lifted from one feed is
+not a safe statement about another.
+
+**No TTL is invented.** `unknown_expiry_boundary()` waits until the next moment
+this system was going to ask anyway:
+
+* **history** — the next 11:05 UTC roll (`timeutil.next_history_roll`), a
+  measured property of the data rather than a preference;
+* **orders** — the operator's own `[cadence].book_cold_interval_minutes`;
+* **types** — the operator's own `[cadence].universe_refresh_utc`;
+* **anything unmapped** — the longest of the three. Not knowing which feed this
+  is, is a reason to wait longer, never shorter.
+
+Waiting until the next scheduled run costs nothing that was going to be fetched
+sooner, which is what makes it safe rather than merely cautious.
+
+`safe_expiry()` additionally guarantees the result is **never at or before
+now** and **never shorter than an expiry already trusted**. `EsiResponse` gains
+`expiry_unknown`, so telemetry can show how often the server gave us nothing
+rather than that fact being silent.
+
+ETags, `last-modified`, pagination, budgets, the breaker and the error-limit
+guard are unchanged, and tests assert each still works.
+
+**Owed live gate (§22 S1).** Against live ESI, confirm that a real response
+carrying no `Expires` results in a wait rather than an immediate refetch, and
+that `expiry_unknown` is rare in the telemetry ledger — if it is common, the
+header parsing is wrong rather than the server being silent.

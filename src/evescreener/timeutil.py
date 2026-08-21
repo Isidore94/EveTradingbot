@@ -80,6 +80,21 @@ def last_completed_bar_date(moment: datetime | None = None) -> date:
     return (reference - timedelta(days=1)).date()
 
 
+def next_history_roll(moment: datetime | None = None) -> datetime:
+    """The next 11:05 UTC history roll strictly after `moment`.
+
+    A measured property of the data, not a preference: ESI's daily history
+    expires at 11:05 UTC, so a bar cannot change between one roll and the next.
+    That makes it the one boundary this system can wait for and *prove* it lost
+    nothing by waiting (§22 S1).
+    """
+    moment = ensure_utc(moment or utcnow())
+    roll = moment.replace(
+        hour=DOWNTIME_HOUR_UTC, minute=HISTORY_ROLL_MINUTE_UTC, second=0, microsecond=0
+    )
+    return roll if roll > moment else roll + timedelta(days=1)
+
+
 def parse_hhmm(text: str) -> time:
     """Parse a `HH:MM` config value into a UTC-naive wall time."""
     hour, _, minute = text.partition(":")

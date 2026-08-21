@@ -5,6 +5,44 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Expires fails closed on every production path (§22 S1)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S1. `uv run pytest -q` →
+**753 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+First phase of the **§22 track**, opened after an independent adversarial
+review found defects in the §21 remediation itself.
+
+**Reproduced through real `EsiClient.get()` calls against a counting
+transport.** R8's tests exercised `fallback_expiry()` in isolation — which is
+precisely why they passed while the production branches did not:
+
+| | before | after |
+|---|---|---|
+| stored expiry after a malformed 304 at 12:01 | **12:00, already past** | 13:01 |
+| second call skipped as still-fresh | **no** | yes |
+| **transport requests** | **2** | **1** |
+| history 200 with no `Expires` | 300 s, borrowed from orders | 83,100 s — next 11:05 roll |
+
+- **The 304 defect.** R8 restored the stored expiry when the header was
+  unusable. That value has necessarily lapsed — its lapsing is *why* the
+  request happened — so it left a past timestamp and made the next call legal.
+  Fetching before `Expires` is the one rule CCP bans accounts for.
+- **The 200 defect.** One 300-second fallback was applied to every feed.
+  History rolls once a day at 11:05 UTC; five minutes would re-ask 288 times a
+  day for a resource that changes once.
+- **No TTL is invented.** `unknown_expiry_boundary()` waits until the next
+  moment this system was going to ask anyway — the next 11:05 roll for history,
+  the operator's own cadence for orders and types, and the longest of the three
+  for anything unmapped. Waiting until the next scheduled run costs nothing
+  that was going to be fetched sooner.
+- `safe_expiry()` never returns a time at or before now, and never shortens an
+  expiry already trusted. `EsiResponse.expiry_unknown` makes a silent server
+  visible to telemetry.
+
+ETags, `last-modified`, pagination, budgets, the breaker and the error-limit
+guard are unchanged and still tested.
+
 ## 2026-08-20 — A week is seven days, and a print is not a return (§20.3)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §20.3. `uv run pytest -q` ->

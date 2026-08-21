@@ -156,23 +156,42 @@ def test_traded_averages_are_keyed_by_region(qtbot, desk):
 # -- 4. Expires fails closed ------------------------------------------------
 
 
-def test_a_missing_expires_header_is_not_a_licence_to_refetch():
-    """No Expires must mean 'unknown, wait', never 'no expiry, go' (§3.2)."""
-    from evescreener.esi.client import fallback_expiry
+def test_expiry_never_fails_open_and_is_never_borrowed_between_feeds(config):
+    """§22 S1 replaced `fallback_expiry` — see `test_esi_expiry_closed.py`.
 
-    assert fallback_expiry(None, feed_ttl_seconds=300) == 300
+    R8's version of this test exercised the helper in isolation, which is
+    exactly why it passed while the production 200 and 304 branches still
+    permitted an immediate refetch. The behavioural coverage now lives in
+    transport-level tests that count real requests; what is asserted here is
+    only that the contract's shape survives.
+    """
+    from datetime import UTC, datetime
 
+    from evescreener.esi.client import HISTORY_FEED, ORDERS_FEED, safe_expiry
 
-def test_a_malformed_expires_is_treated_as_missing_not_as_zero():
-    from evescreener.esi.client import fallback_expiry
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
 
-    assert fallback_expiry("not-a-date", feed_ttl_seconds=300) == 300
+    # A parseable header is used exactly as the server gave it.
+    given, unknown = safe_expiry(
+        "Thu, 20 Aug 2026 13:00:00 GMT", config=config, feed=ORDERS_FEED, now=now
+    )
+    assert given.hour == 13 and unknown is False
 
+    # Missing or malformed: a future boundary, flagged as not the server's word.
+    for header in (None, "not-a-date", ""):
+        expiry, unknown = safe_expiry(header, config=config, feed=ORDERS_FEED, now=now)
+        assert expiry > now, header
+        assert unknown is True, header
 
-def test_a_valid_expires_is_used_as_given():
-    from evescreener.esi.client import fallback_expiry
+    # The boundary is per feed, never one TTL borrowed across all of them.
+    orders, _ = safe_expiry(None, config=config, feed=ORDERS_FEED, now=now)
+    history, _ = safe_expiry(None, config=config, feed=HISTORY_FEED, now=now)
+    assert history > orders
 
-    assert fallback_expiry("Thu, 20 Aug 2026 12:00:00 GMT", feed_ttl_seconds=300) is None
+    # A stored expiry further out than the boundary is kept, never shortened.
+    far = datetime(2026, 8, 21, 23, 0, tzinfo=UTC)
+    kept, unknown = safe_expiry(None, config=config, feed=ORDERS_FEED, now=now, stored=far)
+    assert kept == far and unknown is True
 
 
 # -- 5. the retracted 16,789 is gone everywhere -----------------------------

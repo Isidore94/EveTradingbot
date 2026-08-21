@@ -26,7 +26,14 @@ import httpx
 
 from ..config import Config
 from ..store.db import Database
-from ..timeutil import ensure_utc, iso, utcnow
+from ..timeutil import (
+    ensure_utc,
+    iso,
+    next_daily_run,
+    next_history_roll,
+    parse_hhmm,
+    utcnow,
+)
 from .budget import BudgetExceeded, ErrorLimitGuard, HistoryRateLimiter, TokenBudget, token_cost
 
 ORDERS_FEED = "orders"
@@ -68,6 +75,10 @@ class EsiResponse:
     data: Any = None
     headers: dict[str, str] = field(default_factory=dict)
     expires: datetime | None = None
+    #: True when the server gave no usable `Expires` and the expiry above is
+    #: this system's own scheduled boundary rather than the server's word.
+    #: Recorded so telemetry can show how often that happens (§22 S1).
+    expiry_unknown: bool = False
     last_modified: str | None = None
     pages: int | None = None
     not_modified: bool = False
@@ -107,23 +118,72 @@ class PagedResult:
         return self.pages_expected > 0 and self.pages_fetched == self.pages_expected
 
 
-#: Feed TTLs used when a response carries no usable `Expires` (§21 R8).
-#: Conservative: the point is to wait, not to guess a short window.
-DEFAULT_FEED_TTL_SECONDS = 300
+def unknown_expiry_boundary(config, feed: str, now: datetime) -> datetime:
+    """When may we ask again, given the server told us nothing? (§22 S1)
 
+    A response with a missing or unparseable `Expires` leaves us unable to
+    prove anything about how long it stays valid. Any TTL invented here would
+    be a guess, and guessing *short* is the one direction that risks the ban.
+    The previous fallback guessed 300 seconds for every feed — a number lifted
+    from the orders cache and applied to history, which rolls **once a day**.
 
-def fallback_expiry(header: str | None, *, feed_ttl_seconds: int = DEFAULT_FEED_TTL_SECONDS):
-    """Seconds to wait when `Expires` is missing or malformed, else None.
+    So nothing is invented. The boundary is the next moment this system was
+    going to ask anyway:
 
-    A missing or unparseable `Expires` was treated as "no active expiry", which
-    permits an immediate refetch — the exact behaviour the never-fetch-before-
-    expiry invariant exists to prevent, and circumventing it is a bannable
-    offence (§3.2). Unknown must mean **wait**, not **go**: this returns a TTL
-    to hold for, and `None` only when the header parsed into a real instant.
+    * **history** — the next 11:05 UTC roll. That is a measured property of the
+      data (`timeutil.DOWNTIME_HOUR_UTC`/`HISTORY_ROLL_MINUTE_UTC`), not a
+      preference; a bar does not change between rolls.
+    * **orders** — the operator's own cold sweep interval,
+      `[cadence].book_cold_interval_minutes`.
+    * **types** — the operator's own universe refresh time,
+      `[cadence].universe_refresh_utc`.
+    * **anything unmapped** — the longest of the above. Not knowing which feed
+      this is, is a reason to wait longer, never shorter.
+
+    Waiting until the next scheduled run costs nothing that was going to be
+    fetched sooner, which is what makes this safe rather than merely cautious.
     """
-    if header and parse_http_date(header) is not None:
-        return None
-    return int(feed_ttl_seconds)
+    cadence = config.cadence
+    if feed == HISTORY_FEED:
+        return next_history_roll(now)
+    if feed == ORDERS_FEED:
+        return now + timedelta(minutes=int(cadence.book_cold_interval_minutes))
+    if feed == TYPES_FEED:
+        return next_daily_run(parse_hhmm(cadence.universe_refresh_utc), now)
+    return max(
+        next_history_roll(now),
+        now + timedelta(minutes=int(cadence.book_cold_interval_minutes)),
+        next_daily_run(parse_hhmm(cadence.universe_refresh_utc), now),
+    )
+
+
+def safe_expiry(
+    header: str | None,
+    *,
+    config,
+    feed: str,
+    now: datetime,
+    stored: datetime | None = None,
+) -> tuple[datetime, bool]:
+    """`(expiry, expiry_was_unknown)` — never in the past, never early.
+
+    Three rules, in order:
+
+    1. A parseable `Expires` is used exactly as given. The server knows.
+    2. Otherwise fall back to `unknown_expiry_boundary`, which is derived from
+       this system's own cadences rather than invented.
+    3. Never return anything at or before `now`, and never *shorten* an expiry
+       we already trusted. A 304 that restored a stored-but-lapsed timestamp is
+       precisely the reproduced defect: it made the very next call legal.
+    """
+    parsed = parse_http_date(header)
+    if parsed is not None:
+        return parsed, False
+    boundary = unknown_expiry_boundary(config, feed, now)
+    if stored is not None and stored > boundary:
+        # We already had a longer, trusted expiry. Keep it.
+        return stored, True
+    return boundary, True
 
 
 class EsiClient:
@@ -302,20 +362,23 @@ class EsiClient:
 
             if status == 304:
                 self._breaker_success(feed)
-                expires_at = parse_http_date(hdrs.get("expires"))
-                if expires_at is None:
-                    # A malformed or absent Expires on a 304 must not clear the
-                    # stored one: that would license an immediate refetch of a
-                    # resource the server just told us had not changed (§21 R8).
-                    expires_at = self.db.expires_at(url) or self._now() + timedelta(
-                        seconds=DEFAULT_FEED_TTL_SECONDS
-                    )
+                # The stored expiry has necessarily LAPSED — that is why this
+                # request happened at all — so restoring it would leave a past
+                # timestamp and make the very next call legal (§22 S1).
+                expires_at, unknown = safe_expiry(
+                    hdrs.get("expires"),
+                    config=self.config,
+                    feed=feed,
+                    now=self._now(),
+                    stored=self.db.expires_at(url),
+                )
                 self.db.touch_etag_expiry(url, expires_at)
                 return EsiResponse(
                     url=url,
                     status=304,
                     headers=hdrs,
                     expires=expires_at,
+                    expiry_unknown=unknown,
                     last_modified=hdrs.get("last-modified"),
                     not_modified=True,
                     fetched_at=self._now(),
@@ -340,10 +403,15 @@ class EsiClient:
                 self._breaker_failure(feed, f"HTTP {status} {response.text[:200]}")
                 raise EsiError(f"{url} -> HTTP {status}: {response.text[:300]}")
 
-            expires_at = parse_http_date(hdrs.get("expires"))
-            if expires_at is None:
-                # Fail closed: unknown expiry means wait, never "no expiry".
-                expires_at = self._now() + timedelta(seconds=DEFAULT_FEED_TTL_SECONDS)
+            # Fail closed: unknown expiry means wait until this feed's own next
+            # scheduled boundary, never "no expiry" and never a borrowed TTL.
+            expires_at, expiry_unknown = safe_expiry(
+                hdrs.get("expires"),
+                config=self.config,
+                feed=feed,
+                now=self._now(),
+                stored=self.db.expires_at(url),
+            )
             self.db.put_etag(url, hdrs.get("etag"), expires_at, hdrs.get("last-modified"))
             self._breaker_success(feed)
             pages = int(hdrs["x-pages"]) if hdrs.get("x-pages") else None
@@ -353,6 +421,7 @@ class EsiClient:
                 data=response.json(),
                 headers=hdrs,
                 expires=expires_at,
+                expiry_unknown=expiry_unknown,
                 last_modified=hdrs.get("last-modified"),
                 pages=pages,
                 fetched_at=self._now(),

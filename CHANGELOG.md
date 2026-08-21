@@ -5,6 +5,27 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Broker overrides reach production; a refusal is a record (§22 S6, S7)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S6/S7. `uv run pytest -q` →
+**802 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+- **S6.** `CostModel.from_config(...).broker_fee_overrides` was `{}` for every
+  config, always, and `maker_spreads()` used that untuned model — so R4's
+  per-station broker fee could not move a single production number. The R4 test
+  built the model by hand, proving the arithmetic and nothing about reach.
+  `[costs].broker_fee_overrides` is loaded by `from_config()` now; the new test
+  drives two stations at 0.10% and 5.00% **through `maker_spreads()`**. Rates
+  are operator-**observed**, never derived from standings. With none
+  configured, behaviour is byte-identical to before.
+- **S7.** §19.4 requires the refusal itself to go in the ledger.
+  `record_pass()` raised for an invalid action, and `_clean_tags` raised for an
+  unknown tag, **before** `_refuse()` was reached — so the one class of
+  decision the ledger lost was the one made wrongly. Both route through
+  `_refuse()` now, recording the attempted action and tags with the reason. The
+  decision is still refused and the unknown tag still never accepted; tests
+  assert the exception, the record, and that no `pass` event is written.
+
 ## 2026-08-20 — Three statistical and ranking corrections (§22 S5b, S5c, S5d)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S5b/c/d. `uv run pytest -q` →

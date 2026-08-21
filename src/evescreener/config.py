@@ -84,6 +84,11 @@ class CostsConfig:
     notional_tiers_isk: tuple[float, ...]
     book_staleness_minutes: int
     annual_capital_cost_pct: float
+    #: Operator-**observed** effective broker rates, per station id (§22 S6).
+    #: Transcribed from what the client actually charged; never derived from
+    #: standings, which this system cannot read. Empty means "use the
+    #: skill-derived base everywhere", which is the previous behaviour.
+    broker_fee_overrides: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

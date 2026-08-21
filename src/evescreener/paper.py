@@ -36,7 +36,7 @@ import pandas as pd
 from .config import Config
 from .costs import CostModel
 from .paths import append_jsonl, read_jsonl
-from .reasons import DISLIKE, LIKE, PASS_ACTIONS, normalise_tags
+from .reasons import DISLIKE, LIKE, PASS_ACTIONS, ReasonError, normalise_tags
 from .store.lake import EXECUTABLE_COLUMNS
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
 
@@ -392,14 +392,22 @@ class PaperLedger:
         learning loop say whether the reason was a good one.
         """
         now = ensure_utc(now or utcnow())
-        if action not in PASS_ACTIONS:
-            raise Refusal(f"pass action must be one of {PASS_ACTIONS}, got {action!r}")
         context = {
             "type_id": int(type_id),
             "type_name": type_name,
             "action": action,
+            "attempted_dislike_tags": [str(tag) for tag in (dislike_tags or ())],
         }
-        dislikes = _clean_tags(dislike_tags, vocabulary, DISLIKE)
+        # §19.4: the refusal itself goes in the ledger. Validation used to
+        # raise BEFORE `_refuse`, so an unknown tag or a bad action left no
+        # record at all — the one class of decision the ledger silently lost
+        # was the one made wrongly (§22 S7).
+        if action not in PASS_ACTIONS:
+            self._refuse(f"pass action must be one of {PASS_ACTIONS}, got {action!r}", context)
+        try:
+            dislikes = _clean_tags(dislike_tags, vocabulary, DISLIKE)
+        except ReasonError as exc:
+            self._refuse(str(exc), context)
         if not dislikes:
             self._refuse(NO_DISLIKE_TAGS, context)
         return self._append(

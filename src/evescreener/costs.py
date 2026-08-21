@@ -107,9 +107,15 @@ class CostModel:
             - costs.broker_fee_per_level_pct * costs.broker_relations_level
             - costs.broker_fee_standings_pct,
         )
+        overrides = {
+            int(entry["location_id"]): float(entry["broker_fee_pct"])
+            for entry in getattr(costs, "broker_fee_overrides", ())
+            if entry.get("location_id") is not None and entry.get("broker_fee_pct") is not None
+        }
         return cls(
             sales_tax_pct=tax,
             broker_fee_pct=broker,
+            broker_fee_overrides=overrides,
             relist_surcharge_multiple=costs.relist_surcharge_multiple,
             notional_tiers_isk=costs.notional_tiers_isk,
             book_staleness_minutes=costs.book_staleness_minutes,

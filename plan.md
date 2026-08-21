@@ -2027,9 +2027,9 @@ is listed as **CONFIRMED** only where the wrong output was observed directly.
 | **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | **IMPLEMENTED + GREEN** |
 | **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | **IMPLEMENTED + GREEN** |
 | **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | **IMPLEMENTED + GREEN** |
-| **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | **NEXT** |
-| **S7** | Validation failures raise before any refusal is recorded | **NARROWED** — `_refuse` is not in `reasons.py`; locate the real boundary first | queued |
-| **S8** | Import guard too narrow; TOP's aggregate figures are unversioned | claimed; the figure mismatch is itself the finding | queued |
+| **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | **IMPLEMENTED + GREEN** |
+| **S7** | Validation failures raise before any refusal is recorded | **CONFIRMED** at the `paper.PaperLedger` boundary | **IMPLEMENTED + GREEN** |
+| **S8** | Import guard too narrow; TOP's aggregate figures are unversioned | claimed; the figure mismatch is itself the finding | **NEXT** |
 
 **Nothing in §21 that the review found correct is being churned.** That list
 is in `SOL_REVIEW_PROMPT.md` §"Findings that appeared correct" and includes
@@ -2363,3 +2363,41 @@ Calendar-day 7/30 windows are unchanged.
 **Owed live gate (§22 S5d).** Chart five of the newly-UNKNOWN names and confirm
 they genuinely trade too sparsely to carry a weekly return, rather than the
 minimum being too strict.
+
+### §22 S6 — Broker overrides reach production — **IMPLEMENTED + GREEN**
+
+**Reproduced.** `CostModel.from_config(...).broker_fee_overrides` was `{}` for
+every config, always. `with_broker_overrides()` existed and worked, and nothing
+in production called it — `maker_spreads()` used the untuned model — so R4's
+per-station broker fee could not affect a single production number. The R4 test
+constructed the model by hand, which proves the arithmetic and nothing about
+whether the feature is reachable.
+
+`[costs].broker_fee_overrides` is now an optional list of
+`{ location_id, broker_fee_pct }`, loaded by `from_config()` and therefore
+reaching `maker_spreads()`. It is **operator-observed**: transcribed from what
+the client actually charged, never derived from standings this system cannot
+read. With none configured the behaviour is byte-identical to before, and an
+unlisted station still uses the skill-derived base. The new test drives two
+stations at 0.10% and 5.00% **through `maker_spreads()`**.
+
+**Owed live gate (§22 S6) — unchanged and still owed.** The operator must
+transcribe the actual in-client broker fee at Jita 4-4 and one secondary hub;
+until then the list is empty and every hub is priced at the base rate.
+
+### §22 S7 — A refusal is a record — **IMPLEMENTED + GREEN**
+
+**Reproduced.** §19.4 requires that the refusal itself go in the ledger.
+`record_pass()` raised `Refusal` for an invalid action, and `_clean_tags`
+raised `ReasonError` for an unknown tag, **before** `_refuse()` was reached —
+so neither left any record. The one class of decision the ledger silently lost
+was the one made wrongly, which is precisely the class worth keeping.
+
+Both now route through `_refuse()`, so the append-only ledger records the
+attempted action and the attempted tags with their reason. **The decision is
+still refused and the unknown tag is still never accepted** — tests assert the
+exception, the record, and that no `pass` event is written from a refused
+decision.
+
+**Owed live gate (§22 S7).** Attempt one bad pass on the real desk and confirm
+the refusal appears in `paper.jsonl` with the tags that were attempted.

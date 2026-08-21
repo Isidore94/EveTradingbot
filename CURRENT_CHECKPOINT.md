@@ -42,7 +42,7 @@ An independent adversarial review found defects in the §21 remediation itself
 and older ones §21 did not reach. **S1 is done; S2 is next.** Every §21 owed
 live gate and the consolidated checklist below remain owed in full.
 
-**Gate stamp:** `uv run pytest -q` → **795 passed, 7 deselected**, ruff check +
+**Gate stamp:** `uv run pytest -q` → **802 passed, 7 deselected**, ruff check +
 format clean, `selftest` **12/12**.
 
 | id | finding | disposition | state |
@@ -55,9 +55,9 @@ format clean, `selftest` **12/12**.
 | **S5b** | `effective_samples` returned 3 where at most 2 holds | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 | **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 | **S5d** | Two-observation median ranked as print-resistant | **CONFIRMED** | **IMPLEMENTED + GREEN** |
-| **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | **NEXT** |
-| **S7** | Validation failures raise before any refusal is recorded | **NARROWED** | queued |
-| **S8** | Import guard too narrow; TOP figures unversioned | claimed | queued |
+| **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S7** | Validation failures raise before any refusal is recorded | **CONFIRMED** (paper ledger) | **IMPLEMENTED + GREEN** |
+| **S8** | Import guard too narrow; TOP figures unversioned | claimed | **NEXT** |
 
 ### S2 owed live gate
 
@@ -66,6 +66,14 @@ format clean, `selftest` **12/12**.
       above the executable ask, a sell fill at or below the executable bid.
 - [ ] Confirm `exec_reachable_volume_share` is high at Jita 4-4 and visibly
       lower for a type whose bids rest elsewhere.
+
+### S6/S7 owed live gates
+
+- [ ] **S6** — transcribe the actual in-client broker fee at Jita 4-4 and one
+      secondary hub into `[costs].broker_fee_overrides`. Until then the list is
+      empty and every hub is priced at the base rate.
+- [ ] **S7** — attempt one bad pass on the real desk and confirm the refusal
+      appears in `paper.jsonl` with the attempted tags.
 
 ### S5b/c/d owed live gates
 

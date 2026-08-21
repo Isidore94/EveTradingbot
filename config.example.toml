@@ -70,6 +70,14 @@ broker_fee_base_pct = 3.0
 # remainder comes from standings (plan.md §5, open check #5/#6).
 broker_fee_per_level_pct = 0.3
 broker_fee_standings_pct = 0.5
+# Operator-OBSERVED effective broker rates, per station (plan.md §22 S6).
+# Transcribe what the client actually charged; these are never derived from
+# standings, which this system cannot read. Leave empty to use the
+# skill-derived base everywhere.
+# broker_fee_overrides = [
+#   { location_id = 60003760, broker_fee_pct = 1.30 },  # Jita IV-4
+# ]
+broker_fee_overrides = []
 # Additional charge when modifying/relisting a resting order (open check #5).
 relist_surcharge_multiple = 1.0
 # ISK notional tiers the depth walk prices (plan.md §11 D3).

@@ -406,6 +406,7 @@ class LeadLagResult:
             "types": self.types,
             "cohort": self.cohort,
             "cohort_declaration": cohort_declaration(self.cohort),
+            "h2": h2_statement(self),
             "multiple_comparisons": {
                 "tests": LEAD_LAG_TESTS,
                 "frozen_alpha": MAX_P,
@@ -529,11 +530,130 @@ def adjusted_verdict(row: dict) -> dict:
     reported beside it so a reader can see which claims survive both.
     """
     p_value = row.get("p_value")
+    permutation = row.get("p_value_permutation")
     if p_value is None:
-        return {"p_value_frozen_rule": None, "p_value_family_wise": None}
+        return {
+            "p_value_frozen_rule": None,
+            "p_value_family_wise": None,
+            "p_value_assumes_independence": None,
+        }
+    # The frozen §14.3 rule is applied to the naive p-value exactly as it always
+    # was — it is frozen, and is not retrofitted. The family-wise verdict uses
+    # the CLUSTER-AWARE p-value when one exists, because Bonferroni over
+    # p-values that already assume independence corrects the wrong error.
+    family_source = permutation if permutation is not None else p_value
     return {
         "p_value_frozen_rule": bool(p_value < MAX_P),
-        "p_value_family_wise": bool(p_value < FAMILY_ALPHA),
+        "p_value_family_wise": bool(family_source < FAMILY_ALPHA),
+        "p_value_assumes_independence": True,
+    }
+
+
+H2_UNKNOWN = "H2 UNKNOWN — confirmatory run absent"
+
+#: Permutations for the cluster-aware p-value. Modest by default because the
+#: study runs over ~470k rows and ten tests; raise it when a claim depends on
+#: the tail of the distribution rather than on its shape.
+DEFAULT_PERMUTATIONS = 199
+
+
+def rotation_permutation_p(
+    x,
+    y,
+    groups,
+    *,
+    observed_rho: float | None,
+    permutations: int = DEFAULT_PERMUTATIONS,
+    seed: int = 20260820,
+) -> float | None:
+    """Cluster-aware p-value by circular rotation within each type (§22 S4).
+
+    `spearman()`'s p-value comes from `z = rho * sqrt(n - 1)`, which assumes
+    every one of the ~470,000 rows is an independent observation. They are not:
+    a type's own days are serially dependent, and every type moves with the
+    market on the same day. R5 measured that dependence into
+    `independent_observations()` and then nothing read it — a decorative field
+    described as a correction.
+
+    Rotating each type's `x` series by a random offset destroys the *alignment*
+    between destruction and returns while preserving each series' own
+    autocorrelation **exactly**, which is what makes the resulting null
+    distribution the right one to compare against. The empirical p-value is
+    `(1 + #{|rho_perm| >= |rho_obs|}) / (1 + permutations)`, so it can never be
+    zero — an empirical test cannot prove more than its own resolution.
+    """
+    if observed_rho is None:
+        return None
+    x = np.asarray(x, dtype="float64")
+    y = np.asarray(y, dtype="float64")
+    groups = np.asarray(groups)
+    usable = np.isfinite(x) & np.isfinite(y)
+    if usable.sum() < 3:
+        return None
+    x, y, groups = x[usable], y[usable], groups[usable]
+
+    order = np.argsort(groups, kind="stable")
+    x, y, groups = x[order], y[order], groups[order]
+    starts = np.flatnonzero(np.r_[True, groups[1:] != groups[:-1]])
+    ends = np.r_[starts[1:], len(groups)]
+
+    rng = np.random.default_rng(seed)
+    hits = 0
+    target = abs(float(observed_rho))
+    for _ in range(int(permutations)):
+        rotated = x.copy()
+        for start, end in zip(starts, ends, strict=False):
+            span = end - start
+            if span > 1:
+                rotated[start:end] = np.roll(x[start:end], int(rng.integers(1, span)))
+        rho, _p, _n = spearman(rotated, y)
+        if rho is not None and abs(rho) >= target:
+            hits += 1
+    return float((1 + hits) / (1 + int(permutations)))
+
+
+def h2_statement(result) -> dict:
+    """What may be said about **H2**, as opposed to about a pooled run.
+
+    H2 (§14.1) is a claim about doctrine-class hulls and their fitted modules
+    within a regional catchment. The only lead-lag run this repository has ever
+    performed pooled the whole catalogue globally, so whatever it found is
+    evidence about *that* population and not about H2 — in either direction.
+
+    Every renderer previously printed "the lead-lag claim was tested and not
+    supported", which asserts a test of H2 that has not happened. This returns
+    the honest pair: **H2 UNKNOWN**, plus the exploratory finding beside it,
+    labelled.
+    """
+    if result is None:
+        return {
+            "h2": H2_UNKNOWN,
+            "h2_reason": "no lead-lag study has been run",
+            "evidence_class": "none",
+            "cohort": None,
+            "exploratory_outcome": None,
+        }
+    cohort = getattr(result, "cohort", COHORT_POOLED)
+    declaration = cohort_declaration(cohort)
+    outcome = (getattr(result, "outcome", None) or {}).get("outcome")
+    if declaration["evidence_class"] == "confirmatory":
+        return {
+            "h2": outcome or "UNKNOWN",
+            "h2_reason": (getattr(result, "outcome", None) or {}).get("reason", ""),
+            "evidence_class": "confirmatory",
+            "cohort": cohort,
+            "exploratory_outcome": None,
+        }
+    return {
+        "h2": H2_UNKNOWN,
+        "h2_reason": (
+            "the only run performed pooled every catalogue type globally; H2 names "
+            "doctrine-class hulls and their fitted modules within a regional "
+            "catchment, and that confirmatory run absent"
+        ),
+        "evidence_class": "exploratory",
+        "cohort": cohort,
+        "exploratory_outcome": outcome,
     }
 
 
@@ -544,6 +664,7 @@ def run_lead_lag_study(
     *,
     max_lag: int | None = None,
     seed: int = 20260820,
+    permutations: int = DEFAULT_PERMUTATIONS,
 ) -> LeadLagResult:
     """Test H2 against the frozen §14.3 rule. No interpretation, no retrofit."""
     result = LeadLagResult(generated_at=iso(utcnow()))
@@ -608,15 +729,26 @@ def run_lead_lag_study(
                 second_half["destruction_z"].to_numpy(dtype="float64"),
                 second_half[target].to_numpy(dtype="float64"),
             )
+            permutation_p = rotation_permutation_p(
+                ordered["destruction_z"].to_numpy(dtype="float64"),
+                ordered[target].to_numpy(dtype="float64"),
+                ordered["type_id"].to_numpy(),
+                observed_rho=rho,
+                permutations=permutations,
+                seed=seed,
+            )
             result.lags.append(
                 {
                     "lag_days": lag,
                     "target": label,
                     "rho": rho,
                     "p_value": p,
+                    "p_value_permutation": permutation_p,
                     "observations": n,
                     "independent_observations": independent_observations(ordered),
-                    **adjusted_verdict({"p_value": p, "rho": rho}),
+                    **adjusted_verdict(
+                        {"p_value": p, "p_value_permutation": permutation_p, "rho": rho}
+                    ),
                     "first_half_rho": first_rho,
                     "first_half_n": first_n,
                     "second_half_rho": second_rho,
@@ -702,8 +834,10 @@ def evaluate_lead_lag(result: LeadLagResult) -> dict:
             "with a placebo below half the measured rho"
         ),
         "consequence": (
-            "destruction ships as digest ANNOTATIONS ONLY, and the annotation says the "
-            "lead-lag claim was tested and not supported"
+            "destruction ships as digest ANNOTATIONS ONLY. The annotation says only "
+            "that this POOLED, EXPLORATORY run did not support the effect; H2 itself "
+            "is UNKNOWN because its confirmatory cohort has never been measured "
+            "(plan.md §14.4, §22 S4)"
         ),
         "strongest_lag": strongest,
     }

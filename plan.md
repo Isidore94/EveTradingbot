@@ -2022,7 +2022,7 @@ is listed as **CONFIRMED** only where the wrong output was observed directly.
 | **S2a** | Executable best quote carries **regional** depth, p5 and concentration | claimed; reproduction owed at phase start | **NEXT** |
 | **S2b** | Production pricing bypasses `load_validated_book()` | claimed; reproduction owed at phase start | queued with S2a |
 | **S4** | Pooled exploratory lead-lag rendered as if H2 had been tested | claimed; reproduction owed at phase start | queued |
-| **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | queued |
+| **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | **NEXT** |
 | **S3** | Worker reads page state; a same-input key change schedules no follow-up | claimed; reproduction owed at phase start | queued |
 | **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | queued |
 | **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | queued |
@@ -2145,3 +2145,47 @@ type that `depth_fill_price_0` is consistent with `exec_price` (a buy fill at
 or above the executable ask, a sell fill at or below the executable bid), and
 that `exec_reachable_volume_share` is high at Jita 4-4 and visibly lower for a
 type whose bids sit elsewhere.
+
+### §22 S4 — H2 is UNKNOWN, and every renderer must say so — **IMPLEMENTED + GREEN**
+
+**Reproduced.** R5 made the *payload* honest — it carries a
+`cohort_declaration` stating the pooled catalogue-wide run is exploratory and
+not evidence about H2 — and then every renderer discarded it and printed **"the
+lead-lag claim was tested and not supported"**. That sentence asserts a test of
+H2. No such test exists. `brief.py` was worse: it printed it whenever
+`destruction_z` was merely present, with no lead-lag payload involved.
+
+`h2_statement()` returns the honest pair — **`H2 UNKNOWN — confirmatory run
+absent`**, plus the exploratory finding beside it, labelled with its cohort. An
+H2 verdict is available **only** from a declared doctrine cohort, and a payload
+carrying no declaration **fails closed**: it cannot be shown to be
+confirmatory, so it is not treated as such.
+
+| surface | before | after |
+|---|---|---|
+| digest | "DOES NOT SURVIVE" + "tested and not supported" | "H2 UNKNOWN — confirmatory run absent", the pooled run labelled exploratory, "annotation only" |
+| brief | "the lead-lag claim was tested and not supported" | "a brief carries no lead-lag study, and H2 has no confirmatory run" |
+| `evaluate_lead_lag` consequence | asserts a test of H2 | names the pooled cohort and points at §14.4 |
+
+**The dependence correction is no longer decorative.** R5 measured
+`independent_observations()` and nothing read it: `spearman()` still produced
+`z = rho * sqrt(n - 1)`, which treats ~470,000 serially- and
+cross-sectionally-dependent rows as independent, and Bonferroni was applied to
+*that*. `rotation_permutation_p()` rotates each type's series by a random
+offset — destroying the alignment between destruction and returns while
+preserving each series' own autocorrelation **exactly** — and reports an
+empirical p-value bounded below by `1/(permutations+1)`, because an empirical
+test cannot prove more than its own resolution.
+
+The **frozen §14.3 rule is still applied to the naive p-value**, unchanged and
+not retrofitted. The **family-wise** verdict now uses the cluster-aware
+p-value, because Bonferroni over p-values that already assume independence
+corrects the wrong error. Every lag row carries both, plus
+`p_value_assumes_independence`.
+
+**No confirmatory run was created or claimed.** The doctrine cohort remains
+declared and unmeasured.
+
+**Owed live gate (§22 S4).** Re-run the lead-lag study on the real lake and
+record how far the permutation p-value sits from the naive one. If they agree
+closely, the dependence is weaker than assumed — itself a finding.

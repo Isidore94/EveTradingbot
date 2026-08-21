@@ -5,6 +5,31 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — H2 is UNKNOWN, and every renderer says so (§22 S4)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S4. `uv run pytest -q` →
+**782 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+R5 made the payload honest and every renderer discarded it, printing **"the
+lead-lag claim was tested and not supported"** — a claim about H2, whose
+confirmatory run does not exist. `brief.py` printed it whenever `destruction_z`
+was merely present, with no study involved.
+
+`h2_statement()` returns **`H2 UNKNOWN — confirmatory run absent`** plus the
+exploratory pooled finding beside it, labelled. An H2 verdict is available only
+from a declared doctrine cohort; a payload with no declaration **fails closed**.
+
+**The dependence correction is no longer decorative.**
+`independent_observations()` was measured and never read — `spearman()` still
+assumed ~470,000 dependent rows were independent, and Bonferroni corrected
+that. `rotation_permutation_p()` rotates each type's series by a random offset,
+preserving its autocorrelation exactly while destroying the alignment, and
+gives an empirical p-value bounded below by `1/(permutations+1)`. The frozen
+§14.3 rule still uses the naive p-value, unchanged; the family-wise verdict now
+uses the cluster-aware one.
+
+No confirmatory run was created or claimed.
+
 ## 2026-08-20 — Executable identity covers depth, and pricing uses the validator (§22 S2)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S2. `uv run pytest -q` →

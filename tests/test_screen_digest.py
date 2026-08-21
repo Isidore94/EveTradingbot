@@ -207,12 +207,32 @@ def test_digest_never_mentions_everyone(config, seeded_db):
     assert "@everyone" not in text and "@here" not in text
 
 
-def test_an_unsurviving_lead_lag_says_so_in_the_digest(config, seeded_db):
+def test_a_lead_lag_payload_without_a_cohort_reports_H2_UNKNOWN(config, seeded_db):
+    """§22 S4: the digest asserted a test of H2 that never happened.
+
+    A payload declaring no cohort cannot be shown to be confirmatory, so it
+    fails closed: the run is reported, and H2 stays UNKNOWN.
+    """
     result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
     text = build_digest(
         config, result, lead_lag_outcome={"outcome": "DOES NOT SURVIVE", "reason": "weak"}
     )
-    assert "tested and not supported" in text
+    assert "H2 UNKNOWN" in text
+    assert "tested and not supported" not in text
+    assert "annotation only" in text
+    assert "DOES NOT SURVIVE" in text, "the run itself is still reported"
+
+
+def test_a_pooled_run_is_labelled_exploratory_in_the_digest(config, seeded_db):
+    from evescreener.killmails import LeadLagResult
+
+    study = LeadLagResult(generated_at="2026-08-20T00:00:00+00:00")
+    study.outcome = {"outcome": "DOES NOT SURVIVE", "reason": "weak"}
+    result = run_screen(config, seeded_db, pd.DataFrame(), None, pd.DataFrame(), now=NOW)
+    text = build_digest(config, result, lead_lag_outcome=study.as_dict())
+    assert "H2 UNKNOWN" in text
+    assert "exploratory" in text
+    assert "doctrine cohort has never been measured" in text
 
 
 # -- delivery ---------------------------------------------------------------

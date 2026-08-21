@@ -426,7 +426,8 @@ def render_brief(brief: TypeBrief) -> str:
     if brief.destruction_z is not None:
         lines.append(
             f"destruction_z {brief.destruction_z:+.2f} "
-            "(annotation only — the lead-lag claim was tested and not supported)"
+            "(annotation only — a brief carries no lead-lag study, and H2 has "
+            "no confirmatory run)"
         )
     if brief.nearby_levels:
         lines.append("")

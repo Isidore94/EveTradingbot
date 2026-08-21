@@ -268,13 +268,30 @@ def build_digest(
                 if isinstance(judgement, dict):
                     lines.append(f"· backtest {horizon}d: {judgement.get('verdict', 'UNKNOWN')}")
         if lead_lag_outcome:
-            outcome = lead_lag_outcome.get("outcome", "UNKNOWN")
-            lines.append(f"· destruction lead-lag: {outcome}")
-            if outcome != "SURVIVES":
-                lines.append(
-                    "  (destruction is shown as an annotation only — the lead-lag claim "
-                    "was tested and not supported)"
-                )
+            # §22 S4: the outcome alone cannot be printed, because it is an
+            # outcome about a POOLED catalogue-wide run and reads as a verdict
+            # on H2. Cohort and evidence class travel with it.
+            h2 = lead_lag_outcome.get("h2") or {}
+            if h2:
+                lines.append(f"· destruction lead-lag: {h2.get('h2', 'H2 UNKNOWN')}")
+                exploratory = h2.get("exploratory_outcome")
+                if exploratory:
+                    lines.append(
+                        f"  (exploratory, pooled across all catalogue types: {exploratory}; "
+                        "H2's doctrine cohort has never been measured)"
+                    )
+                lines.append("  destruction is shown as an annotation only")
+            else:
+                # Fail closed: a payload with no cohort declaration cannot be
+                # shown to be confirmatory, so it cannot carry an H2 verdict.
+                lines.append("· destruction lead-lag: H2 UNKNOWN — confirmatory run absent")
+                outcome = lead_lag_outcome.get("outcome")
+                if outcome:
+                    lines.append(
+                        f"  (a run reported {outcome}, but declared no cohort, so what "
+                        "population it measured is unknown)"
+                    )
+                lines.append("  destruction is shown as an annotation only")
 
     diagnostics = screen.composite or {}
     lines.append("")

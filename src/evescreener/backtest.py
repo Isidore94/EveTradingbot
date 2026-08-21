@@ -157,12 +157,25 @@ def friction_breakdown(
     overstating the cost of a strategy already judged NOT PLAUSIBLE is exactly
     the direction of error that would go unquestioned.
     """
-    entry_cost = (entry_effective / entry_close - 1.0) * 100.0 if entry_close else 0.0
-    # Undo the tax to isolate the book's own bite on the way out.
     tax_factor = 1.0 - float(sales_tax_pct) / 100.0
-    pre_tax_exit = exit_effective / tax_factor if tax_factor else exit_effective
-    exit_cost = (1.0 - pre_tax_exit / exit_close) * 100.0 if exit_close else 0.0
-    book = entry_cost + exit_cost
+    if not entry_close or not exit_close or not tax_factor:
+        return {
+            "book_haircut_pct": 0.0,
+            "sales_tax_pct": float(sales_tax_pct),
+            "total_friction_pct": 0.0,
+        }
+
+    # Friction is what the round trip KEEPS OF THE GROSS MOVE, so it is a
+    # ratio of ratios — not a sum of two one-sided percentages (§22 S5a).
+    #
+    # Adding them overstates, and the further the prices move the worse it
+    # gets: entry 100 -> 150 and exit 100 -> 50 summed to 100%, i.e. "the whole
+    # move is friction", when the true cost is 1 - (50/150) = 66.667%. The sum
+    # can even exceed 100% and imply a loss larger than the position.
+    entry_ratio = entry_effective / entry_close
+    pre_tax_exit_ratio = (exit_effective / tax_factor) / exit_close
+    book = (1.0 - pre_tax_exit_ratio / entry_ratio) * 100.0
+    # Tax is levied on what the book already left, so the two compound.
     total = (1.0 - (1.0 - book / 100.0) * tax_factor) * 100.0
     return {
         "book_haircut_pct": float(book),
@@ -357,12 +370,13 @@ def _stats(
         # Averaged the same way `round_trip_haircut_pct` is — per row, then
         # meaned — so the parts always sum to a number the total agrees with.
         tax_factor = 1.0 - float(sales_tax_pct) / 100.0
-        entry_cost = (instances["entry_effective"] / instances["entry_close"] - 1.0) * 100.0
-        pre_tax_exit = (
+        # Per row, as a ratio of the gross move — the same correction as the
+        # scalar helper, applied before the mean rather than after (§22 S5a).
+        entry_ratio = instances["entry_effective"] / instances["entry_close"]
+        pre_tax_exit_ratio = (
             instances["exit_effective"] / tax_factor if tax_factor else instances["exit_effective"]
-        )
-        exit_cost = (1.0 - pre_tax_exit / instances["exit_close"]) * 100.0
-        book = float((entry_cost + exit_cost).mean())
+        ) / instances["exit_close"]
+        book = float(((1.0 - pre_tax_exit_ratio / entry_ratio) * 100.0).mean())
         # Tax is levied on what the book already left, so the two compound.
         total = (1.0 - (1.0 - book / 100.0) * tax_factor) * 100.0
         parts = {

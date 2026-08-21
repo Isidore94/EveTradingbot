@@ -2022,8 +2022,8 @@ is listed as **CONFIRMED** only where the wrong output was observed directly.
 | **S2a** | Executable best quote carries **regional** depth, p5 and concentration | claimed; reproduction owed at phase start | **NEXT** |
 | **S2b** | Production pricing bypasses `load_validated_book()` | claimed; reproduction owed at phase start | queued with S2a |
 | **S4** | Pooled exploratory lead-lag rendered as if H2 had been tested | claimed; reproduction owed at phase start | queued |
-| **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | **NEXT** |
-| **S3** | Worker reads page state; a same-input key change schedules no follow-up | claimed; reproduction owed at phase start | queued |
+| **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | **IMPLEMENTED + GREEN** |
+| **S3** | Worker reads page state; a same-input key change schedules no follow-up | claimed; reproduction owed at phase start | **NEXT** |
 | **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | queued |
 | **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | queued |
 | **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | queued |
@@ -2189,3 +2189,46 @@ declared and unmeasured.
 **Owed live gate (§22 S4).** Re-run the lead-lag study on the real lake and
 record how far the permutation p-value sits from the naive one. If they agree
 closely, the dependence is weaker than assumed — itself a finding.
+
+### §22 S5a — Friction is a ratio of the gross move, not a sum of two costs — **IMPLEMENTED + GREEN**
+
+**Reproduced.** entry close 100 → effective 150, exit close 100 → effective 50,
+tax 0:
+
+| | before | after |
+|---|---|---|
+| `total_friction_pct` | **100.0%** | **66.666667%** |
+
+R3 computed friction as `entry_cost + exit_cost`, two one-sided percentages
+added together. That says "the whole move is friction" for a round trip that
+actually kept a third of it, and the error grows with the size of the moves —
+the sum can exceed 100% and imply a loss larger than the position.
+
+Friction is what the round trip **keeps of the gross move**, so it is a ratio
+of ratios:
+
+```
+book = 1 - (pre_tax_exit / exit_close) / (entry_effective / entry_close)
+total = 1 - (1 - book) * (1 - tax)
+```
+
+Tax still compounds rather than adds, because it is levied on what the book
+already left. Both the scalar helper and the aggregate statistic use the same
+per-row form — applied *before* the mean rather than after.
+
+**The R3 regression test asserted the wrong formula and is replaced.** New
+cases pin the reproduction itself, that friction can never exceed the whole
+position however wide the book, and that a frictionless round trip costs only
+the tax.
+
+**The frozen §13.6 verdict rule is untouched and the verdict does not move.**
+The golden fixture was regenerated *after* the corrected case existed; every
+cell is still **NOT PLAUSIBLE**. Its friction figures shifted slightly — at 2x,
+book 7.00% → 6.80% and total 10.14% → 9.94% — because the additive error only
+bites at large moves and the golden haircuts are small. The pre-correction
+values remain in git history; no stored report was rewritten.
+
+**Owed live gate (§22 S5a).** Re-run the backtest on the real lake and compare
+the reported `total_friction_pct` against the headline 14.7% recorded in §17.
+If the corrected figure differs materially, §17's number is a historical
+snapshot of the old formula and must be labelled as one rather than replaced.

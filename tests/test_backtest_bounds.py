@@ -144,8 +144,57 @@ def test_the_clustered_bound_is_never_more_confident_than_the_naive_one():
 # -- 4. friction reports its parts ------------------------------------------
 
 
-def test_round_trip_friction_separates_book_haircut_from_tax():
-    """'14.7% friction before tax' was a number that already had tax in it."""
+def test_friction_is_a_ratio_of_the_gross_move_not_a_sum_of_two_costs():
+    """§22 S5a: the previous formula added two one-sided percentages.
+
+    entry 100 -> 150 and exit 100 -> 50 summed to **100%** — "the whole move is
+    friction" — where the true cost of the round trip is `1 - 50/150`, i.e.
+    66.667%. The sum can even exceed 100% and imply a loss larger than the
+    position. The R3 regression test asserted the wrong formula and is replaced.
+    """
+    from evescreener.backtest import friction_breakdown
+
+    parts = friction_breakdown(
+        entry_close=100.0,
+        entry_effective=150.0,
+        exit_close=100.0,
+        exit_effective=50.0,
+        sales_tax_pct=0.0,
+    )
+    assert parts["total_friction_pct"] == pytest.approx(100 * (1 - 50 / 150))
+    assert parts["book_haircut_pct"] == pytest.approx(100 * (1 - 50 / 150))
+
+
+def test_friction_can_never_exceed_the_whole_position():
+    """However wide the book, a round trip cannot cost more than everything."""
+    from evescreener.backtest import friction_breakdown
+
+    for exit_effective in (50.0, 10.0, 1.0, 0.01):
+        parts = friction_breakdown(
+            entry_close=100.0,
+            entry_effective=200.0,
+            exit_close=100.0,
+            exit_effective=exit_effective,
+            sales_tax_pct=3.375,
+        )
+        assert parts["total_friction_pct"] < 100.0, exit_effective
+
+
+def test_a_frictionless_round_trip_costs_only_the_tax():
+    from evescreener.backtest import friction_breakdown
+
+    parts = friction_breakdown(
+        entry_close=100.0,
+        entry_effective=100.0,
+        exit_close=100.0,
+        exit_effective=100.0 * (1 - 0.03375),
+        sales_tax_pct=3.375,
+    )
+    assert parts["book_haircut_pct"] == pytest.approx(0.0, abs=1e-9)
+    assert parts["total_friction_pct"] == pytest.approx(3.375)
+
+
+def test_book_haircut_and_tax_still_compound_rather_than_add():
     from evescreener.backtest import friction_breakdown
 
     parts = friction_breakdown(
@@ -155,13 +204,6 @@ def test_round_trip_friction_separates_book_haircut_from_tax():
         exit_effective=90.0,
         sales_tax_pct=3.375,
     )
-    # Entry: 105/100 - 1 = 5%. Exit: the 90 received is AFTER tax, so the
-    # book's own bite is 1 - (90 / 0.96625) / 100 = 6.8564%.
-    expected_exit = (1.0 - (90.0 / (1.0 - 0.03375)) / 100.0) * 100.0
-    assert parts["book_haircut_pct"] == pytest.approx(5.0 + expected_exit, rel=1e-9)
-    assert parts["sales_tax_pct"] == pytest.approx(3.375)
-    # Tax is levied on what the book already left, so the two COMPOUND. The
-    # sum would overstate the cost of a strategy already judged NOT PLAUSIBLE.
     book = parts["book_haircut_pct"] / 100.0
     assert parts["total_friction_pct"] == pytest.approx(
         (1.0 - (1.0 - book) * (1.0 - 0.03375)) * 100.0

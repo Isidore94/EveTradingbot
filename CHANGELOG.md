@@ -5,6 +5,30 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Friction is a ratio of the gross move (§22 S5a)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S5a. `uv run pytest -q` →
+**785 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+Reproduced: entry 100→150, exit 100→5 0, tax 0 reported **100.0%** friction
+where the true cost is `1 - 50/150` = **66.667%**.
+
+R3 added two one-sided percentages. That says "the whole move is friction" for
+a round trip that kept a third of it, and the error grows with the moves — the
+sum can exceed 100% and imply a loss larger than the position. Friction is what
+the round trip keeps of the **gross move**, so it is a ratio of ratios:
+`1 - (pre_tax_exit / exit_close) / (entry_effective / entry_close)`. Tax still
+compounds. Both the scalar helper and the aggregate use the same per-row form.
+
+The R3 regression test asserted the wrong formula and is replaced.
+
+**The frozen §13.6 rule is untouched and the verdict does not move** — every
+cell is still NOT PLAUSIBLE. The golden fixture was regenerated after the
+corrected case existed; its friction figures shifted slightly (2x: book
+7.00%→6.80%, total 10.14%→9.94%) because the additive error only bites at
+large moves. Pre-correction values remain in git history; no stored report was
+rewritten.
+
 ## 2026-08-20 — H2 is UNKNOWN, and every renderer says so (§22 S4)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S4. `uv run pytest -q` →

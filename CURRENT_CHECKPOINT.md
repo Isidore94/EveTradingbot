@@ -42,7 +42,7 @@ An independent adversarial review found defects in the §21 remediation itself
 and older ones §21 did not reach. **S1 is done; S2 is next.** Every §21 owed
 live gate and the consolidated checklist below remain owed in full.
 
-**Gate stamp:** `uv run pytest -q` → **782 passed, 7 deselected**, ruff check +
+**Gate stamp:** `uv run pytest -q` → **785 passed, 7 deselected**, ruff check +
 format clean, `selftest` **12/12**.
 
 | id | finding | disposition | state |
@@ -50,8 +50,8 @@ format clean, `selftest` **12/12**.
 | **S1** | `Expires` did not fail closed on the 304/200 paths | **CONFIRMED** (2 requests where 1 was correct) | **IMPLEMENTED + GREEN** |
 | **S2** | Regional depth on an executable quote; pricing bypasses the validator | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 | **S4** | Pooled exploratory lead-lag rendered as if H2 were tested | claimed | **NEXT — reproduce first** |
-| **S5a** | `friction_breakdown` 100% where 66.667% is correct | **CONFIRMED** | **NEXT** |
-| **S3** | Worker reads page state; same-input key change schedules no follow-up | claimed | queued |
+| **S5a** | `friction_breakdown` 100% where 66.667% is correct | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S3** | Worker reads page state; same-input key change schedules no follow-up | claimed | **NEXT** |
 | **S5b** | `effective_samples` returned 3 where at most 2 holds | **CONFIRMED** | queued |
 | **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** | queued |
 | **S5d** | Two-observation median ranked as print-resistant | **CONFIRMED** | queued |
@@ -66,6 +66,13 @@ format clean, `selftest` **12/12**.
       above the executable ask, a sell fill at or below the executable bid.
 - [ ] Confirm `exec_reachable_volume_share` is high at Jita 4-4 and visibly
       lower for a type whose bids rest elsewhere.
+
+### S5a owed live gate
+
+- [ ] Re-run the backtest on the real lake and compare `total_friction_pct`
+      against the headline **14.7%** in §17. If it differs materially, §17's
+      figure is a snapshot of the old additive formula and must be **labelled**
+      as historical rather than replaced.
 
 ### S4 owed live gate
 

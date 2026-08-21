@@ -5,8 +5,10 @@ verification stamp. `plan.md` owns the roadmap; `CHANGELOG.md` owns history.
 
 ## Active item
 
-**The consolidated live-validation gate** (plan.md §17 D-1), now covering the
-desk and the operator setup engine as well (plan.md §19, checklist section I).
+**The paper desk's fill models** (plan.md §12.2 amended 2026-08-21, §17 D-32)
+— see the ACTIVE section below — sitting on top of **the consolidated
+live-validation gate** (plan.md §17 D-1), which covers the desk and the
+operator setup engine as well (plan.md §19, checklist section I).
 Everything is **IMPLEMENTED + GREEN**. Nothing is `LIVE_VALIDATED`, and
 nothing may be promoted to real ISK until the checklist below is worked
 through.
@@ -35,6 +37,60 @@ what gate E measures. Do that one first.
 Every item on it is an **operator action**. The build cannot self-certify: the
 whole point of the ladder is that a machine's confidence in itself is not
 evidence.
+
+## ACTIVE — the paper desk, fill models (plan.md §12.2 amended, §17 D-32)
+
+**Operator directive 2026-08-21**, from an attempt to take a paper trade on
+the desk: *"when I go to paper trade it's just a mess and it doesn't work"*,
+plus a request to fill at the midpoint.
+
+**State: IMPLEMENTED + GREEN. Nothing here is LIVE_VALIDATED.**
+**Gate stamp:** `uv run pytest -q` → **850 passed, 7 deselected**, ruff check
++ format clean.
+
+What it was, in order of what actually blocked the trade:
+
+1. The only book on disk was **25 hours old and pre-R1** (18 columns, no
+   `exec_*`), so `book_quote()` refused every fill twice over. A fresh sweep
+   (411,876 orders, 412/412 pages, 19,148 types, complete, 2026-08-21T19:42Z)
+   replaced it.
+2. The form **prefilled a price the ledger would refuse**, reading the lake
+   directly instead of going through `book_quote()`. It now prices through the
+   ledger's own function, shows `UNKNOWN` and the reason up front, and greys
+   the button rather than accepting a full form and refusing the submit.
+3. The **notional was free-entry** where only the three configured tiers are
+   ever accepted.
+4. **Two entries in the same second collapsed into one position** — the second
+   `open` replayed over the first, so a position on disk was uncloseable and
+   invisible to the verdict tracker. Ids now carry a sequence suffix, and a
+   legacy collision is recovered on read as `…#2`.
+5. PAPER read `verdict['reason']` and `exit_source`, neither of which exists;
+   every verdict rendered as "no reason recorded" and every close as "book".
+
+The **mid fill was declined with the reason stated**, and the operator chose
+the maker model instead. `fill_model` is now recorded on every open, mark and
+close; taker is unchanged and remains the default; maker posts one tick in
+front of the executable quote, pays the per-station broker fee on both legs,
+and is stamped `fill_assumed`. The two populations are scored apart under the
+same frozen §12.4 rule.
+
+### Owed live gate — the maker assumption is the whole risk
+
+Nothing below can be self-certified: the ledger cannot tell whether a posted
+order would ever have filled, and no number in this system bounds it.
+
+- [ ] Post one real buy order at the price a maker paper entry recorded, and
+      record **whether it filled at all, and how long it took**. A maker paper
+      record with no fill-rate evidence behind it is exactly the self-flattery
+      §12.2 exists to prevent.
+- [ ] Record how many times it was undercut before filling, and the broker fee
+      each relist cost — undercut risk and waiting time are unmodelled (the
+      same limit §17 D-31 states for SPREADS).
+- [ ] `paper real-fill` a taker entry and a maker entry against prices really
+      paid, and check both against the ±0.5%-of-notional tolerance (§12.3).
+- [ ] Confirm on the in-game market that `exec_price` for a tracked type
+      matches the best quote reachable at Jita 4-4 — the maker price is
+      derived from it directly.
 
 ## ACTIVE — plan.md §22 remediation track (operator-authorized, post-Sol)
 

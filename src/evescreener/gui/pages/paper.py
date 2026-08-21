@@ -19,6 +19,7 @@ OPEN_HEADERS = [
     "position",
     "name",
     "opened",
+    "fill",
     "entry",
     "stop",
     "target",
@@ -26,7 +27,7 @@ OPEN_HEADERS = [
     "why",
     "book at entry",
 ]
-CLOSED_HEADERS = ["name", "closed", "net %", "realized R", "setup", "priced"]
+CLOSED_HEADERS = ["name", "closed", "fill", "net %", "realized R", "setup", "priced"]
 PASS_HEADERS = ["name", "at", "action", "why", "close at pass"]
 
 
@@ -80,10 +81,23 @@ class PaperPage(DeskPage):
         ledger = self._ledger()
         report = ledger.report(now=self.data.loaded_at)
         verdict = report.verdict or {}
-        self.verdict.setText(
+        # `_verdict` writes `detail`, never `reason`. Reading the wrong key
+        # meant this line said "no reason recorded" for every verdict the
+        # tracker has ever produced.
+        headline = (
             f"§12.4 verdict: {verdict.get('verdict', 'UNKNOWN')} — "
-            f"{verdict.get('reason', 'no reason recorded')}"
+            f"{verdict.get('detail') or 'no detail recorded'}"
         )
+        if report.by_fill_model:
+            # A taker result and a maker result are two experiments. The
+            # headline averages them; this line keeps them apart.
+            parts = [
+                f"{model}: {block['verdict'].get('verdict', 'UNKNOWN')} "
+                f"({block['closed']} closed, {block['cumulative_net_isk']:,.0f} ISK)"
+                for model, block in sorted(report.by_fill_model.items())
+            ]
+            headline += "  ·  " + " · ".join(parts)
+        self.verdict.setText(headline)
 
         positions = ledger.positions()
         open_rows, open_payloads = [], []
@@ -97,6 +111,7 @@ class PaperPage(DeskPage):
                     (position["position_id"], position["position_id"]),
                     (position.get("type_name") or BLANK, position.get("type_name")),
                     (str(position.get("at"))[:16], str(position.get("at"))),
+                    (_fill_cell(position), position.get("fill_model") or "taker"),
                     (
                         format_isk(position.get("entry_effective_price")),
                         position.get("entry_effective_price"),
@@ -117,10 +132,16 @@ class PaperPage(DeskPage):
                 [
                     (record.get("type_name") or BLANK, record.get("type_name")),
                     (str(record.get("at"))[:16], str(record.get("at"))),
+                    (_fill_cell(record), record.get("fill_model") or "taker"),
                     _cell(record.get("net_return_pct"), "+.2f"),
                     _cell(record.get("realized_r"), "+.2f"),
                     (record.get("setup_tag") or BLANK, record.get("setup_tag")),
-                    (record.get("exit_source") or "book", record.get("exit_source") or "book"),
+                    # The close record names this `priced_from`; `exit_source`
+                    # never existed, so this column always read "book".
+                    (
+                        record.get("priced_from") or "book_walk",
+                        record.get("priced_from") or "book_walk",
+                    ),
                 ]
             )
             closed_payloads.append(record)
@@ -142,11 +163,20 @@ class PaperPage(DeskPage):
             )
         self.pass_table.set_rows(pass_rows)
 
-        self.footer.setText(
+        assumed = sum(
+            block.get("assumed_fills", 0) for block in (report.by_fill_model or {}).values()
+        )
+        footer = (
             f"refused/UNKNOWN {report.refused} · closed {len(report.closed)} · "
             f"net {report.cumulative_net_isk:,.0f} ISK. Marking reads the local book "
             "snapshot only; a stale book is refused, never repriced."
         )
+        if assumed:
+            footer += (
+                f" {assumed} closed trade(s) marked * are ASSUMED maker fills: the book "
+                "proved the price was postable, never that anyone traded into it."
+            )
+        self.footer.setText(footer)
 
     # -- actions -----------------------------------------------------------
     def _current(self) -> dict | None:
@@ -181,6 +211,12 @@ class PaperPage(DeskPage):
         if dialog.exec():
             self.ledger_changed.emit()
         self.repopulate()
+
+
+def _fill_cell(record: dict) -> str:
+    """`taker`, or `maker*` — the star is the unpriced queue assumption."""
+    model = record.get("fill_model") or "taker"
+    return f"{model}*" if record.get("fill_assumed") else str(model)
 
 
 def _cell(value, spec: str):

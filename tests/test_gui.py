@@ -631,6 +631,105 @@ def test_the_prefill_leaves_an_unmeasurable_field_empty_with_a_reason(qtbot, des
     assert prefill["target_price"] is not None, "anchored value is still measurable"
 
 
+def test_a_book_that_cannot_price_greys_the_button_and_says_why_first(qtbot, desk):
+    """The complaint that started this: a confident price beside a dead book.
+
+    The form used to prefill an entry price straight off the lake, ignore the
+    executable-quote contract and the staleness budget, and only surface the
+    refusal after the operator had filled in the whole form and pressed the
+    button. Now the same function the ledger prices with is asked first.
+    """
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from evescreener.gui.paperform import PaperOpenDialog, prefill_for
+
+    # A pre-R1 snapshot: it cannot say where its quotes rested.
+    desk.book = book(type_ids=range(600, 606)).drop(
+        columns=["exec_location_id", "exec_price", "exec_is_structure"]
+    )
+    dialog = PaperOpenDialog(desk, prefill_for(desk, 601))
+    qtbot.addWidget(dialog)
+    dialog.thesis.setText("dip below anchored value")
+    dialog.tags.check("clean_dip_below_value")
+
+    assert dialog.entry.text() == "UNKNOWN", "no price is shown that the ledger would refuse"
+    assert not dialog.buttons.button(QDialogButtonBox.Ok).isEnabled()
+    assert "executable-quote contract" in dialog.blocker.text()
+
+
+def test_the_button_stays_grey_until_the_reasons_are_given(qtbot, desk):
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from evescreener.gui.paperform import PaperOpenDialog, prefill_for
+    from evescreener.reasons import load_reasons
+
+    desk.vocabulary = load_reasons(Path(__file__).resolve().parents[1] / "config" / "reasons.jsonl")
+    dialog = PaperOpenDialog(desk, prefill_for(desk, 601))
+    qtbot.addWidget(dialog)
+    ok = dialog.buttons.button(QDialogButtonBox.Ok)
+    assert not ok.isEnabled()
+    assert "thesis" in dialog.blocker.text()
+    dialog.thesis.setText("dip below anchored value")
+    assert not ok.isEnabled()
+    assert "like it" in dialog.blocker.text()
+    dialog.tags.check("clean_dip_below_value")
+    assert ok.isEnabled()
+    assert not dialog.blocker.isVisibleTo(dialog)
+
+
+def test_the_notional_offers_only_the_tiers_the_depth_walk_measures(qtbot, desk):
+    """A free-entry box let the operator type a size that was always refused."""
+    from evescreener.gui.paperform import PaperOpenDialog, prefill_for
+
+    dialog = PaperOpenDialog(desk, prefill_for(desk, 601))
+    qtbot.addWidget(dialog)
+    offered = [dialog.notional.itemData(index) for index in range(dialog.notional.count())]
+    assert offered == [float(tier) for tier in desk.config.costs.notional_tiers_isk]
+    assert dialog.notional_isk() == desk.config.paper.default_notional_isk
+
+
+def test_switching_to_maker_reprices_live_and_names_the_assumption(qtbot, desk):
+    from evescreener.gui.paperform import PaperOpenDialog, prefill_for
+
+    dialog = PaperOpenDialog(desk, prefill_for(desk, 601))
+    qtbot.addWidget(dialog)
+    taker_text = dialog.entry.text()
+    assert "ask walk" in taker_text
+
+    dialog.fill_model.setCurrentIndex(dialog.fill_model.findData("maker"))
+    assert "executable bid" in dialog.entry.text()
+    assert "broker" in dialog.entry.text()
+    assert "ASSUMED" in dialog.model_note.text()
+    assert dialog.entry.text() != taker_text
+    # The desk fixture's book is bid 95 / ask-walk 106: the two models must
+    # not be within rounding distance of each other.
+    assert "units for" in dialog.sizing.text()
+
+
+def test_a_maker_buy_from_the_desk_lands_in_the_ledger_flagged_assumed(qtbot, desk):
+    from pathlib import Path
+
+    from evescreener.gui.paperform import PaperOpenDialog, prefill_for
+    from evescreener.paper import PaperLedger
+    from evescreener.reasons import load_reasons
+
+    desk.vocabulary = load_reasons(Path(__file__).resolve().parents[1] / "config" / "reasons.jsonl")
+    dialog = PaperOpenDialog(desk, prefill_for(desk, 601))
+    qtbot.addWidget(dialog)
+    dialog.fill_model.setCurrentIndex(dialog.fill_model.findData("maker"))
+    dialog.thesis.setText("wide book, worth posting into")
+    dialog.tags.check("clean_dip_below_value")
+    dialog.submit()
+
+    ledger = PaperLedger(desk.config.paths.paper_ledger, desk.config)
+    opens = [record for record in ledger.records() if record.get("event") == "open"]
+    assert len(opens) == 1
+    assert opens[0]["fill_model"] == "maker"
+    assert opens[0]["fill_assumed"] is True
+
+
 def test_a_pass_from_the_desk_needs_a_dislike_tag(qtbot, desk):
     from evescreener.gui.paperform import PassDialog
 

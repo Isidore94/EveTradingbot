@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     paper = sub.add_parser("paper", help="the paper trading experiment (plan.md §12)")
     paper_sub = paper.add_subparsers(dest="paper_command", required=True)
-    paper_open = paper_sub.add_parser("open", help="price and record a taker entry")
+    paper_open = paper_sub.add_parser("open", help="price and record an entry")
     paper_open.add_argument("--type-id", type=int, help="type id (or use --name)")
     paper_open.add_argument("--name", help="type name, resolved against the SDE")
     paper_open.add_argument("--notional", type=float, help="ISK notional (default: config)")
@@ -98,9 +98,22 @@ def build_parser() -> argparse.ArgumentParser:
     paper_open.add_argument("--reason-text", default="", help="optional free text")
     paper_open.add_argument("--stop", type=float, help="stop price, for R sizing")
     paper_open.add_argument("--target", type=float, help="target price, for planned R")
-    paper_close = paper_sub.add_parser("close", help="price and record a taker exit")
+    paper_open.add_argument(
+        "--fill-model",
+        choices=("taker", "maker"),  # authority: paper.FILL_MODELS
+        help="taker: walk the asks (default, the only fill the snapshot proves). "
+        "maker: post one tick above the executable bid, pay the broker fee, and "
+        "wait — recorded as an ASSUMED fill",
+    )
+    paper_close = paper_sub.add_parser("close", help="price and record an exit")
     paper_close.add_argument("--position-id", required=True)
     paper_close.add_argument("--note", default="")
+    paper_close.add_argument(
+        "--fill-model",
+        choices=("taker", "maker"),  # authority: paper.FILL_MODELS
+        help="override the position's own model — use it when a posted exit had "
+        "to be dumped into the bid instead",
+    )
     paper_close.add_argument(
         "--actual-price",
         type=float,
@@ -647,6 +660,7 @@ def _cmd_paper(config: Config, args) -> int:
                     target_price=args.target,
                     median_daily_turnover=median,
                     vocabulary=_vocabulary(),
+                    fill_model=args.fill_model,
                 )
                 print(json.dumps(record, indent=2, default=str))
             elif args.paper_command == "pass":
@@ -679,7 +693,10 @@ def _cmd_paper(config: Config, args) -> int:
                 print(
                     json.dumps(
                         ledger.close_position(
-                            position_id=args.position_id, book=book, note=args.note
+                            position_id=args.position_id,
+                            book=book,
+                            note=args.note,
+                            fill_model=args.fill_model,
                         ),
                         indent=2,
                         default=str,

@@ -176,6 +176,12 @@ class PaperConfig:
     verdict_first_read_closed: int
     verdict_falsify_negative_closed: int
     default_notional_isk: float
+    #: Minimum price improvement that puts a posted order in front of the
+    #: queue. EVE quotes to 0.01 ISK (plan.md §12.2, amended 2026-08-21).
+    maker_tick_isk: float = 0.01
+    #: Which fill model a new paper entry starts on. `taker` is the frozen
+    #: default and the only one whose fill is guaranteed by the snapshot.
+    default_fill_model: str = "taker"
 
 
 @dataclass(frozen=True, slots=True)

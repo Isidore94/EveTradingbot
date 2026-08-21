@@ -219,6 +219,12 @@ fill_tolerance_pct_of_notional = 0.5
 verdict_first_read_closed = 20
 verdict_falsify_negative_closed = 40
 default_notional_isk = 250000000.0
+# Fill model (plan.md §12.2, amended 2026-08-21). "taker" walks the book and
+# is the only fill the snapshot guarantees; "maker" posts one tick in front of
+# the resting queue, pays the broker fee, and is recorded as ASSUMED because a
+# snapshot cannot price queue position.
+default_fill_model = "taker"
+maker_tick_isk = 0.01
 
 [backtest]
 # Frozen study parameters (plan.md §13). Changing these after a run is a

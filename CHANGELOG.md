@@ -5,6 +5,63 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-21 — Two fill models, and a paper form that refuses before it asks (§12.2, §17 D-32)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §12.2 as amended, §17 D-32.
+`uv run pytest -q` → **850 passed, 7 deselected**, ruff check + format clean.
+**Not LIVE_VALIDATED**: no maker fill in this ledger has been checked against
+a fill the operator really got.
+
+Operator report: *"when I go to paper trade it's just a mess and it doesn't
+work"*, plus a request to fill at the midpoint.
+
+- **It did not work because the only book on disk could not price anything.**
+  `data/books/region=10000002/date=2026-08-20.parquet` was swept 25 hours
+  before the attempt and predated the executable-quote contract (18 columns,
+  no `exec_location_id` / `exec_price` / `exec_is_structure`), so
+  `book_quote()` refused it twice over. A fresh sweep — 411,876 orders,
+  412/412 pages, 19,148 types, complete — replaced it.
+- **The form showed a price the ledger was always going to refuse.**
+  `prefill_for()` read `depth_fill_price_0` straight off the lake, bypassing
+  the staleness budget and the R1 contract that `PaperLedger` enforces. It now
+  prices through `paper.book_quote` — the ledger's own function — so an
+  unpriceable book reads `UNKNOWN`, names its reason in the header, and greys
+  `Record paper buy` instead of accepting a full form and then refusing it.
+  The ledger still validates on submit and remains the authority.
+- **The notional was a free-entry spin box**, but `open_position` refuses any
+  value that is not one of `costs.notional_tiers_isk` — the only sizes the
+  depth walk measures. It is now a picker of those tiers.
+- **Two entries in the same second silently became one position.** Ids were
+  `{type_id}-{HHMMSS}`, so `positions()` replayed the second `open` over the
+  first: a position that existed on disk, could never be closed, and was
+  missing from every number the verdict tracker reads. New ids carry a
+  sequence suffix; a legacy collision is now recovered on read as `…#2` with
+  `duplicate_id` set, rather than dropped.
+- **Two page bugs that made the ledger look empty.** PAPER read
+  `verdict['reason']` (the tracker writes `detail`), so every verdict rendered
+  as "no reason recorded"; and the closed table read `exit_source`, a key that
+  has never existed, so the `priced` column always said "book" even for an
+  operator-supplied fill.
+- **`fill_model` — `taker` or `maker` — is recorded on every open, mark and
+  close.** Taker is unchanged and remains the default. Maker posts one tick in
+  front of the executable quote, pays the per-station broker fee (§21 R4) on
+  both legs, records the volume queued **ahead** of it, and is stamped
+  `fill_assumed` with its assumption in the record: the book proves the price
+  was postable, never that anyone traded into it. `paper report`, the PAPER
+  page and the desk score the two populations apart under the same frozen
+  §12.4 rule, and the whole-sample verdict says when it is mixing them.
+- **There is no mid fill, and asking for one is a recorded refusal.** No EVE
+  order type executes at the midpoint. On the 2026-08-21 sweep, Helium Fuel
+  Block quoted a taker round trip of **−11.5%** against a maker round trip of
+  **+2.7%** on the same book at the same second; a number between them
+  describes no trade anyone can make.
+- **A maker position marks on its own model**, with the taker liquidation mark
+  recorded beside it — what the plan says it is worth, and what walking out
+  today would actually pay.
+- `paper open|close --fill-model {taker,maker}`; `config.toml` gains
+  `paper.default_fill_model` and `paper.maker_tick_isk`, both optional with
+  the previous behaviour as their defaults.
+
 ## 2026-08-20 — A wider guard, and numbers that can be re-derived (§22 S8)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S8. `uv run pytest -q` →

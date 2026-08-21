@@ -7,12 +7,21 @@ ISK.
 
 So the fills are real fills, or there are no fills:
 
-* entries are **ask-walk taker** fills at the declared notional, from a live
-  book sweep — not best ask, not mid, never the daily close;
-* exits are **bid-walk taker** fills × (1 − sales tax);
-* the maker exit is computed and shown but **never realized** — queue risk
-  cannot be priced from a snapshot, so the system shows both numbers and picks
-  neither;
+* **taker** entries are **ask-walk** fills at the declared notional, from a
+  live book sweep — not best ask, not mid, never the daily close, and taker
+  exits are **bid-walk** fills × (1 − sales tax). This is the frozen default
+  and the only fill a snapshot can *prove*;
+* **maker** entries and exits (plan.md §12.2, amended 2026-08-21 on operator
+  authority) post one tick in front of the executable quote and pay the broker
+  fee on both legs. A snapshot proves the price was postable and nothing more:
+  queue position and adverse selection are unpriced, so every maker record
+  carries `fill_assumed: true`, and `paper report` scores each population
+  separately under the same frozen §12.4 rule — printed beside the frozen
+  whole-sample verdict, never silently merged into it;
+* **mid is still not a fill.** No order type in EVE executes at the midpoint,
+  and with a 98.8% median spread (§17) half of it is not a rounding error —
+  it is the entire result. The two models above are the two things an operator
+  can actually do;
 * a book older than `paper.stale_book_minutes` **refuses the fill**. The
   position is not opened and the refusal is counted. **Nothing is ever priced
   off history.**
@@ -41,12 +50,24 @@ from .store.lake import EXECUTABLE_COLUMNS
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
 
 __all__ = [
+    "FILL_MODELS",
     "PaperLedger",
     "PaperReport",
     "Refusal",
     "book_quote",
     "render_report",
 ]
+
+#: The two things an operator can actually do. `taker` crosses the spread and
+#: is the frozen default; `maker` posts and waits (plan.md §12.2, amended
+#: 2026-08-21). There is deliberately no `mid`: no EVE order type fills there.
+FILL_MODELS = ("taker", "maker")
+
+MAKER_ASSUMED = (
+    "maker fill ASSUMED: a snapshot proves this price was postable, never that "
+    "anyone traded into it. Queue position, undercutting and adverse selection "
+    "are unpriced. Scored as its own population, never blended with taker fills"
+)
 
 # Every recorded decision — taken or passed — must say why, in the committed
 # vocabulary (§19 Amendment 3). No tags, no record, in either direction.
@@ -82,9 +103,27 @@ def _clean_tags(tags, vocabulary, direction: str) -> tuple[str, ...]:
     return normalise_tags(tags, vocabulary or ReasonVocabulary(reasons=()), direction)
 
 
+def _finite(value) -> bool:
+    """True only for a real, finite number. `None`, NaN and text are UNKNOWN."""
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
 @dataclass(slots=True)
 class BookQuote:
-    """One side's walk price at one notional, with its own freshness attached."""
+    """One side's price for one intent, with its own freshness attached.
+
+    `fill_model` says how the price was obtained, because the two are not the
+    same kind of evidence. A `taker` price is what the snapshot proves you
+    could have paid by consuming the book right then. A `maker` price is only
+    what you could have *posted*: whether anyone would have traded into it is
+    unknowable from a snapshot, so `assumed` is True and every consumer keeps
+    the two populations apart (plan.md §12.2, amended 2026-08-21).
+    """
 
     price: float | None
     quantity: float | None
@@ -92,6 +131,13 @@ class BookQuote:
     age_minutes: float | None
     stale: bool
     reason: str | None = None
+    fill_model: str = "taker"
+    location_id: int | None = None
+    is_structure: bool | None = None
+
+    @property
+    def assumed(self) -> bool:
+        return self.fill_model == "maker"
 
 
 def book_quote(
@@ -102,15 +148,32 @@ def book_quote(
     tier_index: int,
     now: datetime | None = None,
     stale_after_minutes: int = 60,
+    fill_model: str = "taker",
+    tick: float = 0.01,
 ) -> BookQuote:
-    """Walk price for one side at one tier, or an explicit refusal.
+    """Price for one book side, or an explicit refusal.
+
+    `side` names the side of the book being **read**, and `fill_model` says
+    what is done with it:
+
+    * `taker` — the depth-walk VWAP at `tier_index`, i.e. what consuming that
+      side at the declared notional would have cost. This is the frozen
+      default and the only price the snapshot guarantees.
+    * `maker` — one `tick` in front of the executable quote resting on that
+      side: `exec_price + tick` when joining the bid queue, `exec_price - tick`
+      when joining the ask queue. Size does not move this price, so the tier
+      is not consulted; what it costs instead is queue position, which a
+      snapshot cannot price. `quantity` therefore carries the volume already
+      resting **ahead** of you, not a fill.
 
     Every failure mode returns a *reason*: no sweep, wrong side, too thin, too
-    old. None of them returns a price.
+    old, pre-R1 contract. None of them returns a price.
     """
+    if fill_model not in FILL_MODELS:
+        raise ValueError(f"fill_model must be one of {FILL_MODELS}, got {fill_model!r}")
     now = ensure_utc(now or utcnow())
     if book is None or book.empty:
-        return BookQuote(None, None, None, None, True, "no book sweep available")
+        return BookQuote(None, None, None, None, True, "no book sweep available", fill_model)
     missing = [column for column in EXECUTABLE_COLUMNS if column not in book.columns]
     if missing:
         # A snapshot written before the executable-quote contract cannot say
@@ -125,25 +188,71 @@ def book_quote(
             True,
             "book predates the executable-quote contract "
             f"({', '.join(missing)} absent) — re-run sweep-books",
+            fill_model,
         )
     rows = book[(book["type_id"] == int(type_id)) & (book["side"] == side)]
     if rows.empty:
-        return BookQuote(None, None, None, None, True, f"no {side} side in the last sweep")
+        return BookQuote(
+            None, None, None, None, True, f"no {side} side in the last sweep", fill_model
+        )
     row = rows.sort_values("sweep_ts").iloc[-1]
     sweep_ts = parse_iso(str(row["sweep_ts"])) or ensure_utc(pd.Timestamp(row["sweep_ts"]))
     age = (now - sweep_ts).total_seconds() / 60.0
     stale = age > stale_after_minutes
-    price = row.get(f"depth_fill_price_{tier_index}")
-    quantity = row.get(f"depth_fill_qty_{tier_index}")
-    if price is None or not isinstance(price, int | float) or not math.isfinite(float(price)):
-        return BookQuote(
-            None,
-            None,
-            iso(sweep_ts),
-            age,
-            stale,
-            f"book cannot fill this notional on the {side} side",
-        )
+    location_id = int(row["exec_location_id"]) if _finite(row.get("exec_location_id")) else None
+    is_structure = (
+        bool(row["exec_is_structure"]) if row.get("exec_is_structure") is not None else None
+    )
+
+    if fill_model == "maker":
+        resting = row.get("exec_price")
+        if not _finite(resting):
+            return BookQuote(
+                None,
+                None,
+                iso(sweep_ts),
+                age,
+                stale,
+                f"no executable {side}-side quote to post in front of",
+                fill_model,
+                location_id,
+                is_structure,
+            )
+        # One tick towards the middle: the cheapest price that puts a new
+        # order at the front of that queue.
+        price = float(resting) + (float(tick) if side == "buy" else -float(tick))
+        # What is already resting there is what you queue behind, not a fill.
+        quantity = float(row["exec_volume"]) if _finite(row.get("exec_volume")) else None
+        if price <= 0:
+            return BookQuote(
+                None,
+                None,
+                iso(sweep_ts),
+                age,
+                stale,
+                f"a maker {side} one tick from {float(resting):,.2f} is not a positive price",
+                fill_model,
+                location_id,
+                is_structure,
+            )
+    else:
+        raw_price = row.get(f"depth_fill_price_{tier_index}")
+        raw_qty = row.get(f"depth_fill_qty_{tier_index}")
+        if not _finite(raw_price):
+            return BookQuote(
+                None,
+                None,
+                iso(sweep_ts),
+                age,
+                stale,
+                f"book cannot fill this notional on the {side} side",
+                fill_model,
+                location_id,
+                is_structure,
+            )
+        price = float(raw_price)
+        quantity = float(raw_qty) if _finite(raw_qty) else None
+
     if stale:
         return BookQuote(
             None,
@@ -153,8 +262,21 @@ def book_quote(
             True,
             f"book is {age:.0f} min old (> {stale_after_minutes}); "
             "refusing the fill rather than pricing off history",
+            fill_model,
+            location_id,
+            is_structure,
         )
-    return BookQuote(float(price), float(quantity) if quantity else None, iso(sweep_ts), age, False)
+    return BookQuote(
+        float(price),
+        quantity,
+        iso(sweep_ts),
+        age,
+        False,
+        None,
+        fill_model,
+        location_id,
+        is_structure,
+    )
 
 
 @dataclass(slots=True)
@@ -174,6 +296,10 @@ class PaperReport:
     fill_accuracy: dict = field(default_factory=dict)
     self_impact_flags: int = 0
     priced_from: dict = field(default_factory=dict)
+    #: The frozen §12.4 rule applied to each fill-model population on its own.
+    #: A taker result and a maker result answer different questions, and an
+    #: average of the two answers neither (§12.2, amended 2026-08-21).
+    by_fill_model: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -192,6 +318,7 @@ class PaperReport:
             "fill_accuracy": self.fill_accuracy,
             "self_impact_flags": self.self_impact_flags,
             "priced_from": self.priced_from,
+            "by_fill_model": self.by_fill_model,
         }
 
 
@@ -208,12 +335,26 @@ class PaperLedger:
         return read_jsonl(self.path)
 
     def positions(self) -> dict[str, dict]:
-        """Reconstruct positions by replaying the ledger. Nothing is mutated."""
+        """Reconstruct positions by replaying the ledger. Nothing is mutated.
+
+        A duplicate `open` id is disambiguated on read rather than dropped.
+        Ids used to be `{type_id}-{second}`, so two entries in the same type in
+        the same second produced the same key and the second one **silently
+        replaced the first**: a position that existed on disk, was never
+        closeable, and never appeared in the tally. New ids carry a sequence
+        suffix so it cannot recur; this keeps every historical row reachable.
+        """
         positions: dict[str, dict] = {}
         for record in self.records():
             kind = record.get("event")
             position_id = record.get("position_id")
             if kind == "open":
+                if position_id in positions:
+                    suffix = 2
+                    while f"{position_id}#{suffix}" in positions:
+                        suffix += 1
+                    position_id = f"{position_id}#{suffix}"
+                    record = {**record, "position_id": position_id, "duplicate_id": True}
                 positions[position_id] = {**record, "marks": [], "close": None, "real_fills": []}
             elif position_id in positions:
                 if kind == "mark":
@@ -258,11 +399,18 @@ class PaperLedger:
         median_daily_turnover: float | None = None,
         now: datetime | None = None,
         vocabulary=None,
+        fill_model: str | None = None,
     ) -> dict:
-        """Price and record one taker entry, or refuse it.
+        """Price and record one entry, or refuse it.
 
         A refusal is written to the ledger too: how often the system declines
         to price something is a headline number, not an omission (§12.4).
+
+        `fill_model` is `taker` (walk the asks, guaranteed by the snapshot) or
+        `maker` (post one tick above the executable bid, pay the broker fee,
+        and wait). A maker entry is stamped `fill_assumed` because the book
+        cannot say whether anyone would have sold into it (§12.2, amended
+        2026-08-21).
 
         `setup_tag` and at least one `like_tags` entry are **required**
         (§19 Amendment 3). The refusal for a missing reason is recorded like
@@ -270,6 +418,7 @@ class PaperLedger:
         qualify is itself information.
         """
         now = ensure_utc(now or utcnow())
+        fill_model = str(fill_model or self.config.paper.default_fill_model)
         tiers = list(self.config.costs.notional_tiers_isk)
         tier_index = _tier_index(tiers, notional_isk)
         context = {
@@ -277,7 +426,14 @@ class PaperLedger:
             "type_name": type_name,
             "notional_isk": float(notional_isk),
             "action": "open",
+            "fill_model": fill_model,
         }
+        if fill_model not in FILL_MODELS:
+            self._refuse(
+                f"fill model must be one of {list(FILL_MODELS)}, got {fill_model!r}. "
+                "There is no mid fill: no EVE order type executes at the midpoint",
+                context,
+            )
         if not str(thesis).strip():
             self._refuse("an opening needs a thesis sentence you can argue with", context)
         if not str(setup_tag).strip():
@@ -291,24 +447,19 @@ class PaperLedger:
                 f"{[f'{tier:,.0f}' for tier in tiers]}; the depth walk only measures those",
                 context,
             )
-        ask = book_quote(
-            book,
-            type_id=type_id,
-            side="sell",
-            tier_index=tier_index,
-            now=now,
-            stale_after_minutes=self.config.paper.stale_book_minutes,
-        )
-        if ask.price is None:
-            self._refuse(ask.reason or "no ask-walk price", {**context, "sweep_ts": ask.sweep_ts})
-        bid = book_quote(
-            book,
-            type_id=type_id,
-            side="buy",
-            tier_index=tier_index,
-            now=now,
-            stale_after_minutes=self.config.paper.stale_book_minutes,
-        )
+        # A taker buy consumes the ask side; a maker buy joins the bid queue.
+        # `side` always names the side of the book being read.
+        entry_side = "sell" if fill_model == "taker" else "buy"
+        entry_quote = self._quote(book, type_id, entry_side, tier_index, now, fill_model)
+        if entry_quote.price is None:
+            self._refuse(
+                entry_quote.reason or f"no {fill_model} entry price",
+                {**context, "sweep_ts": entry_quote.sweep_ts},
+            )
+        # The other side is recorded for reference at every entry, so the
+        # spread that was standing when the decision was made stays auditable.
+        ask_reference = self._quote(book, type_id, "sell", tier_index, now, "taker")
+        bid_reference = self._quote(book, type_id, "buy", tier_index, now, "taker")
         # Measured 2026-08-20: structure-resident depth is entirely on the BID
         # side in The Forge, so it is the exit that may be inaccessible. Record
         # the exposure at entry so a later exit can be judged against it.
@@ -325,7 +476,18 @@ class PaperLedger:
             else None
         )
 
-        units = notional_isk / ask.price
+        # A posted buy pays the broker fee; a taker fill does not. The
+        # effective price is what one unit really costs, fee included, so
+        # `units` and every downstream R are computed on money actually spent.
+        # Broker fee is per-station (§21 R4), and the executable quote knows
+        # which station it rested at.
+        broker_pct = self.costs.broker_fee_at(entry_quote.location_id)
+        effective_entry = (
+            entry_quote.price
+            if fill_model == "taker"
+            else entry_quote.price * (1.0 + broker_pct / 100.0)
+        )
+        units = notional_isk / effective_entry
         self_impact = bool(
             median_daily_turnover
             and notional_isk > median_daily_turnover * self.config.paper.self_impact_turnover_share
@@ -336,29 +498,35 @@ class PaperLedger:
         )
         record = {
             "event": "open",
-            "position_id": f"{int(type_id)}-{now.strftime('%Y%m%dT%H%M%S')}",
+            "position_id": self._next_position_id(type_id, now),
             "at": iso(now),
             "type_id": int(type_id),
             "type_name": type_name,
             "side": "long",
             "notional_isk": float(notional_isk),
             "tier_index": tier_index,
-            "entry_effective_price": ask.price,
+            "fill_model": fill_model,
+            "fill_assumed": entry_quote.assumed,
+            "fill_assumption": MAKER_ASSUMED if entry_quote.assumed else None,
+            "entry_quote_price": entry_quote.price,
+            "entry_effective_price": effective_entry,
             "entry_units": units,
-            "entry_walk_qty": ask.quantity,
-            "book_sweep_ts": ask.sweep_ts,
-            "book_age_minutes": round(ask.age_minutes or 0.0, 2),
-            "bid_at_entry": bid.price,
+            "entry_walk_qty": entry_quote.quantity if fill_model == "taker" else None,
+            "queue_ahead_units": entry_quote.quantity if fill_model == "maker" else None,
+            "exec_location_id": entry_quote.location_id,
+            "exec_is_structure": entry_quote.is_structure,
+            "book_sweep_ts": entry_quote.sweep_ts,
+            "book_age_minutes": round(entry_quote.age_minutes or 0.0, 2),
+            "ask_at_entry": ask_reference.price,
+            "bid_at_entry": bid_reference.price,
             "bid_station_volume_share": bid_station_share,
             "stop_price": stop_price,
             "target_price": target_price,
             "maker_exit_advisory_net": maker_exit_advisory,
             "sales_tax_pct": self.costs.sales_tax_pct,
-            "broker_fee_pct": self.costs.broker_fee_pct,
-            "breakeven_move_pct": self.costs.breakeven_move_pct(
-                entry_price=ask.price,
-                exit_price=bid.price,
-                reference_price=(ask.price + bid.price) / 2 if bid.price else None,
+            "broker_fee_pct": broker_pct,
+            "breakeven_move_pct": self._breakeven_pct(
+                fill_model, effective_entry, ask_reference.price, bid_reference.price, broker_pct
             ),
             "self_impact": self_impact,
             "median_daily_turnover": median_daily_turnover,
@@ -366,9 +534,81 @@ class PaperLedger:
             "setup_tag": str(setup_tag).strip(),
             "like_tags": list(likes),
             "reason_text": str(reason_text),
-            "planned_r": _planned_r(ask.price, stop_price, target_price, self.costs),
+            "planned_r": _planned_r(
+                effective_entry, stop_price, target_price, self.costs, maker=fill_model == "maker"
+            ),
         }
         return self._append(record)
+
+    def _next_position_id(self, type_id: int, now: datetime) -> str:
+        """A key unique within the ledger, derived only from what is on disk.
+
+        No clock beyond `now` and no randomness, so a replay of the same file
+        produces the same ids. The sequence suffix is what stops two entries in
+        one second from colliding — the failure that used to lose a position.
+        """
+        stem = f"{int(type_id)}-{now.strftime('%Y%m%dT%H%M%S')}"
+        taken = {
+            str(record.get("position_id"))
+            for record in self.records()
+            if record.get("event") == "open"
+        }
+        if stem not in taken:
+            return stem
+        suffix = 2
+        while f"{stem}#{suffix}" in taken:
+            suffix += 1
+        return f"{stem}#{suffix}"
+
+    # -- pricing helpers ---------------------------------------------------
+    def _exit_proceeds(self, fill_model: str, gross: float | None, broker_pct: float):
+        """ISK received per unit. Tax always; the broker fee on a posted exit."""
+        if gross is None:
+            return None
+        rate = self.costs.sales_tax_pct + (broker_pct if fill_model == "maker" else 0.0)
+        return float(gross) * (1.0 - rate / 100.0)
+
+    def _quote(self, book, type_id, side, tier_index, now, fill_model) -> BookQuote:
+        """One `book_quote` with this ledger's staleness budget and tick."""
+        return book_quote(
+            book,
+            type_id=int(type_id),
+            side=side,
+            tier_index=tier_index,
+            now=now,
+            stale_after_minutes=self.config.paper.stale_book_minutes,
+            fill_model=fill_model,
+            tick=self.config.paper.maker_tick_isk,
+        )
+
+    def _breakeven_pct(self, fill_model, entry, ask, bid, broker_pct) -> float | None:
+        """How far price must move for this round trip to clear its own costs.
+
+        The two models pay for different things and the number has to say so.
+        A taker crosses the spread twice and pays tax; a maker pays the broker
+        fee twice plus tax but is *paid* the spread — which is why a maker
+        breakeven can be negative, and why that number means "only if both
+        legs actually fill".
+        """
+        if not entry or entry <= 0:
+            return None
+        if fill_model == "taker":
+            reference = (ask + bid) / 2.0 if ask and bid else None
+            return self.costs.breakeven_move_pct(
+                entry_price=entry, exit_price=bid, reference_price=reference
+            )
+        # Maker: the exit rests one tick inside the executable ask.
+        if not ask or ask <= 0:
+            return None
+        exit_quote = ask - self.config.paper.maker_tick_isk
+        reference = (ask + bid) / 2.0 if bid else ask
+        if exit_quote <= 0 or not reference:
+            return None
+        fee = (self.costs.sales_tax_pct + broker_pct) / 100.0
+        if fee >= 1.0:
+            return None
+        required_exit = entry / (1.0 - fee)
+        return (required_exit / exit_quote - 1.0) * 100.0
 
     def record_pass(
         self,
@@ -429,23 +669,41 @@ class PaperLedger:
         return [record for record in self.records() if record.get("event") == "pass"]
 
     def mark(self, *, book: pd.DataFrame, now: datetime | None = None) -> list[dict]:
-        """Daily mark-to-market. Every mark carries its staleness stamp."""
+        """Daily mark-to-market. Every mark carries its staleness stamp.
+
+        A position is marked on **its own** fill model, so an unrealized
+        number is measured on the same basis the trade will close on — and the
+        taker (liquidation) mark is recorded beside it, always. For a maker
+        position those two differ by the whole spread, and a reader is entitled
+        to both: one is what the plan says it is worth, the other is what
+        walking out today would actually pay.
+        """
         now = ensure_utc(now or utcnow())
         marks: list[dict] = []
         for position_id, position in self.positions().items():
             if position.get("close"):
                 continue
-            bid = book_quote(
-                book,
-                type_id=position["type_id"],
-                side="buy",
-                tier_index=position["tier_index"],
-                now=now,
-                stale_after_minutes=self.config.paper.stale_book_minutes,
+            model = str(position.get("fill_model") or "taker")
+            exit_side = "buy" if model == "taker" else "sell"
+            quote = self._quote(
+                book, position["type_id"], exit_side, position["tier_index"], now, model
             )
-            net = (
-                self.costs.sell_proceeds(bid.price, maker=False) if bid.price is not None else None
+            liquidation = (
+                quote
+                if model == "taker"
+                else self._quote(
+                    book, position["type_id"], "buy", position["tier_index"], now, "taker"
+                )
             )
+            broker_pct = self.costs.broker_fee_at(quote.location_id)
+            net = self._exit_proceeds(model, quote.price, broker_pct)
+            liquidation_net = (
+                self.costs.sell_proceeds(liquidation.price, maker=False)
+                if liquidation.price is not None
+                else None
+            )
+            entry = position["entry_effective_price"]
+            units = position["entry_units"]
             marks.append(
                 self._append(
                     {
@@ -453,19 +711,22 @@ class PaperLedger:
                         "position_id": position_id,
                         "at": iso(now),
                         "type_id": position["type_id"],
-                        "mark_price": bid.price,
+                        "fill_model": model,
+                        "mark_price": quote.price,
                         "mark_net_price": net,
-                        "unrealized_net_isk": (
-                            (net - position["entry_effective_price"]) * position["entry_units"]
-                            if net is not None
+                        "unrealized_net_isk": ((net - entry) * units if net is not None else None),
+                        "liquidation_net_price": liquidation_net,
+                        "liquidation_net_isk": (
+                            (liquidation_net - entry) * units
+                            if liquidation_net is not None
                             else None
                         ),
-                        "book_sweep_ts": bid.sweep_ts,
-                        "book_age_minutes": round(bid.age_minutes, 2)
-                        if bid.age_minutes is not None
+                        "book_sweep_ts": quote.sweep_ts,
+                        "book_age_minutes": round(quote.age_minutes, 2)
+                        if quote.age_minutes is not None
                         else None,
-                        "stale": bid.stale,
-                        "unknown_reason": bid.reason,
+                        "stale": quote.stale,
+                        "unknown_reason": quote.reason,
                     }
                 )
             )
@@ -479,14 +740,23 @@ class PaperLedger:
         now: datetime | None = None,
         note: str = "",
         actual_price: float | None = None,
+        fill_model: str | None = None,
     ) -> dict:
-        """Bid-walk taker exit net of tax, or a refusal. Never off history.
+        """Exit on the position's own fill model, or a refusal. Never off history.
+
+        A `taker` position exits on the bid walk net of sales tax; a `maker`
+        position exits one tick inside the executable ask, net of tax **and**
+        the broker fee, and stays flagged `fill_assumed`. `fill_model`
+        overrides the position's own only when the operator says the exit
+        really went the other way — a maker entry that had to be dumped into
+        the bid is a taker exit, and recording it as anything else would
+        flatter the record.
 
         `actual_price` records a close the operator **really made**, at a gross
         unit price he actually received. That is the only way to close a
         position whose book can no longer price it — and it is real evidence,
-        not a substitute for a missing measurement. Sales tax still applies;
-        the operator supplies the price, not the arithmetic.
+        not a substitute for a missing measurement. Fees still apply; the
+        operator supplies the price, not the arithmetic.
         """
         now = ensure_utc(now or utcnow())
         positions = self.positions()
@@ -496,6 +766,10 @@ class PaperLedger:
             self._refuse(f"unknown position {position_id!r}", context)
         if position.get("close"):
             self._refuse(f"position {position_id!r} is already closed", context)
+        model = str(fill_model or position.get("fill_model") or "taker")
+        if model not in FILL_MODELS:
+            self._refuse(f"fill model must be one of {list(FILL_MODELS)}, got {model!r}", context)
+        context["fill_model"] = model
         if actual_price is not None:
             if actual_price <= 0:
                 self._refuse("an actual close price must be positive", context)
@@ -506,19 +780,22 @@ class PaperLedger:
                 age_minutes=None,
                 stale=False,
                 reason=None,
+                fill_model=model,
+                location_id=position.get("exec_location_id"),
             )
         else:
-            bid = book_quote(
-                book,
-                type_id=position["type_id"],
-                side="buy",
-                tier_index=position["tier_index"],
-                now=now,
-                stale_after_minutes=self.config.paper.stale_book_minutes,
+            # A taker exit consumes the bid side; a maker exit joins the ask
+            # queue one tick inside the executable ask.
+            exit_side = "buy" if model == "taker" else "sell"
+            bid = self._quote(
+                book, position["type_id"], exit_side, position["tier_index"], now, model
             )
         if bid.price is None:
-            self._refuse(bid.reason or "no bid-walk price", {**context, "sweep_ts": bid.sweep_ts})
-        exit_net = self.costs.sell_proceeds(bid.price, maker=False)
+            self._refuse(
+                bid.reason or f"no {model} exit price", {**context, "sweep_ts": bid.sweep_ts}
+            )
+        broker_pct = self.costs.broker_fee_at(bid.location_id)
+        exit_net = self._exit_proceeds(model, bid.price, broker_pct)
         entry = position["entry_effective_price"]
         units = position["entry_units"]
         net_isk = (exit_net - entry) * units
@@ -529,9 +806,16 @@ class PaperLedger:
             "at": iso(now),
             "type_id": position["type_id"],
             "type_name": position.get("type_name"),
+            "setup_tag": position.get("setup_tag"),
+            "fill_model": model,
+            "fill_assumed": bool(model == "maker" and actual_price is None),
+            "fill_assumption": (
+                MAKER_ASSUMED if model == "maker" and actual_price is None else None
+            ),
             "exit_walk_price": bid.price,
             "exit_effective_price": exit_net,
             "sales_tax_pct": self.costs.sales_tax_pct,
+            "broker_fee_pct": broker_pct if model == "maker" else 0.0,
             "entry_effective_price": entry,
             "units": units,
             "net_isk": net_isk,
@@ -615,7 +899,14 @@ class PaperLedger:
 
         positions = self.positions()
         closed = [
-            {**position["close"], "thesis": position.get("thesis")}
+            {
+                **position["close"],
+                "thesis": position.get("thesis"),
+                "setup_tag": position["close"].get("setup_tag") or position.get("setup_tag"),
+                "fill_model": position["close"].get("fill_model")
+                or position.get("fill_model")
+                or "taker",
+            }
             for position in positions.values()
             if position.get("close")
         ]
@@ -637,6 +928,8 @@ class PaperLedger:
                     "mark_stale": latest.get("stale") if latest else None,
                     "unrealized_net_isk": latest.get("unrealized_net_isk") if latest else None,
                     "self_impact": position.get("self_impact"),
+                    "fill_model": position.get("fill_model") or "taker",
+                    "fill_assumed": bool(position.get("fill_assumed")),
                 }
             )
 
@@ -698,7 +991,40 @@ class PaperLedger:
             report.breakeven_win_rate,
             self.config,
         )
+        report.by_fill_model = self._by_fill_model(closed)
         return report
+
+    def _by_fill_model(self, closed: list[dict]) -> dict:
+        """The same frozen rule, applied to each population on its own.
+
+        A taker trade pays the spread; a maker trade is paid it and carries an
+        unpriced queue assumption instead. They are two different experiments,
+        and one blended win rate answers neither of them.
+        """
+        import numpy as np
+
+        from .backtest import breakeven_win_rate, wilson_lower_bound
+
+        out: dict = {}
+        for model in FILL_MODELS:
+            sample = [record for record in closed if (record.get("fill_model") or "taker") == model]
+            if not sample:
+                continue
+            returns = [float(record["net_return_pct"]) for record in sample]
+            net_isk = float(sum(record["net_isk"] for record in sample))
+            wins = sum(1 for value in returns if value > 0)
+            wilson = wilson_lower_bound(wins, len(returns))
+            breakeven = breakeven_win_rate(np.array(returns, dtype="float64"))
+            out[model] = {
+                "closed": len(sample),
+                "cumulative_net_isk": net_isk,
+                "win_rate": wins / len(returns),
+                "wilson_lb": wilson,
+                "breakeven_win_rate": breakeven,
+                "assumed_fills": sum(1 for record in sample if record.get("fill_assumed")),
+                "verdict": _verdict(len(sample), net_isk, wilson, breakeven, self.config),
+            }
+        return out
 
 
 def _tier_index(tiers: list[float], notional: float) -> int | None:
@@ -708,12 +1034,24 @@ def _tier_index(tiers: list[float], notional: float) -> int | None:
     return None
 
 
-def _planned_r(entry: float, stop: float | None, target: float | None, costs: CostModel):
-    """Planned R, net of the sales tax on the exit. Gross R is never reported."""
+def _planned_r(
+    entry: float,
+    stop: float | None,
+    target: float | None,
+    costs: CostModel,
+    *,
+    maker: bool = False,
+):
+    """Planned R, net of the fees the *planned exit* pays. Gross R never appears.
+
+    A maker exit pays the broker fee as well as the tax, so planning one in R
+    means charging both — otherwise a maker plan looks better than a taker
+    plan by exactly the fee it forgot.
+    """
     if not stop or not target or entry <= 0 or stop >= entry:
         return None
     risk = entry - stop
-    reward = costs.sell_proceeds(target, maker=False) - entry
+    reward = costs.sell_proceeds(target, maker=maker) - entry
     if risk <= 0:
         return None
     return reward / risk
@@ -848,17 +1186,49 @@ def render_report(report: PaperReport) -> str:
         )
         if accuracy.get("worst_difference_pct") is not None:
             lines.append(f"- worst deviation: {accuracy['worst_difference_pct']:.3f}% of notional")
+    if report.by_fill_model:
+        lines.extend(
+            [
+                "",
+                "## By fill model — two experiments, scored apart",
+                "",
+                "| fill model | closed | net ISK | win rate | Wilson LB | breakeven | verdict |",
+                "|---|---:|---:|---:|---:|---:|---|",
+            ]
+        )
+        for model, block in sorted(report.by_fill_model.items()):
+            lines.append(
+                f"| {model} | {block['closed']} | {block['cumulative_net_isk']:,.0f} "
+                f"| {block['win_rate']:.1%} | {block['wilson_lb']:.3f} "
+                + (
+                    f"| {block['breakeven_win_rate']:.3f} "
+                    if block["breakeven_win_rate"] is not None
+                    else "| UNKNOWN "
+                )
+                + f"| {block['verdict'].get('verdict', 'UNKNOWN')} |"
+            )
+        if "maker" in report.by_fill_model:
+            lines.extend(
+                [
+                    "",
+                    f"> {report.by_fill_model['maker']['assumed_fills']} of the maker rows are "
+                    "ASSUMED fills: the book proved the price was postable, never that anyone "
+                    "traded into it. Queue position and adverse selection are unpriced.",
+                ]
+            )
     lines.extend(["", "## Open positions", ""])
     if not report.open_positions:
         lines.append("_none_")
     else:
-        lines.append("| position | type | opened | notional | entry | last mark | stale |")
-        lines.append("|---|---|---|---:|---:|---:|---|")
+        lines.append("| position | type | opened | notional | fill | entry | last mark | stale |")
+        lines.append("|---|---|---|---:|---|---:|---:|---|")
         for row in report.open_positions:
             mark = "UNKNOWN" if row["last_mark"] is None else f"{row['last_mark']:,.2f}"
+            fill = row.get("fill_model") or "taker"
             lines.append(
                 f"| {row['position_id']} | {row.get('type_name') or row['type_id']} "
                 f"| {row['opened_at'][:10]} | {row['notional_isk']:,.0f} "
+                f"| {fill}{'*' if row.get('fill_assumed') else ''} "
                 f"| {row['entry_effective_price']:,.2f} | {mark} "
                 f"| {'yes' if row.get('mark_stale') else 'no'} |"
             )
@@ -869,6 +1239,14 @@ def render_report(report: PaperReport) -> str:
             "## Verdict (plan.md §12.4, frozen before the first trade)",
             "",
             f"**{verdict_block.get('verdict', 'UNKNOWN')}** — {verdict_block.get('detail', '')}",
+            "",
+            (
+                "> This headline is the frozen rule over **every** closed trade. With "
+                "both fill models in the sample it averages two different experiments; "
+                "the per-model table above is the one to read."
+                if len(report.by_fill_model) > 1
+                else ""
+            ),
             "",
             f"> Rule: {verdict_block.get('rule', '')}",
         ]

@@ -75,9 +75,10 @@ class EsiResponse:
     data: Any = None
     headers: dict[str, str] = field(default_factory=dict)
     expires: datetime | None = None
-    #: True when the server gave no usable `Expires` and the expiry above is
-    #: this system's own scheduled boundary rather than the server's word.
-    #: Recorded so telemetry can show how often that happens (§22 S1).
+    #: True when the server gave no usable `Expires`, so the expiry above is
+    #: this system's own scheduled boundary rather than the server's word. The
+    #: telemetry ledger marks the same rows `expiry-unknown` and leaves their
+    #: `expires_at` NULL, so how often it happens is answerable (§22 S1).
     expiry_unknown: bool = False
     last_modified: str | None = None
     pages: int | None = None
@@ -345,7 +346,22 @@ class EsiClient:
                 self.tokens.charge(status, self._now())
                 self.tokens.observe_headers(hdrs, self._now())
             self.error_limit.observe(hdrs, status, self._now())
-            self._record(feed, url, status, duration, hdrs, note=note)
+            # A response the server gave no usable `Expires` for is marked, so
+            # "how often is the server silent?" is a grep rather than a guess.
+            # `expires_at` in the same row is NULL for exactly these, which is
+            # the other half of the answer (§22 S1).
+            degraded = status in (200, 304) and parse_http_date(hdrs.get("expires")) is None
+            self._record(
+                feed,
+                url,
+                status,
+                duration,
+                hdrs,
+                note="; ".join(
+                    part for part in (note, "expiry-unknown" if degraded else "") if part
+                )
+                or None,
+            )
 
             if status == 420:
                 last_error = "HTTP 420 error limit — full stop"

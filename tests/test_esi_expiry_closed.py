@@ -222,6 +222,40 @@ def test_the_degraded_expiry_is_recorded_rather_than_silent(config, db):
     assert asyncio.run(client2.get(ORDERS_FEED, "/markets/99/orders")).expiry_unknown is False
 
 
+def test_the_telemetry_ledger_marks_a_silent_server(config, db):
+    """The claim must be true: how often the server gave nothing is answerable."""
+    from evescreener.timeutil import parse_iso
+
+    def handler(_request):
+        return httpx.Response(200, json=[{"type_id": 34}], headers={"etag": 'W/"z"'})
+
+    client, _counter = client_for(config, db, handler, now=lambda: NOW)
+    asyncio.run(client.get(ORDERS_FEED, "/markets/10000002/orders"))
+
+    rows = db.ledger_since(parse_iso("2020-01-01T00:00:00+00:00"))
+    assert rows, "the request must reach the telemetry ledger"
+    last = rows[-1]
+    assert "expiry-unknown" in (last["note"] or "")
+    assert last["expires_at"] is None, "and its recorded expiry is NULL"
+
+
+def test_a_well_behaved_response_is_not_marked(config, db):
+    from evescreener.timeutil import parse_iso
+
+    def handler(_request):
+        return httpx.Response(
+            200,
+            json=[{"type_id": 34}],
+            headers={"etag": 'W/"z"', "expires": http_date(NOW + timedelta(minutes=5))},
+        )
+
+    client, _counter = client_for(config, db, handler, now=lambda: NOW)
+    asyncio.run(client.get(ORDERS_FEED, "/markets/10000002/orders"))
+    last = db.ledger_since(parse_iso("2020-01-01T00:00:00+00:00"))[-1]
+    assert "expiry-unknown" not in (last["note"] or "")
+    assert last["expires_at"] is not None
+
+
 def test_pagination_headers_still_reach_the_caller(config, db):
     def handler(_request):
         return httpx.Response(

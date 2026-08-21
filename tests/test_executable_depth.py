@@ -213,3 +213,18 @@ def test_every_pricing_entrypoint_refuses_the_pre_r1_schema(entrypoint):
         from evescreener.backtest import measure_haircuts
 
         assert measure_haircuts(legacy, TIERS) == {}
+
+
+def test_the_census_still_measures_the_region_it_always_measured():
+    """§22 S2a redefined `top_order_volume_share`; §17's figure was region-wide.
+
+    The census is a diagnostic of the whole region, so pointing it at the
+    executable column would silently change what an already-recorded statistic
+    means — the same class of error as replacing a historical figure.
+    """
+    import inspect
+
+    from evescreener import census
+
+    source = inspect.getsource(census.book_statistics)
+    assert "region_top_order_volume_share" in source

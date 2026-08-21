@@ -237,7 +237,22 @@ def book_statistics(book: pd.DataFrame, tiers: Sequence[float]) -> dict:
             for index, tier in enumerate(tiers)
             if f"depth_fill_price_{index}" in sells.columns
         },
-        "spoof_flagged_share": round(float((sells["top_order_volume_share"] > 0.5).mean()), 4),
+        # §22 S2a redefined `top_order_volume_share` to describe the EXECUTABLE
+        # book. The census is a diagnostic of the whole region, and §17's
+        # recorded figure was taken region-wide — so it reads the region-wide
+        # column and stays comparable with what is already written down.
+        "spoof_flagged_share": round(
+            float(
+                (
+                    pd.to_numeric(
+                        sells.get("region_top_order_volume_share", sells["top_order_volume_share"]),
+                        errors="coerce",
+                    )
+                    > 0.5
+                ).mean()
+            ),
+            4,
+        ),
         # The round-trip haircut a taker actually pays at the smallest tier —
         # half the spread in, half out, before tax. This is the number any
         # strategy's edge has to clear, so it belongs in the opportunity map

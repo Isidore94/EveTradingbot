@@ -40,6 +40,12 @@ def book(sweep=NOW) -> pd.DataFrame:
             "top_order_volume_share": 0.05,
             "station_volume_share": 1.0,
             "partial_sweep": False,
+            # R1/S2: a fixture must say where its quotes rested, or every
+            # pricing path correctly refuses it.
+            "best_location_id": 60003760,
+            "exec_location_id": 60003760,
+            "exec_price": best,
+            "exec_is_structure": False,
         }
         for index in range(3):
             row[f"depth_fill_price_{index}"] = fill if index == 0 else None

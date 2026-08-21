@@ -313,11 +313,19 @@ def run_screen(
             # side — the bid-walk price is optimistic by however much of that
             # depth the operator cannot dock at. plan.md §9 R3 assumed the
             # opposite direction; the measurement corrected it.
-            station = buy_row.get("station_volume_share")
-            if station is not None and float(station) < 0.9:
+            # §22 S2a: accessibility is REACHABILITY at the executable venue,
+            # not NPC ownership. CCP matches a buy order by its range from its
+            # own location, so a station-ranged bid at another NPC station is
+            # unreachable however NPC-owned it is, while a region-ranged bid
+            # inside a structure is reachable because the seller never docks
+            # there. `station_volume_share` measured the wrong thing.
+            reachable = buy_row.get("exec_reachable_volume_share")
+            if reachable is None:
+                reachable = buy_row.get("station_volume_share")
+            if reachable is not None and float(reachable) < 0.9:
                 flags.append(
-                    f"{1 - float(station):.0%} of bid depth sits in player structures — "
-                    "exit may be inaccessible without docking rights"
+                    f"{1 - float(reachable):.0%} of bid depth is unreachable from the "
+                    "executable venue — that exit is not available"
                 )
             top_bid = buy_row.get("top_order_volume_share")
             if top_bid is not None and float(top_bid) > config.screen.top_order_share_flag:

@@ -2085,3 +2085,63 @@ guard are unchanged, and tests assert each still works.
 carrying no `Expires` results in a wait rather than an immediate refetch, and
 that `expiry_unknown` is rare in the telemetry ledger — if it is common, the
 header parsing is wrong rather than the server being silent.
+
+### §22 S2 — Executable identity covers depth, and pricing uses the validator — **IMPLEMENTED + GREEN**
+
+**S2a reproduced, verbatim from the review.** Venue A: ask 100 / 100 units, bid
+90 / 100 units. Venue B: an unreachable ask at 1 / 99 units and a
+station-ranged bid at 1,000 / 100 units. Tier notional 1,000 ISK.
+
+| field | before | after |
+|---|---|---|
+| executable ask / bid | 100 / 90 | 100 / 90 |
+| ask `depth_fill_price_0` | **9.258402** | 100.00 |
+| bid `depth_fill_price_0` | **1,000.00** | 90.00 |
+| ask `p5_price` | **1.00** | 100.00 |
+| bid `p5_price` | **1,000.00** | 90.00 |
+
+R1 made `exec_price` respect `reachable_from()` and left everything else
+walking **region-wide** levels. Screen, paper and backtest all consume those
+fields, so a row carried an executable ask of 100 beside an ask *fill* of 9.26
+taken from a venue the operator cannot reach — physically impossible, and
+optimistic on **both** sides at once.
+
+Every executable field now derives from orders reachable at
+`exec_location_id`: `p5_price`, `depth_fill_price_*`, the quantities,
+`order_count` and `top_order_volume_share`. A concentration flag about orders
+you cannot trade against was not a flag.
+
+**The region-wide readings are preserved, not deleted**, under explicit
+diagnostic names — `region_p5_price`, `region_depth_fill_price_*`,
+`region_depth_fill_qty_*`, `region_top_order_volume_share` — so the correction
+stays auditable and the two readings can be compared.
+
+**Accessibility is reachability, not NPC ownership.** `station_volume_share`
+answered "is this depth in an NPC station", which is the wrong question: CCP
+matches a buy order by its **range from its own location**, so a
+station-ranged bid at another NPC station is unreachable however NPC-owned it
+is, while a region-ranged bid inside an Upwell structure *is* reachable because
+the seller never docks there. `exec_reachable_volume_share` measures the right
+thing and `screen.py` and `brief.py` flag on it; `station_volume_share` remains
+as a diagnostic. `reachable_from()` is **unchanged** — `solarsystem` and the
+numeric jump ranges still fail closed, which is correct until the topology
+exists.
+
+**S2b reproduced.** `load_validated_book()` correctly rejects the operator's
+stored pre-R1 snapshot, and `paper.book_quote` priced off it anyway:
+
+| | before | after |
+|---|---|---|
+| `paper.book_quote` on a pre-R1 frame | `price=9.2584, stale=False` | `price=None, stale=True` |
+| reason | *(none)* | "book predates the executable-quote contract … re-run sweep-books" |
+
+The guard is at the pricing boundary rather than being another warning flag:
+`paper.book_quote`, `books.spread_view` and `backtest.measure_haircuts` each
+refuse a frame missing `EXECUTABLE_COLUMNS`, and a parametrised test asserts
+all three refuse the current pre-R1 schema.
+
+**Owed live gate (§22 S2).** After the next `sweep-books`, confirm on a liquid
+type that `depth_fill_price_0` is consistent with `exec_price` (a buy fill at
+or above the executable ask, a sell fill at or below the executable bid), and
+that `exec_reachable_volume_share` is high at Jita 4-4 and visibly lower for a
+type whose bids sit elsewhere.

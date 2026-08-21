@@ -5,6 +5,38 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Executable identity covers depth, and pricing uses the validator (§22 S2)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S2. `uv run pytest -q` →
+**767 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+**S2a.** R1 made `exec_price` respect `reachable_from()` and left `p5_price`,
+`depth_fill_price_*`, the quantities and `top_order_volume_share` walking
+region-wide levels. Reproduced verbatim: an executable ask of 100 beside an ask
+fill of **9.258402**, and an executable bid of 90 beside a bid fill of
+**1,000** — a physically impossible round trip, optimistic on both sides.
+
+| field | before | after |
+|---|---|---|
+| ask `depth_fill_price_0` | 9.258402 | 100.00 |
+| bid `depth_fill_price_0` | 1,000.00 | 90.00 |
+| ask / bid `p5_price` | 1.00 / 1,000.00 | 100.00 / 90.00 |
+
+Region-wide readings are preserved under `region_*` diagnostic names rather
+than deleted, so the correction stays auditable.
+
+**Accessibility is reachability, not NPC ownership.** CCP matches a buy order
+by its range from its own location, so a station-ranged bid at another NPC
+station is unreachable however NPC-owned it is, while a region-ranged bid in a
+structure is reachable. `exec_reachable_volume_share` replaces
+`station_volume_share` in the screen and brief flags.
+
+**S2b.** `paper.book_quote` priced a pre-R1 snapshot that
+`load_validated_book()` rejects — `price=9.2584, stale=False`. It now returns
+`price=None, stale=True` with an explicit reason, and `books.spread_view` and
+`backtest.measure_haircuts` refuse the same schema. A parametrised test asserts
+all three.
+
 ## 2026-08-20 — Expires fails closed on every production path (§22 S1)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S1. `uv run pytest -q` →

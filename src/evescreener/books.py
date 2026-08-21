@@ -192,6 +192,11 @@ class BookSummaryRow:
     top_order_volume_share: float | None
     station_volume_share: float | None
     partial_sweep: bool
+    exec_reachable_volume_share: float | None = None
+    region_p5_price: float | None = None
+    region_depth_fill_price: list = field(default_factory=list)
+    region_depth_fill_qty: list = field(default_factory=list)
+    region_top_order_volume_share: float | None = None
     # -- R1: executable identity (plan.md §21 R1) --------------------------
     best_location_id: int | None = None
     best_range: str | None = None
@@ -222,7 +227,21 @@ class BookSummaryRow:
             "exec_volume": self.exec_volume,
             "exec_order_count": self.exec_order_count,
             "exec_is_structure": self.exec_is_structure,
+            "exec_reachable_volume_share": self.exec_reachable_volume_share,
+            "region_p5_price": self.region_p5_price,
+            "region_top_order_volume_share": self.region_top_order_volume_share,
         }
+        for index in range(3):
+            record[f"region_depth_fill_price_{index}"] = (
+                self.region_depth_fill_price[index]
+                if index < len(self.region_depth_fill_price)
+                else None
+            )
+            record[f"region_depth_fill_qty_{index}"] = (
+                self.region_depth_fill_qty[index]
+                if index < len(self.region_depth_fill_qty)
+                else None
+            )
         for index in range(3):
             record[f"depth_fill_price_{index}"] = (
                 self.depth_fill_price[index] if index < len(self.depth_fill_price) else None
@@ -347,8 +366,13 @@ def reduce_orders(
         executable = [order for order in _live(group) if reachable_from(order, venue)]
         exec_price = None
         if executable:
-            prices = [float(order["price"]) for order in executable]
-            exec_price = max(prices) if side == "buy" else min(prices)
+            reachable_prices = [float(order["price"]) for order in executable]
+            exec_price = max(reachable_prices) if side == "buy" else min(reachable_prices)
+        # Depth, p5 and concentration are walked over the EXECUTABLE book, not
+        # the region (§22 S2a). Region-wide levels priced a 1,000 ISK bid fill
+        # at a venue whose reachable bid was 90 — an impossible round trip, and
+        # optimistic on both sides at once.
+        exec_levels = _sorted_levels(executable, is_buy=(side == "buy"))
         total_volume = sum(volume for _, volume in levels)
         station_volume = sum(
             float(order.get("volume_remain") or 0)
@@ -357,11 +381,18 @@ def reduce_orders(
         )
         prices: list[float | None] = []
         quantities: list[float | None] = []
+        region_prices: list[float | None] = []
+        region_quantities: list[float | None] = []
         for notional in notional_tiers:
-            price, units = depth_walk(levels, float(notional))
+            price, units = depth_walk(exec_levels, float(notional))
             prices.append(price)
             quantities.append(units)
+            region_price, region_units = depth_walk(levels, float(notional))
+            region_prices.append(region_price)
+            region_quantities.append(region_units)
         largest = max(volume for _, volume in levels)
+        exec_volume = sum(volume for _, volume in exec_levels)
+        exec_largest = max((volume for _, volume in exec_levels), default=0.0)
         rows.append(
             BookSummaryRow(
                 type_id=type_id,
@@ -371,12 +402,17 @@ def reduce_orders(
                 expires_ts=expires_ts,
                 best_price=levels[0][0],
                 total_volume=total_volume,
-                order_count=len(levels),
-                p5_price=p5_price(levels),
+                order_count=len(exec_levels) or None,
+                p5_price=p5_price(exec_levels) if exec_levels else None,
                 depth_fill_price=prices,
                 depth_fill_qty=quantities,
-                top_order_volume_share=(largest / total_volume) if total_volume else None,
+                top_order_volume_share=(exec_largest / exec_volume) if exec_volume else None,
                 station_volume_share=(station_volume / total_volume) if total_volume else None,
+                exec_reachable_volume_share=(exec_volume / total_volume) if total_volume else None,
+                region_p5_price=p5_price(levels),
+                region_depth_fill_price=region_prices,
+                region_depth_fill_qty=region_quantities,
+                region_top_order_volume_share=(largest / total_volume) if total_volume else None,
                 partial_sweep=partial,
                 best_location_id=(
                     int(best_order["location_id"])
@@ -390,11 +426,7 @@ def reduce_orders(
                 ),
                 exec_location_id=venue,
                 exec_price=exec_price,
-                exec_volume=(
-                    sum(float(order["volume_remain"]) for order in executable)
-                    if executable
-                    else None
-                ),
+                exec_volume=exec_volume or None,
                 exec_order_count=len(executable) or None,
                 exec_is_structure=((not is_npc_station(venue)) if venue is not None else None),
             ).as_record()

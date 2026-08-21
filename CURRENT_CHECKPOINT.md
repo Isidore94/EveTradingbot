@@ -42,14 +42,14 @@ An independent adversarial review found defects in the §21 remediation itself
 and older ones §21 did not reach. **S1 is done; S2 is next.** Every §21 owed
 live gate and the consolidated checklist below remain owed in full.
 
-**Gate stamp:** `uv run pytest -q` → **753 passed, 7 deselected**, ruff check +
+**Gate stamp:** `uv run pytest -q` → **767 passed, 7 deselected**, ruff check +
 format clean, `selftest` **12/12**.
 
 | id | finding | disposition | state |
 |---|---|---|---|
 | **S1** | `Expires` did not fail closed on the 304/200 paths | **CONFIRMED** (2 requests where 1 was correct) | **IMPLEMENTED + GREEN** |
-| **S2** | Regional depth on an executable quote; pricing bypasses the validator | claimed | **NEXT — reproduce first** |
-| **S4** | Pooled exploratory lead-lag rendered as if H2 were tested | claimed | queued |
+| **S2** | Regional depth on an executable quote; pricing bypasses the validator | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S4** | Pooled exploratory lead-lag rendered as if H2 were tested | claimed | **NEXT — reproduce first** |
 | **S5a** | `friction_breakdown` 100% where 66.667% is correct | **CONFIRMED** | queued |
 | **S3** | Worker reads page state; same-input key change schedules no follow-up | claimed | queued |
 | **S5b** | `effective_samples` returned 3 where at most 2 holds | **CONFIRMED** | queued |
@@ -58,6 +58,14 @@ format clean, `selftest` **12/12**.
 | **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | queued |
 | **S7** | Validation failures raise before any refusal is recorded | **NARROWED** | queued |
 | **S8** | Import guard too narrow; TOP figures unversioned | claimed | queued |
+
+### S2 owed live gate
+
+- [ ] After the next `sweep-books`, confirm on a liquid type that
+      `depth_fill_price_0` is consistent with `exec_price` — a buy fill at or
+      above the executable ask, a sell fill at or below the executable bid.
+- [ ] Confirm `exec_reachable_volume_share` is high at Jita 4-4 and visibly
+      lower for a type whose bids rest elsewhere.
 
 ### S1 owed live gate
 

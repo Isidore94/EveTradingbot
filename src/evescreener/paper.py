@@ -37,6 +37,7 @@ from .config import Config
 from .costs import CostModel
 from .paths import append_jsonl, read_jsonl
 from .reasons import DISLIKE, LIKE, PASS_ACTIONS, normalise_tags
+from .store.lake import EXECUTABLE_COLUMNS
 from .timeutil import ensure_utc, iso, parse_iso, utcnow
 
 __all__ = [
@@ -110,6 +111,21 @@ def book_quote(
     now = ensure_utc(now or utcnow())
     if book is None or book.empty:
         return BookQuote(None, None, None, None, True, "no book sweep available")
+    missing = [column for column in EXECUTABLE_COLUMNS if column not in book.columns]
+    if missing:
+        # A snapshot written before the executable-quote contract cannot say
+        # where its quotes rested, and `load_validated_book()` already refuses
+        # it. Refusing here too is what stops a caller reaching the lake
+        # directly and pricing off it anyway (§22 S2b).
+        return BookQuote(
+            None,
+            None,
+            None,
+            None,
+            True,
+            "book predates the executable-quote contract "
+            f"({', '.join(missing)} absent) — re-run sweep-books",
+        )
     rows = book[(book["type_id"] == int(type_id)) & (book["side"] == side)]
     if rows.empty:
         return BookQuote(None, None, None, None, True, f"no {side} side in the last sweep")

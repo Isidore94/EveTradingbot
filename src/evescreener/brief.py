@@ -362,11 +362,14 @@ def build_brief(
         if bool(sell_row.get("partial_sweep")):
             brief.flags.append("priced from a partial sweep")
     if buy_row is not None:
-        station = _finite(buy_row.get("station_volume_share"))
-        if station is not None and station < 0.9:
+        # §22 S2a: reachability at the executable venue, not NPC ownership.
+        reachable = _finite(buy_row.get("exec_reachable_volume_share"))
+        if reachable is None:
+            reachable = _finite(buy_row.get("station_volume_share"))
+        if reachable is not None and reachable < 0.9:
             brief.flags.append(
-                f"{1 - station:.0%} of bid depth sits in player structures — "
-                "exit may be inaccessible without docking rights"
+                f"{1 - reachable:.0%} of bid depth is unreachable from the "
+                "executable venue — that exit is not available"
             )
     if brief.anchor_truncated:
         brief.flags.append("anchor predates the lake horizon (truncated)")

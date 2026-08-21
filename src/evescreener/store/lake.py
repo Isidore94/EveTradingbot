@@ -64,6 +64,22 @@ BOOK_SUMMARY_COLUMNS = [
     "exec_volume",
     "exec_order_count",
     "exec_is_structure",
+    # Share of this side's volume that is actually reachable at the executable
+    # venue. Supersedes `station_volume_share` as the accessibility measure:
+    # CCP matches a buy order by its RANGE from its own location, so NPC
+    # ownership is not the question (§22 S2a).
+    "exec_reachable_volume_share",
+    # -- region-wide diagnostics -------------------------------------------
+    # The pre-S2a readings, kept so the correction stays auditable. They
+    # describe the whole region and must never be used to price a fill.
+    "region_p5_price",
+    "region_depth_fill_price_0",
+    "region_depth_fill_price_1",
+    "region_depth_fill_price_2",
+    "region_depth_fill_qty_0",
+    "region_depth_fill_qty_1",
+    "region_depth_fill_qty_2",
+    "region_top_order_volume_share",
 ]
 
 #: Columns without which a snapshot cannot be priced at all. A partition

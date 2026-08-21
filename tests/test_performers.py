@@ -185,6 +185,44 @@ def test_a_sparse_series_measures_calendar_days_not_rows():
     assert row["state"] == "UNKNOWN"
 
 
+def test_a_two_observation_median_is_a_mean_and_is_not_print_resistant():
+    """§22 S5d, reproduced: Aug 10 = 0.01, Aug 12/17/19 = 100.
+
+    Both raw seven-day endpoints are 100, so the raw return is 0%. The ranked
+    "robust" value read **+99.98%** with state OK, because the far endpoint
+    window held exactly two bars and the median of two values is their
+    arithmetic MEAN — which one 0.01 ISK print drags almost as far as it drags
+    the raw number. Three observations is the smallest window in which a single
+    bad print is outvoted.
+    """
+    days = ["2026-08-10", "2026-08-12", "2026-08-17", "2026-08-19"]
+    closes = [0.01, 100.0, 100.0, 100.0]
+    frame = pd.DataFrame(
+        {
+            "type_id": 34,
+            "region_id": 10000002,
+            "datetime": [pd.Timestamp(day, tz="UTC").replace(hour=11) for day in days],
+            "high": closes,
+            "low": closes,
+            "close": closes,
+            "volume": 5000.0,
+            "order_count": 2,
+            "isk_value": 1.0,
+            "fetched_at": "2026-08-20T11:30:00+00:00",
+        }
+    )
+    row = top_performers(frame, now=NOW, min_units=0).iloc[0]
+    assert row["week_pct_raw"] == pytest.approx(0.0)
+    assert not np.isfinite(row["week_pct"]), "two observations cannot be called robust"
+    assert row["state"] == "UNKNOWN"
+
+
+def test_three_observations_is_the_declared_minimum():
+    from evescreener.performers import MIN_ENDPOINT_BARS
+
+    assert MIN_ENDPOINT_BARS == 3
+
+
 def test_a_lone_bar_in_an_endpoint_window_cannot_be_its_own_median():
     """A median over one observation is that observation (§20.3)."""
     days = ["2026-08-05", "2026-08-06", "2026-08-07", "2026-08-12"]

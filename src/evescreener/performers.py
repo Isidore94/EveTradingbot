@@ -66,7 +66,7 @@ ENDPOINT_BARS = ENDPOINT_DAYS
 #: A median over ONE observation is that observation. An endpoint window
 #: holding a single bar therefore offers no defence against a print at all, so
 #: it is UNKNOWN rather than falsely robust.
-MIN_ENDPOINT_BARS = 2
+MIN_ENDPOINT_BARS = 3
 
 COLUMNS = [
     "type_id",
@@ -110,7 +110,14 @@ def _window_median(days: np.ndarray, closes: np.ndarray, anchor, span: int) -> f
     endpoint window can hold a single bar, and if that bar is a 0.01 ISK print
     the "robust" return is exactly as wrong as the raw one — which is how
     *Batch Compressed Plagioclase II-Grade* still read +49,699,900% over a
-    month after the first fix. Fewer than `MIN_ENDPOINT_BARS` observations is
+    month after the first fix. Over **two** it is their arithmetic MEAN, which
+    one 0.01 ISK print drags almost as far as it drags the raw number: Aug 10 =
+    0.01 with Aug 12/17/19 = 100 produced a ranked **+99.98%** week beside a
+    **raw 0%**, and state OK (§22 S5d). Three is the smallest window in which a
+    single bad print is outvoted, and calling the result "print-resistant"
+    below that was a claim the arithmetic did not support.
+
+    Fewer than `MIN_ENDPOINT_BARS` observations is
     UNKNOWN: the name has no defensible return over that window, and saying so
     is the honest answer (§4).
     """

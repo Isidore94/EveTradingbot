@@ -63,6 +63,7 @@ __all__ = [
 # two different systems.
 MIN_SAMPLES_FOR_A_READ = 20
 
+
 # How far forward a recorded pass is measured. The same horizons the backtest
 # uses, so a pass and a trade are judged on the same clock.
 PASS_HORIZONS = (5, 10, 20)
@@ -253,18 +254,28 @@ def _days_since(stamp: str | None, now) -> float | None:
 def effective_expected_r(expected_r: float | None, freshness: float | None) -> float | None:
     """The one expected-R contract: what is ranked is what freshness touched.
 
-    `freshness_factor` was computed, stored on the record, and then ignored by
-    the ranking — so a setup last measured a year ago sorted level with one
-    measured yesterday. Decay must reach the number that decides order, or it
-    is decoration.
+    **Decay moves the estimate toward the prior, and the prior is 0R.** R6
+    multiplied, which does that correctly for a positive expected R and
+    backwards for a negative one: `-1R x 0.01 = -0.01R` **outranked**
+    `-0.1R x 1.0 = -0.1R`, so a severe loss that had gone stale sorted above a
+    mild one measured yesterday. Aging adverse evidence made it look like a
+    better opportunity (§22 S5c).
 
-    It scales rather than penalises, so a **negative** expected R decays toward
-    zero rather than deeper: a stale loss is a less certain claim, not a larger
-    one. Either input missing is UNKNOWN, and UNKNOWN never reads as 1.0 (§4).
+    Multiplying is right for the *magnitude* and wrong for the *direction*, so
+    decay is applied only where it cannot flatter: a positive expected R shrinks
+    toward zero, and a negative one is **held at its measured value**. A stale
+    loss is not evidence of a smaller loss. What staleness does buy is
+    uncertainty, and that is expressed by `freshness_state()` turning
+    sufficiently stale evidence UNKNOWN — where it ranks below everything
+    measured, rather than above it.
     """
     if expected_r is None or freshness is None:
         return None
-    return float(expected_r) * float(freshness)
+    value = float(expected_r)
+    if value <= 0.0:
+        # Never improved by age.
+        return value
+    return value * float(freshness)
 
 
 def eligible_outcomes(rows) -> int:

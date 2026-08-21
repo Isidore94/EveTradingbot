@@ -117,6 +117,50 @@ def test_daily_samples_of_a_ten_day_return_are_not_ten_independent_ones():
     assert effective_samples(frame, horizon=10) == 10
 
 
+def test_overlapping_windows_either_side_of_a_bin_edge_are_not_independent():
+    """§22 S5b: R3 binned against a GLOBAL origin, so a bin edge faked independence.
+
+    Type 2 on 1 January, type 1 on the 10th and 11th, at a ten-day horizon. The
+    two type-1 windows share nine of their ten days; a global origin put them
+    in different bins and R3 answered 3.
+    """
+    from evescreener.backtest import non_overlapping_subset
+
+    frame = pd.DataFrame(
+        {
+            "type_id": [2, 1, 1],
+            "datetime": pd.to_datetime(["2026-01-01", "2026-01-10", "2026-01-11"], utc=True),
+        }
+    )
+    assert effective_samples(frame, horizon=10) == 2
+    kept = non_overlapping_subset(frame, horizon=10)
+    days = sorted(str(value.date()) for value in kept["datetime"])
+    assert days == ["2026-01-01", "2026-01-10"], "the 11th overlaps the 10th"
+
+
+def test_the_subset_is_deterministic_and_actually_non_overlapping():
+    from evescreener.backtest import non_overlapping_subset
+
+    frame = _instances([34], days=45)
+    first = non_overlapping_subset(frame, horizon=10)
+    second = non_overlapping_subset(frame, horizon=10)
+    assert list(first.index) == list(second.index)
+    stamps = sorted(pd.to_datetime(first["datetime"], utc=True))
+    gaps = [(b - a).days for a, b in zip(stamps, stamps[1:], strict=False)]
+    assert all(gap >= 10 for gap in gaps), gaps
+
+
+def test_wins_are_counted_in_the_subset_not_rescaled_from_the_overlapping_rate():
+    """Rescaling re-imports the dependence the correction exists to remove."""
+    import inspect
+
+    from evescreener import backtest
+
+    source = inspect.getsource(backtest._stats)
+    assert "non_overlapping_subset" in source
+    assert "(wins / samples) * n_eff" not in source
+
+
 def test_effective_samples_counts_each_type_separately():
     """Two types over the same dates are two independent series, not one."""
     frame = _instances([34, 35], days=100)

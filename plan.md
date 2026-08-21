@@ -2024,10 +2024,10 @@ is listed as **CONFIRMED** only where the wrong output was observed directly.
 | **S4** | Pooled exploratory lead-lag rendered as if H2 had been tested | claimed; reproduction owed at phase start | queued |
 | **S5a** | `friction_breakdown` returns 100% where 66.667% is correct | **CONFIRMED** — reported 100.0 vs 66.666667 | **IMPLEMENTED + GREEN** |
 | **S3** | Worker reads page state; a same-input key change schedules no follow-up | **CONFIRMED** | **IMPLEMENTED + GREEN** |
-| **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | **NEXT** |
-| **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | queued |
-| **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | queued |
-| **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | queued |
+| **S5b** | `effective_samples` global-origin binning overstates independence | **CONFIRMED** — returned 3 where at most 2 is supported | **IMPLEMENTED + GREEN** |
+| **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** — `-1R x 0.01` outranks `-0.1R x 1.0` | **IMPLEMENTED + GREEN** |
+| **S5d** | A two-observation median is a mean and is ranked as print-resistant | **CONFIRMED** — `week_pct +99.98%` / `raw 0%` / state OK | **IMPLEMENTED + GREEN** |
+| **S6** | `broker_fee_overrides` is always empty in production | **CONFIRMED** — `from_config` yields `{}` | **NEXT** |
 | **S7** | Validation failures raise before any refusal is recorded | **NARROWED** — `_refuse` is not in `reasons.py`; locate the real boundary first | queued |
 | **S8** | Import guard too narrow; TOP's aggregate figures are unversioned | claimed; the figure mismatch is itself the finding | queued |
 
@@ -2268,3 +2268,98 @@ still tested.
 computation is running and confirm the list that settles matches the hub
 finally selected; then let the refresh timer fire mid-computation and confirm
 the page ends up showing the newer data rather than the older.
+
+### §22 S5b — Effective samples select a real non-overlapping subset — **IMPLEMENTED + GREEN**
+
+**Reproduced.** Type 2 on 1 January; type 1 on the 10th and 11th; horizon 10.
+The two type-1 windows share **nine of their ten days**, yet R3 answered **3**.
+
+| | before | after |
+|---|---|---|
+| `effective_samples` | **3** | **2** |
+
+R3 binned dates against a **global origin**, which calls two windows
+independent whenever they fall in different bins — a bin *edge* between the
+10th and 11th manufactured independence that is not there.
+`non_overlapping_subset()` selects rows instead: walk each type's own dates in
+order and keep an instance only when it starts at least `horizon` days after
+the last kept one. Greedy, deterministic, and what comes back is an actual set
+of rows whose forward windows provably do not overlap.
+
+**Wins are counted in that subset.** R3 reconstructed them as
+`round(win_rate * n_eff)`, which re-imports the very dependence the correction
+exists to remove.
+
+**Cross-type dependence remains unmodelled and is now stated as such.** Two
+types moving together on the same day still count as two observations;
+correcting that needs a market-factor model this system does not have.
+
+**Owed live gate (§22 S5b).** Re-run the backtest on the real lake and record
+`n_eff` against `samples`. If the ratio is far from `1/horizon`, the instance
+set is more clustered than the crude correction assumes.
+
+### §22 S5c — Aging adverse evidence must not improve its rank — **IMPLEMENTED + GREEN**
+
+**Reproduced.**
+
+| setup | expected R | freshness | effective (before) | rank (before) |
+|---|---|---|---|---|
+| stale severe | −1.0R | 0.01 | **−0.01R** | **1st** |
+| fresh mild | −0.1R | 1.00 | −0.10R | 2nd |
+
+R6 multiplied, which is right for a gain and backwards for a loss: a severe
+loss that had gone stale sorted **above** a mild one measured yesterday. Decay
+moves an estimate toward the 0R prior, so it shrinks a gain and must not shrink
+a loss — **a stale loss is not evidence of a smaller loss**. A positive expected
+R still decays toward zero; a negative one is held at its measured value, and
+`fresh-mild` now ranks first.
+
+**No staleness cliff was invented.** `freshness_factor` is bounded to
+[0.4, 1.0] by construction, so no point in its range means "this carries no
+information"; a cutoff there would be exactly the unmeasured threshold §22 S4
+removed elsewhere. An initial 0.5 floor was tried, marked every setup older
+than about eight days UNKNOWN, and was withdrawn for that reason. Small-sample
+scepticism stays in `MIN_SAMPLES_FOR_A_READ` and the Wilson lower bound, where
+it belongs. Raw and adjusted values both remain on the record.
+
+**Owed live gate (§22 S5c).** Unobservable until real closed trades exist —
+every LEARNING row is still UNVALIDATED.
+
+### §22 S5d — A median of two is a mean — **IMPLEMENTED + GREEN**
+
+**Reproduced.** Aug 10 = 0.01, Aug 12/17/19 = 100. Both raw seven-day endpoints
+are 100, so the raw return is 0%.
+
+| | before | after |
+|---|---|---|
+| ranked `week_pct` | **+99.980002%** | **UNKNOWN** |
+| `week_pct_raw` | 0% | 0% |
+| `state` | **OK** | UNKNOWN |
+
+§20.3 required **two** observations at each endpoint and called the result
+print-resistant. The median of two values is their arithmetic **mean**, which
+one 0.01 ISK print drags almost as far as it drags the raw number — so the
+table sorted on a "robust" value that was not robust, and showing the raw
+number beside it does not help when the ranking uses the false one.
+`MIN_ENDPOINT_BARS` is **3**, the smallest window in which a single bad print
+is outvoted.
+
+**Measured cost on the real Forge lake** (2,947 tracked names, 100-unit floor,
+2026-08-20):
+
+| | 2 observations | 3 observations |
+|---|---|---|
+| OK | 2,740 | **2,583** |
+| UNKNOWN | 109 | **266** |
+| THIN and OK | 1,207 | **1,168** |
+| worst week reading | 85,069% | 85,069% |
+
+157 names (5.7% of OK, 39 of them THIN) become UNKNOWN. The worst reading is
+unchanged, which confirms the remaining extremes have three real observations
+at each end — they are sustained repricings, not prints.
+
+Calendar-day 7/30 windows are unchanged.
+
+**Owed live gate (§22 S5d).** Chart five of the newly-UNKNOWN names and confirm
+they genuinely trade too sparsely to carry a weekly return, rather than the
+minimum being too strict.

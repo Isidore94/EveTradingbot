@@ -5,6 +5,32 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-20 — Three statistical and ranking corrections (§22 S5b, S5c, S5d)
+
+**Status: IMPLEMENTED + GREEN.** `plan.md` §22 S5b/c/d. `uv run pytest -q` →
+**795 passed, 7 deselected**, ruff check + format clean, `selftest` 12/12.
+
+- **S5b — effective samples.** R3 binned dates against a *global* origin, so a
+  bin edge between 10 and 11 January made two windows sharing nine of ten days
+  look independent: **3** where at most **2** holds.
+  `non_overlapping_subset()` now selects an actual set of rows per type, and
+  wins are counted **in** that subset rather than rescaled from the overlapping
+  win rate — rescaling re-imports the dependence being corrected. Cross-type
+  dependence remains unmodelled and is stated as such.
+- **S5c — negative expected R.** R6 multiplied, so `-1R x 0.01 = -0.01R`
+  outranked `-0.1R x 1.0 = -0.1R`: a severe loss gone stale sorted above a mild
+  one measured yesterday. Decay moves an estimate toward the 0R prior, so it
+  shrinks a gain and must not shrink a loss. **No staleness cliff was
+  invented** — `freshness_factor` is bounded to [0.4, 1.0], so no point in its
+  range means "no information"; a 0.5 floor was tried, marked everything older
+  than ~8 days UNKNOWN, and was withdrawn.
+- **S5d — a median of two is a mean.** Aug 10 = 0.01 with Aug 12/17/19 = 100
+  gave a ranked **+99.98%** week beside a **raw 0%**, state OK, because the far
+  endpoint held two bars. `MIN_ENDPOINT_BARS` is **3**. Measured cost on the
+  real lake: OK 2,740 → 2,583, UNKNOWN 109 → 266 (157 names, 39 of them THIN).
+  The worst reading is unchanged at 85,069%, confirming the remaining extremes
+  are sustained repricings rather than prints.
+
 ## 2026-08-20 — A generation, not a widget tuple (§22 S3)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §22 S3. `uv run pytest -q` →

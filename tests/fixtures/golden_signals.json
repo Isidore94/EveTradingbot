@@ -66,7 +66,7 @@
     "1x": {
       "book_haircut_pct": 3.4482758620689618,
       "breakeven_win_rate": 0.6416463909319432,
-      "effective_samples": 343,
+      "effective_samples": 297,
       "excluded_haircut_unknown": 0,
       "expectancy_pct": -5.6514551599596805,
       "first_half_breakeven": 0.6667453413444876,
@@ -85,14 +85,14 @@
       "total_friction_pct": 6.706896551724128,
       "verdict": "NOT PLAUSIBLE",
       "wilson_lb": 0.16144205642368673,
-      "wilson_lb_clustered": 0.15950175957834292,
+      "wilson_lb_clustered": 0.14814955289728424,
       "win_rate": 0.1975,
       "wins": 79
     },
     "2x": {
       "book_haircut_pct": 6.796116504854377,
       "breakeven_win_rate": 0.7044878479596668,
-      "effective_samples": 343,
+      "effective_samples": 297,
       "excluded_haircut_unknown": 0,
       "expectancy_pct": -8.922902623206582,
       "first_half_breakeven": 0.705470110658006,
@@ -111,14 +111,14 @@
       "total_friction_pct": 9.94174757281554,
       "verdict": "NOT PLAUSIBLE",
       "wilson_lb": 0.06571691296712198,
-      "wilson_lb_clustered": 0.06440128540105199,
+      "wilson_lb_clustered": 0.05766371722826745,
       "win_rate": 0.09,
       "wins": 36
     },
     "3x": {
       "book_haircut_pct": 10.047846889952153,
       "breakeven_win_rate": 0.8194818751535724,
-      "effective_samples": 343,
+      "effective_samples": 297,
       "excluded_haircut_unknown": 0,
       "expectancy_pct": -12.100432934398533,
       "first_half_breakeven": 0.8568319987940884,
@@ -137,7 +137,7 @@
       "total_friction_pct": 13.083732057416263,
       "verdict": "NOT PLAUSIBLE",
       "wilson_lb": 0.03061683210766865,
-      "wilson_lb_clustered": 0.02891387124517107,
+      "wilson_lb_clustered": 0.028283562149105792,
       "win_rate": 0.0475,
       "wins": 19
     }

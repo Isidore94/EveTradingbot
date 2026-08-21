@@ -36,13 +36,47 @@ def test_an_unknown_freshness_cannot_silently_mean_fresh():
     assert effective_expected_r(None, 1.0) is None
 
 
-def test_a_negative_expected_r_is_not_improved_by_going_stale():
-    """Decay must shrink magnitude toward zero, never flip or flatter a loss."""
-    fresh = effective_expected_r(-1.0, 1.0)
-    stale = effective_expected_r(-1.0, 0.4)
-    assert fresh == pytest.approx(-1.0)
-    assert stale == pytest.approx(-0.4)
-    assert stale > fresh, "a stale loss is less certain, not a bigger loss"
+def _record(name, expected_r, freshness, *, closed=10, state="MEASURED"):
+    record = SetupRecord(name=name, closed=closed)
+    record.expected_r = expected_r
+    record.freshness = freshness
+    record.state = state
+    record.apply_freshness()
+    return record
+
+
+def test_aging_adverse_evidence_does_not_improve_its_rank():
+    """§22 S5c: R6 multiplied, which flatters a loss as it goes stale.
+
+    `-1R x 0.01 = -0.01R` outranked `-0.1R x 1.0 = -0.1R`, so a severe loss
+    that had gone stale sorted *above* a mild one measured yesterday. Decay
+    moves an estimate toward the 0R prior, which shrinks a gain and must not
+    shrink a loss — a stale loss is not evidence of a smaller loss.
+    """
+    from evescreener.learning import rank_setups
+
+    assert effective_expected_r(-1.0, 1.0) == pytest.approx(-1.0)
+    assert effective_expected_r(-1.0, 0.01) == pytest.approx(-1.0), "held, not shrunk"
+    # A positive expectancy still decays toward zero.
+    assert effective_expected_r(1.0, 0.4) == pytest.approx(0.4)
+
+    stale_severe = _record("stale-severe", expected_r=-1.0, freshness=0.01)
+    fresh_mild = _record("fresh-mild", expected_r=-0.1, freshness=1.0)
+    assert [r.name for r in rank_setups([stale_severe, fresh_mild])] == [
+        "fresh-mild",
+        "stale-severe",
+    ]
+
+
+def test_no_staleness_cliff_is_invented():
+    """`freshness_factor` is bounded to [0.4, 1.0]; there is no point in that
+    range at which it says "this carries no information", so no cutoff is
+    added. Small-sample scepticism stays where it belongs — in
+    `MIN_SAMPLES_FOR_A_READ` and the Wilson lower bound."""
+    from evescreener import learning
+
+    assert not hasattr(learning, "STALE_EVIDENCE_FLOOR")
+    assert not hasattr(learning, "freshness_state")
 
 
 # -- 2. the record carries the ranked value --------------------------------
@@ -68,15 +102,6 @@ def test_a_record_with_no_freshness_reports_unknown_effective_r():
 
 
 # -- 3. ranking actually moves -----------------------------------------------
-
-
-def _record(name, expected_r, freshness, *, closed=10, state="MEASURED"):
-    record = SetupRecord(name=name, closed=closed)
-    record.expected_r = expected_r
-    record.freshness = freshness
-    record.state = state
-    record.apply_freshness()
-    return record
 
 
 def test_a_year_old_setup_no_longer_ranks_level_with_yesterdays():

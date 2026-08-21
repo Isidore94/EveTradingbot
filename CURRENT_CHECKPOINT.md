@@ -42,7 +42,7 @@ An independent adversarial review found defects in the §21 remediation itself
 and older ones §21 did not reach. **S1 is done; S2 is next.** Every §21 owed
 live gate and the consolidated checklist below remain owed in full.
 
-**Gate stamp:** `uv run pytest -q` → **789 passed, 7 deselected**, ruff check +
+**Gate stamp:** `uv run pytest -q` → **795 passed, 7 deselected**, ruff check +
 format clean, `selftest` **12/12**.
 
 | id | finding | disposition | state |
@@ -52,10 +52,10 @@ format clean, `selftest` **12/12**.
 | **S4** | Pooled exploratory lead-lag rendered as if H2 were tested | claimed | **NEXT — reproduce first** |
 | **S5a** | `friction_breakdown` 100% where 66.667% is correct | **CONFIRMED** | **IMPLEMENTED + GREEN** |
 | **S3** | Worker reads page state; same-input key change schedules no follow-up | **CONFIRMED** | **IMPLEMENTED + GREEN** |
-| **S5b** | `effective_samples` returned 3 where at most 2 holds | **CONFIRMED** | **NEXT** |
-| **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** | queued |
-| **S5d** | Two-observation median ranked as print-resistant | **CONFIRMED** | queued |
-| **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | queued |
+| **S5b** | `effective_samples` returned 3 where at most 2 holds | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S5c** | Aging adverse evidence improves its rank | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S5d** | Two-observation median ranked as print-resistant | **CONFIRMED** | **IMPLEMENTED + GREEN** |
+| **S6** | `broker_fee_overrides` always empty in production | **CONFIRMED** | **NEXT** |
 | **S7** | Validation failures raise before any refusal is recorded | **NARROWED** | queued |
 | **S8** | Import guard too narrow; TOP figures unversioned | claimed | queued |
 
@@ -66,6 +66,15 @@ format clean, `selftest` **12/12**.
       above the executable ask, a sell fill at or below the executable bid.
 - [ ] Confirm `exec_reachable_volume_share` is high at Jita 4-4 and visibly
       lower for a type whose bids rest elsewhere.
+
+### S5b/c/d owed live gates
+
+- [ ] **S5b** — re-run the backtest and record `n_eff` against `samples`. If the
+      ratio is far from `1/horizon`, the instance set is more clustered than the
+      crude correction assumes.
+- [ ] **S5c** — unobservable until real closed trades exist.
+- [ ] **S5d** — chart five of the 157 newly-UNKNOWN names and confirm they
+      genuinely trade too sparsely to carry a weekly return.
 
 ### S3 owed live gate
 

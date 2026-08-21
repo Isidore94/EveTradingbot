@@ -46,6 +46,7 @@ __all__ = [
     "run_backtest",
     "verdict",
     "effective_samples",
+    "non_overlapping_subset",
     "friction_breakdown",
     "stress_factors",
     "wilson_lower_bound",
@@ -184,37 +185,60 @@ def friction_breakdown(
     }
 
 
+def non_overlapping_subset(instances: pd.DataFrame, horizon: int) -> pd.DataFrame:
+    """A concrete, deterministic set of instances whose windows do not overlap.
+
+    R3 binned dates against a **global** origin, which calls two windows
+    independent whenever they land in different bins — even when they overlap
+    almost entirely. The reproduction: a type-2 instance on 1 January, and
+    type-1 instances on the 10th and 11th, at a ten-day horizon. The two
+    type-1 windows share nine of their ten days, but a global origin puts them
+    either side of a bin edge, so R3 answered **3** where at most **2** is
+    supported (§22 S5b).
+
+    This selects rows rather than counting bins: walk each type's own dates in
+    order and keep an instance only when it starts at least `horizon` days
+    after the last one kept. Greedy and deterministic, so the same table always
+    yields the same subset, and what comes back is an actual set of rows whose
+    forward windows provably do not overlap.
+
+    **Cross-type dependence is NOT modelled.** Two types moving together on the
+    same day still count as two observations. That is stated rather than
+    corrected, because correcting it needs a market-factor model this system
+    does not have.
+    """
+    empty = pd.DataFrame()
+    if instances is None or instances.empty:
+        return instances if instances is not None else empty
+    horizon = max(1, int(horizon))
+    if "datetime" not in instances.columns:
+        return instances
+    frame = instances.copy()
+    frame["_day"] = pd.to_datetime(frame["datetime"], utc=True, errors="coerce")
+    frame = frame[frame["_day"].notna()]
+    if frame.empty:
+        return frame.drop(columns=["_day"])
+    if "type_id" not in frame.columns:
+        frame["type_id"] = 0
+
+    keep = []
+    for _type_id, group in frame.sort_values(["type_id", "_day"]).groupby("type_id", sort=False):
+        last = None
+        for index, day in zip(group.index, group["_day"], strict=False):
+            if last is None or (day - last).days >= horizon:
+                keep.append(index)
+                last = day
+    return frame.loc[keep].drop(columns=["_day"])
+
+
 def effective_samples(instances: pd.DataFrame, horizon: int) -> int:
     """How many *independent* observations the instance table really holds.
 
-    An `h`-day forward return sampled every day on one type shares `h-1` days
-    of bars with its neighbour, so 100 daily instances of a 10-day return are
-    nearer 10 observations than 100. Treating them as 100 shrinks every
-    confidence interval by roughly sqrt(h) and makes a weak result look
-    established.
-
-    The correction is deliberately the crudest defensible one — non-overlapping
-    blocks of `horizon` days, counted per type, because two types are two
-    series — rather than an estimated correlation structure. A cruder
-    correction that can be checked by hand is worth more here than a tighter
-    one that cannot.
+    The size of `non_overlapping_subset` — an actual set of rows, not a count
+    of bins. See that function for why bin-counting overstated it.
     """
-    if instances is None or instances.empty:
-        return 0
-    horizon = max(1, int(horizon))
-    if "datetime" not in instances.columns:
-        return int(len(instances))
-    stamps = pd.to_datetime(instances["datetime"], utc=True, errors="coerce")
-    usable = instances[stamps.notna()].copy()
-    if usable.empty:
-        return 0
-    stamps = stamps.dropna()
-    origin = stamps.min()
-    block = ((stamps - origin).dt.days // horizon).astype("int64")
-    types = usable["type_id"] if "type_id" in usable.columns else 0
-    return int(
-        pd.DataFrame({"type_id": types, "block": block.to_numpy()}).drop_duplicates().shape[0]
-    )
+    subset = non_overlapping_subset(instances, horizon)
+    return int(len(subset)) if subset is not None else 0
 
 
 def measure_haircuts(
@@ -363,8 +387,18 @@ def _stats(
     # Overlapping forward windows are not independent facts (§21 R3). Both
     # bounds are reported: the naive one because it is what every prior result
     # used, the clustered one because it is what the sample supports.
-    n_eff = effective_samples(instances, horizon)
-    wins_eff = int(round((wins / samples) * n_eff)) if samples and n_eff else 0
+    # The clustered bound is computed on a real non-overlapping subset, and its
+    # wins are counted IN that subset. R3 reconstructed them by multiplying the
+    # overlapping win rate by the effective n, which re-imports exactly the
+    # dependence the correction exists to remove (§22 S5b).
+    subset = non_overlapping_subset(instances, horizon)
+    n_eff = int(len(subset))
+    subset_returns = (
+        subset["net_return_pct"].to_numpy(dtype="float64")
+        if n_eff and "net_return_pct" in subset.columns
+        else np.array([], dtype="float64")
+    )
+    wins_eff = int((subset_returns > 0).sum()) if subset_returns.size else 0
     parts = None
     if {"entry_effective", "exit_effective"} <= set(instances.columns):
         # Averaged the same way `round_trip_haircut_pct` is — per row, then

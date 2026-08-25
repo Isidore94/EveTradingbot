@@ -10,12 +10,131 @@ authorization 2026-08-25, recorded as §17 D-33: *"build first, evaluate against
 competitors and live gates afterwards"*). H5 and H6 are **out of scope**; H0 is
 deferred to a keep/park decision after the shadow period.
 
-**State: PLAN LANDED, CODE IN PROGRESS.** The consolidated owed live-validation
-checklist for this track is written at the end of this file when the build
-lands. Nothing in the track is `LIVE_VALIDATED`.
+**State: H1–H4 IMPLEMENTED + GREEN. NOTHING IS `LIVE_VALIDATED`.**
+**Gate stamp:** `uv run pytest -q` → **1,025 passed, 7 deselected**, ruff check
++ format clean, `python -m evescreener selftest` → **12/12**.
 
 Everything below this item — the paper desk, §21, §22 and the consolidated
-checklist — is unchanged and still owed in full.
+checklist — is unchanged and still owed in full. This track **adds** to that
+list; it replaces nothing on it.
+
+### Read this before you open the tab
+
+**Nothing in this build has been checked against the game.** Not one route has
+been flown, not one ladder has been compared to a market window, not one
+liquidation estimate has met a real sell order. The whole track is arithmetic
+over swept data and a graph read out of the SDE, and arithmetic is exactly the
+part a machine cannot validate about itself.
+
+**The page's normal state may be a short list or an honest zero, and that is
+the system working.** The measured Forge reality has not changed because a new
+tab reads it: the median spread across two-sided types is **98.8%**, only ~932
+Forge types trade inside a 5% spread at all, and of **151,113** hub pairs
+measured at 0.25B, **10–14** cleared real freight and tax (§17). A hauling
+scanner that returned a full screen of plans against that book would be
+telling you something false. Judge the tab on whether its refusals are
+*correct*, not on how many rows it prints — the rejected view with its reason
+histogram is the more informative half of the page.
+
+**What the tab measures, and what it assumes.** Getting in is measured: the
+source and destination walks are arithmetic over depth that was actually
+swept. Getting out is assumed: `destination_share_prior` (0.25) and
+`capture_share` (0.05/0.15/0.35) are **operator priors**, because ESI's
+regional history carries no station split and no computation turns that into a
+measurement. They are labelled ASSUMED on every surface, and they become
+measurements only when your own recorded fills can replace them.
+
+### A. The map, and the route it draws (H1a)
+
+- [ ] **Ten in-game route spot checks.** Set destination in the client for ten
+      of the tab's routes and compare the client's jump count against the
+      page's. Include **at least one route through a 0.45–0.49 system** — the
+      band where displayed security (0.5, high-sec) and raw security (0.449,
+      not) disagree, and the band a hauler is actually ganked in. The engine
+      rounds half-up on purpose; the client is the authority on whether that
+      is right.
+- [ ] **Confirm the Jita → Amarr readings against the client**: this build
+      measures **11 jumps** through **Ahbazon (0.4)** on the shortest profile
+      and **34** on high-sec-only, from SDE build **3478781**. If the client
+      disagrees, the map is stale or the profile is not what you think it is.
+- [ ] **Confirm one avoid-list system is genuinely avoided**, and that removing
+      the only high-sec path produces **UNKNOWN with a reason** rather than a
+      longer route through low-sec.
+
+### B. The ladders (H1b)
+
+- [ ] **Ten in-game quote/depth spot checks.** Open the market window for ten
+      of the tab's items at the named station and compare the first few price
+      levels and their volumes against the detail drawer's ladders. What is
+      being checked is the **station** reduction: the page claims these are the
+      orders you could hit standing *there*.
+- [ ] **Sell one unit into a ranged bid** — one of them **resting in a player
+      structure** — and record **where the goods left from and where the ISK
+      landed**. This is the single most load-bearing unverified claim in the
+      track: the reachability doctrine says a ranged bid reaches out to you and
+      the seller never docks at the buyer's station. If that is wrong, every
+      exit number on the page is wrong in the optimistic direction.
+- [ ] **Track one liquid `order_id` across sweeps** and watch whether `issued`
+      moves when the order is repriced. The page currently labels the column
+      "last placed **or repriced** (unverified)" because nobody knows. One
+      observation settles it, and the answer belongs in §23.6.
+- [ ] **Record the measured depth size per five-hub generation** — rows and
+      bytes — into `plan.md` §17, then set retention from that number rather
+      than from a guess. `data/depth/region=*/date=*.parquet` after a
+      `sweep-books --secondary`. The killmail table (§7) is the standing
+      warning about what "trivial next to the market lake" is worth as an
+      estimate.
+
+### C. The costs (H2, and §22 S6 restated)
+
+- [ ] **Transcribe the actual in-client broker fee at two hubs** into
+      `[costs].broker_fee_overrides` — Jita 4-4 and one other, which are owned
+      by **different NPC corporations** and therefore charge you different
+      rates. Until then every hub is priced at the skill-derived base, and the
+      maker column is wrong by exactly that difference. (This is §22 S6's owed
+      gate; the hauling maker scenario now consumes the same override, so it is
+      owed twice over.)
+- [ ] **Reproduce one hauling row's arithmetic against a real round trip**:
+      what you paid, what the wallet showed after tax, and what the report's
+      audit block predicted. Tolerance is §12.3's ±0.5% of notional, stated
+      before any fill and not to be adjusted after seeing the result.
+
+### D. The tab itself — a two-week shadow (H2–H4)
+
+- [ ] **Two weeks of shadow use, with the decision recorded before you
+      undock.** For each haul you take: `haul record open` with a thesis and a
+      like tag *before departure*, and `haul record close` with what you really
+      got *after arrival*. The forecast error is the number that matters, and
+      it only exists if the open is recorded first.
+- [ ] **Log the stale-miss rate**: how often the destination bid you priced
+      against was gone when you docked. Nothing in this system bounds that —
+      it is the "a snapshot is not a tape" caveat, and the shadow period is
+      how it acquires a number.
+- [ ] **Log the minutes.** The default objective ranks on net ISK per active
+      minute using `seconds_per_jump` and `handling_minutes` from your ship
+      profile. Time one real haul end to end and correct the profile; a
+      ranking built on a wrong minute is a ranking of the wrong thing.
+- [ ] **Pass on something deliberately**, with a dislike tag, and confirm the
+      refusal lands in `data/streams/paper_hauls.jsonl`. Then attempt one
+      **bad** pass (a misspelled tag) and confirm the refusal is recorded with
+      the attempted tags — §22 S7's rule, now enforced here too.
+- [ ] **Use `along_route` mode on a trip you were making anyway** and confirm
+      the detour it charges matches what the trip actually cost you in extra
+      jumps.
+
+### E. Then, and only then: H0 — keep or park
+
+- [ ] **Compare the tab against EVE Flipper, EVE Profits and ISK Scout**, on
+      the same day, on your own hubs, on the four questions in §23.20: does any
+      of them price a **quantity** against **executable** depth at a named
+      station; does any charge **your** route, ship and session; does any say
+      **why not**; does any distinguish **measured** from **assumed**.
+- [ ] **Decide keep or park, and write the decision down.** **Park is a real
+      and expected outcome.** EVE Flipper is at v1.6.14 and already walks VWAP
+      depth, trades multi-hop routes, arbitrages contracts and backtests on
+      paper. If a live third-party site does this job better, parking is
+      cheaper than maintaining a worse copy of it — and the two weeks of shadow
+      evidence is what makes that judgement something other than taste.
 
 ## Previous item — the paper desk's fill models (plan.md §12.2 amended 2026-08-21, §17 D-32)
 

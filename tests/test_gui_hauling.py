@@ -245,3 +245,56 @@ def test_an_unresolvable_system_name_is_reported_rather_than_ignored(qtbot, haul
     _run(qtbot, page)
     assert any("no solar system named" in note for note in page._result["scan"].notes)
     assert "no solar system named" in page.summary.text()
+
+
+# -- 3. the desk cannot paint a generation the lake has replaced ------------
+
+
+def test_the_input_key_moves_when_a_depth_partition_changes(config, tmp_path):
+    """A page that reads a file the key does not watch keeps painting a
+    generation that no longer exists (§22 S3)."""
+    from evescreener.gui.data import desk_input_key
+
+    config.paths.ensure()
+    first = desk_input_key(config, FORGE, root=tmp_path)
+    partition = config.paths.depth_partition(FORGE, "2026-08-25")
+    partition.parent.mkdir(parents=True, exist_ok=True)
+    partition.write_bytes(b"a new depth generation")
+    assert desk_input_key(config, FORGE, root=tmp_path) != first
+
+
+def test_the_input_key_moves_when_a_hauling_report_is_written(config, tmp_path):
+    from evescreener.gui.data import desk_input_key
+
+    config.paths.ensure()
+    first = desk_input_key(config, FORGE, root=tmp_path)
+    (config.paths.reports / "hauling-20260825T120000Z.json").write_text("{}", encoding="utf-8")
+    assert desk_input_key(config, FORGE, root=tmp_path) != first
+
+
+# -- 4. the boundary the page must never cross -----------------------------
+
+
+def test_no_gui_module_imports_the_freight_comparison():
+    """`haulfreight` reaches PushX through `crossregion`, which imports `httpx`
+    at module scope. The page is allowed to show a freight column from a
+    stored report; it is not allowed to be able to fetch one (§19.2)."""
+    import ast
+    import pathlib
+
+    gui = pathlib.Path(__file__).resolve().parents[1] / "src" / "evescreener" / "gui"
+    offenders = []
+    for path in gui.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            for name in names:
+                if "haulfreight" in name or "crossregion" in name:
+                    offenders.append(f"{path.name}:{node.lineno} imports {name}")
+    assert offenders == [], "the desk must not be able to reach a third-party API: " + "; ".join(
+        offenders
+    )

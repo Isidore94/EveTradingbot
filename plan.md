@@ -1234,6 +1234,7 @@ this document's prior text is recorded here with its reason.
 | D-31 | **SPREADS reads the book from the maker's side, and refuses the dust bid.** §17's NOT PLAUSIBLE verdict was measured on a *taker* — cross in, cross out, 14.7% round-trip friction against a +2.80% gross edge. A maker posts both sides and **collects** the spread, so the 98.8% median Forge spread that killed the taker is the maker's revenue. `books.spread_view()` and `CostModel.buy_outlay/sell_proceeds(maker=True)` already existed; `spreads.py` composes them. Maker round trip at the operator's skills = broker 1.300% in + broker 1.300% out + sales tax 3.375% = **5.975%**. Nothing here contradicts §17: both readings are true at once, because they are prices paid by opposite participants. | **The dust bid is the failure mode, and it was measured before the page was designed.** Ranking the raw book by spread produces garbage: a 0.02 ISK bid against a 129,000 ISK ask reads as a **608,000,000%** edge and nothing will ever sell into that bid. Median raw `net_pct` across 16,709 two-sided Forge types is **+181%**, p90 **+37,492%** — numbers that are arithmetically correct and economically meaningless. Anchoring on the **traded average** (the ESI daily mean, the one price transactions are known to have happened at), of 16,381 types with both a two-sided book and an average: **39.7%** have a best bid under half the average (19.8% under a tenth, 9.3% under a hundredth) and **23.6%** have a best ask above twice it. With the guards — bid ≥ 0.5× average, ask ≤ 2× average, ≥100 units/day — **2,230** names survive and **1,590** carry a positive net maker edge, median **+13.0%**, p90 **+57.3%**, top name *Capital Ion Thruster* at bid 301,700 / avg 597,400 / ask 871,600. **CORRECTED by §21 R4 (2026-08-20):** the sentence above originally read that these guards were *derived* from measurement. That was an overclaim and the original wording is left visible here so the correction is auditable. The measurement counted how many observations fall beyond cutoffs that had **already been chosen** — which describes the cutoffs, it does not derive them. They are **operator heuristics**; deriving them would need an outcome-based, preregistered, preferably out-of-sample study of which quotes actually filled, and no such study exists. The counts (39.7% / 23.6%) and the thresholds (0.5x, 2.0x) are **unchanged** — only the claim about their provenance is. Guards are **page controls, not constants**, and 'show excluded' returns the rejects with their `DUST_BID`/`WIDE_ASK`/`NO_AVG` flags so the guard can be checked rather than trusted. **What is still unmeasured and is stated on the page rather than modelled:** whether a posted order ever fills. Undercut risk (0.01 ISK inside your order, defended only by relisting at a broker fee each time) and waiting time are **not** in the lake and no number here bounds them. Volume, top-of-book depth and the top order's share are reported as evidence, never as a probability. A book older than `costs.book_staleness_minutes` prices **nothing** — on the operator's 121-minute-old sweep the page correctly showed an honest zero. |
 | D-32 | **The paper ledger records two fill models, and a `mid` fill is refused.** §12.2's taker rules are unchanged and remain the default; `maker` posts one tick in front of the executable quote, pays the broker fee on both legs, and is stamped `fill_assumed`. `paper report` and the desk's PAPER page score the two populations apart under the same frozen §12.4 rule. `config/config.toml` gains `paper.default_fill_model` and `paper.maker_tick_isk`. | **Operator directive 2026-08-21**, asked as "fill at the mid point to simulate a real fill". The mid was declined with the reason stated and the operator chose the maker model instead: no EVE order type fills at the midpoint, so mid is not a simulation of a real fill but an average of two prices the operator could get — and on the 2026-08-21 Forge sweep, Helium Fuel Block quoted a taker round trip of **−11.5%** against a maker round trip of **+2.7%** on the same book at the same second. A number sitting between those two describes no trade anyone can make. **This is the same reading as D-31**, moved from a page that *shows* maker edge to a ledger that *records* it, and it inherits D-31's unmeasured limit verbatim: whether a posted order ever fills is not in the lake, so the ledger flags the assumption on every row rather than pricing it. The §17 verdicts were all measured on takers and none of them moves. |
 | D-33 | **HAULING phases H1–H4 built in one push**, overriding the one-phase-per-session rule and the H0-before-H1 ordering — the same override pattern as D-1. The per-phase gates are **batched, not waived**: they become one consolidated owed live-validation checklist in `CURRENT_CHECKPOINT.md`, and H0 converts from a build/don't-build gate into a **keep/park** gate decided after the two-week shadow. | **Operator directive 2026-08-25**, reason as stated: *"build first, evaluate against competitors and live gates afterwards"*. Three things this authorization explicitly does **not** touch, and did not: **H5 and H6 are out of scope entirely** (both would need authenticated ESI, and §10.8 makes that a plan-level decision rather than a convenience); no hard invariant is weakened; and nothing existing changed — the whole track is additive, with a regression test asserting `book_summary`'s frame is byte-identical through the modified sweep path. The competitor set the directive named was checked live the same day and corrected in §23.2: **ISK Scout** was missing from it, **EVE Flipper** is further along than assumed (v1.6.14, Jul 2026 — VWAP depth walking, multi-hop route trading, contract arbitrage, paper backtesting), **eve-meta is defunct** and **evetrade.space has lapsed**. |
+| D-34 | **§23.15's ≤7,000-line track budget is exceeded. Final: 8,953 lines** — 4,024 new core modules and page, 3,021 new tests, 1,908 added to existing files. Executable lines (excluding blanks, comments and docstrings) are 5,387. | Stated rather than trimmed. The track carried five separable concerns — the map and router, the depth reduction, the ranking engine, the liquidity and packing layer, and the freight comparison — plus a desk page and eleven test modules, and the last of those is where a third of the overage is. Two things were deliberately **not** done to make the number: no test was dropped, and no explanation of *why* a rule exists was cut, because this repository's whole defence against re-litigating settled decisions is that the reasoning is written down next to the code. §1's repo-wide budget stands for future work and this remains an authorized exception, not a new ceiling. |
 
 ### §0 named checks — status after this build
 
@@ -2759,15 +2760,20 @@ valid scanner result.
 
 ### §23.15 Phases, and the single-push deviation
 
-| phase | scope |
-|---|---|
-| **H1a** | SDE extension (security, stargates, NPC stations) + the route engine |
-| **H1b** | Station depth reduction, the executable walk, the depth lake |
-| **H2** | The hauling engine, the report, the `haul` CLI, the GUI page |
-| **H3** | Liquidity scenarios, the maker display, **mixed-cargo packing** (the greedy basket) |
-| **H4** | Opportunistic detour mode, self-haul vs PushX |
-| ~~H5, H6~~ | **OUT OF SCOPE.** They would need authenticated ESI |
-| **H0** | The competitor comparison — **moved after the shadow period** (§23.2, §23.20) |
+| phase | scope | state |
+|---|---|---|
+| **H1a** | SDE extension (security, stargates, NPC stations) + the route engine | **IMPLEMENTED + GREEN** |
+| **H1b** | Station depth reduction, the executable walk, the depth lake | **IMPLEMENTED + GREEN** |
+| **H2** | The hauling engine, the report, the `haul` CLI, the GUI page | **IMPLEMENTED + GREEN** |
+| **H3** | Liquidity scenarios, the maker display, **mixed-cargo packing** (the greedy basket) | **IMPLEMENTED + GREEN** |
+| **H4** | Opportunistic detour mode, self-haul vs PushX | **IMPLEMENTED + GREEN** |
+| ~~H5, H6~~ | **OUT OF SCOPE.** They would need authenticated ESI | not built |
+| **H0** | The competitor comparison — **moved after the shadow period** (§23.2, §23.20) | owed, after the shadow |
+
+**Nothing in this track is `LIVE_VALIDATED`.** The gate stamp for all five
+phases is `uv run pytest -q` → **1,025 passed, 7 deselected**, ruff check +
+format clean, `selftest` **12/12**. The consolidated owed checklist is in
+`CURRENT_CHECKPOINT.md`.
 
 **H1–H4 were built in one push under operator authorization 2026-08-25**,
 recorded as §17 **D-33** with the operator's stated reason. The per-phase gates
@@ -2781,6 +2787,13 @@ do.
 **LOC budget for this track: ≤ 7,000 lines including tests**, and the final
 count is reported in `CHANGELOG.md`. §1's repo-wide budget remains exceeded by
 authorization (§17 D-9, D-20); this is a per-track ceiling, not a new licence.
+
+**Measured: 8,953 lines — 1,953 over, recorded as §17 D-34.** 4,024 in seven
+new core modules plus the page, 3,021 in eleven new test modules, and 1,908
+added to existing files (658 of them the depth reduction in `books.py`, 462 the
+`haul` command surface). Excluding blank lines, comments and docstrings the
+executable total is **5,387**, which is inside the target — but the target said
+"lines including tests" and the honest reading of it is the first number.
 
 ### §23.16 Tests and fixtures
 

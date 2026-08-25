@@ -20,9 +20,7 @@ from dataclasses import replace
 
 import pytest
 
-pytestmark = pytest.mark.gui
-
-from evescreener.crossregion import FreightQuote  # noqa: E402
+from evescreener.crossregion import FreightQuote
 from evescreener.haulfreight import attach_freight, freight_comparison
 from evescreener.hauling import ALONG_ROUTE, NO_ROUTE, Station, scan_hauls
 from evescreener.routes import RouteGraph

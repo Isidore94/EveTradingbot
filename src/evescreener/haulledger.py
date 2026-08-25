@@ -195,6 +195,11 @@ class HaulLedger:
         A close with no numbers is still recorded — "I sold it and did not write
         down what for" is a fact about the evidence, and the tally reports it as
         unresolved rather than assuming the plan's own forecast came true.
+
+        **A close is resolved only when BOTH sides are actual.** Proceeds with
+        no cost yields `assumed_net_isk`, labelled and computed from the
+        forecast; `realized_net_isk` and the forecast error stay UNKNOWN,
+        because a forecast cannot be evidence about itself.
         """
         now = ensure_utc(now or utcnow())
         context = {"haul_id": haul_id, "action": "close"}
@@ -204,10 +209,31 @@ class HaulLedger:
         if hauls[haul_id].get("close") is not None:
             self._refuse(f"haul {haul_id!r} is already closed", context)
         opened = hauls[haul_id]
-        cost = actual_cost_isk if actual_cost_isk is not None else opened.get("expected_cost_isk")
-        realized = None
-        if actual_proceeds_isk is not None and cost is not None:
-            realized = float(actual_proceeds_isk) - float(cost)
+        # **An actual is an actual.** Borrowing `expected_cost_isk` and storing
+        # it under `actual_cost_isk` let the forecast grade its own homework:
+        # a "realized" net and a "forecast error" computed from the forecast,
+        # counted as resolved evidence. This ledger is the path by which
+        # §23.7's priors are supposed to *become* measurements, so contaminating
+        # it is the one thing it cannot do.
+        expected_cost = opened.get("expected_cost_isk")
+        # Where the cost figure this record *used* came from. Nothing computed
+        # means nothing sourced — a close with no proceeds applied no cost at
+        # all, whatever the open happened to forecast.
+        if actual_cost_isk is not None:
+            cost_source = "actual"
+        elif expected_cost is not None and actual_proceeds_isk is not None:
+            cost_source = "expected"
+        else:
+            cost_source = None
+        fully_actual = actual_proceeds_isk is not None and actual_cost_isk is not None
+        realized = float(actual_proceeds_isk) - float(actual_cost_isk) if fully_actual else None
+        # Shown, but never mistaken for a measurement: what the trip nets if
+        # the forecast cost was right.
+        assumed = (
+            float(actual_proceeds_isk) - float(expected_cost)
+            if not fully_actual and actual_proceeds_isk is not None and expected_cost is not None
+            else None
+        )
         return self._append(
             {
                 "event": "close",
@@ -215,8 +241,11 @@ class HaulLedger:
                 "haul_id": haul_id,
                 "type_id": opened.get("type_id"),
                 "actual_proceeds_isk": actual_proceeds_isk,
-                "actual_cost_isk": cost,
+                "actual_cost_isk": actual_cost_isk,
+                "cost_source": cost_source,
+                "expected_cost_isk": expected_cost,
                 "realized_net_isk": realized,
+                "assumed_net_isk": assumed,
                 "expected_net_isk": opened.get("expected_net_isk"),
                 "forecast_error_isk": (
                     realized - float(opened["expected_net_isk"])
@@ -274,6 +303,9 @@ class HaulLedger:
     def tally(self) -> HaulTally:
         hauls = self.hauls()
         closes = [haul["close"] for haul in hauls.values() if haul.get("close")]
+        # Only fully-actual closes count as resolved: this is the sample that
+        # will one day replace §23.7's priors, and a half-measured close is not
+        # a member of it.
         realized = [
             float(close["realized_net_isk"])
             for close in closes

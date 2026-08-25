@@ -198,9 +198,16 @@ def test_a_bad_pass_action_is_refused_before_anything_is_recorded_as_a_pass(ledg
 
 
 def test_a_close_records_what_really_happened_and_the_forecast_error(ledger, vocabulary):
+    """**Amended 2026-08-25.** This test previously asserted that proceeds
+    alone produced a `realized_net_isk` — by borrowing the forecast cost. That
+    is the defect, not the contract: a realized number needs both sides
+    actual, and the forecast error needs a realized number."""
     opened = _open(ledger, vocabulary)
     close = ledger.record_close(
-        haul_id=opened["haul_id"], actual_proceeds_isk=130_000_000.0, note="sold into a thinner bid"
+        haul_id=opened["haul_id"],
+        actual_proceeds_isk=130_000_000.0,
+        actual_cost_isk=122_900_000.0,
+        note="sold into a thinner bid",
     )
     assert close["realized_net_isk"] == pytest.approx(130_000_000.0 - 122_900_000.0)
     assert close["forecast_error_isk"] == pytest.approx(close["realized_net_isk"] - 13_196_312.5)
@@ -241,3 +248,53 @@ def test_two_hauls_in_the_same_second_stay_two_hauls(ledger, vocabulary):
     second = _open(ledger, vocabulary)
     assert first["haul_id"] != second["haul_id"]
     assert len(ledger.hauls()) == 2
+
+
+# -- 3. an actual is an actual -------------------------------------------
+
+
+def test_a_close_with_no_cost_does_not_borrow_the_forecast(ledger, vocabulary):
+    """This ledger is the path by which §23.7's priors become measurements.
+
+    Borrowing `expected_cost_isk`, storing it as `actual_cost_isk`, and then
+    computing a "realized" net and a "forecast error" from it makes the
+    forecast grade its own homework — and counts the close as resolved while
+    doing it.
+    """
+    opened = _open(ledger, vocabulary)
+    close = ledger.record_close(haul_id=opened["haul_id"], actual_proceeds_isk=130_000_000.0)
+    assert close["actual_cost_isk"] is None, "the operator did not say what he paid"
+    assert close["cost_source"] == "expected"
+    assert close["realized_net_isk"] is None
+    assert close["forecast_error_isk"] is None
+    # The arithmetic is still shown — labelled as resting on the forecast.
+    assert close["assumed_net_isk"] == pytest.approx(130_000_000.0 - 122_900_000.0)
+
+    tally = ledger.tally()
+    assert tally.closed == 1
+    assert tally.unresolved_closes == 1, "a half-measured close is not evidence"
+    assert tally.realized_net_isk is None
+
+
+def test_a_fully_actual_close_is_resolved_and_scores_the_forecast(ledger, vocabulary):
+    opened = _open(ledger, vocabulary)
+    close = ledger.record_close(
+        haul_id=opened["haul_id"],
+        actual_proceeds_isk=130_000_000.0,
+        actual_cost_isk=121_000_000.0,
+    )
+    assert close["cost_source"] == "actual"
+    assert close["realized_net_isk"] == pytest.approx(9_000_000.0)
+    assert close["forecast_error_isk"] == pytest.approx(9_000_000.0 - 13_196_312.5)
+    assert close["assumed_net_isk"] is None
+    tally = ledger.tally()
+    assert tally.unresolved_closes == 0
+    assert tally.realized_net_isk == pytest.approx(9_000_000.0)
+
+
+def test_a_close_with_no_numbers_at_all_records_neither(ledger, vocabulary):
+    opened = _open(ledger, vocabulary)
+    close = ledger.record_close(haul_id=opened["haul_id"])
+    assert close["cost_source"] is None
+    assert close["realized_net_isk"] is None and close["assumed_net_isk"] is None
+    assert ledger.tally().unresolved_closes == 1

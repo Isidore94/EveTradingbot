@@ -2653,7 +2653,20 @@ the two. Per (type, destination region) over **completed bars only**:
 **A zero or unmeasurable quantile makes liquidation UNKNOWN**, and an UNKNOWN
 liquidation **fails every maker-mode cap** rather than defaulting to a fast
 one. Fewer than `min_liquidity_bars` completed bars does the same. A dead
-market does not become tradeable by dividing by a small number.
+market does not become tradeable by dividing by a small number. **Bars outside
+the window are not evidence about the window** — *(corrected 2026-08-25: a
+fallback to the last N rows measured a market that had not traded for a year
+and reported 500 units a day with an empty reason, feeding the maker caps, the
+drawer and the reliability grade)*.
+
+**The paper-haul ledger is the path by which these priors become measurements,
+so it never launders a forecast into an actual.** A close is *resolved* only
+when proceeds **and** cost are both what the operator really paid; proceeds
+alone yields a labelled `assumed_net_isk` while `realized_net_isk` and the
+forecast error stay UNKNOWN. *(Corrected 2026-08-25: the close borrowed
+`expected_cost_isk`, stored it as `actual_cost_isk`, and computed a "realized"
+net and a "forecast error" from it — the forecast grading its own homework, and
+counted as evidence.)*
 
 ### §23.8 Routes
 

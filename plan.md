@@ -1233,6 +1233,7 @@ this document's prior text is recorded here with its reason.
 | D-30 | **The chart draws range candles; a prev-close body is refused on measurement, not on principle.** The operator asked for conventional candlesticks, reasoning that EVE trades 24/7 so there is no session gap and yesterday's close is today's open. That is correct about the market and wrong about this data, and it was settled by measuring rather than arguing. Each candle is a filled body spanning the day's **low→high**, crossed by a notch at the **average**, coloured against the previous average. §4's no-synthesized-`open` invariant is **unchanged**. | **Measured on the full lake — 4,034,697 bars with a previous close.** `close` is the ESI daily *mean transaction price*, not a last trade, so yesterday's mean is not where today opened. Yesterday's close lands **outside** today's measured `[low, high]` on **55.70%** of all bars (27.81% above the high, 27.89% below the low). It is **worse on exactly the names the desk charts**: **68.97%** of tier-OK bars, **66.40%** of THIN, **58.07%** of watchlist bars — and still **46.10%** after excluding the 40.8% of bars where `high == low`. A conventional body would therefore hang off the end of its own wick on the *majority* of bars: not merely a fabrication, a visibly broken rendering. Clamping it into the range would make over half the chart's bodies artefacts of the clamp. **What the data does support:** the range is measured, the average is measured, and the day-over-day change in the average is a comparison between two measured numbers — so body, notch and colour are each real. **What no chart from this lake can ever show:** intraday direction. ESI records no sequence within a day, so whether price rose or fell inside the day is not recoverable at any price; the notch's height within the body is the honest substitute. **Readability, the actual complaint:** the previous HLC rendering was unreadable at the 400-bar default (3.5 px/bar on a desk pane). The chart now opens at **120 bars** with a 60/120/250/all selector, and degrades by measured slot width rather than smearing. **Level series are not candle series.** A composite index is built with `high == low == close` (signals/composite.py — an index level is one number per day), so candles drawn from one are zero-height bodies and MARKET rendered FORGE and FORGE-EW as a field of floating notches. `ChartSeries.ranged` detects the absence of any intraday range and the painter draws a level line instead. Separately, `ChartCanvas` had a non-expanding size policy, so in a `section()` block it split the available height with its own title label and sat squashed at the bottom of a mostly empty pane; it is now Expanding. |
 | D-31 | **SPREADS reads the book from the maker's side, and refuses the dust bid.** §17's NOT PLAUSIBLE verdict was measured on a *taker* — cross in, cross out, 14.7% round-trip friction against a +2.80% gross edge. A maker posts both sides and **collects** the spread, so the 98.8% median Forge spread that killed the taker is the maker's revenue. `books.spread_view()` and `CostModel.buy_outlay/sell_proceeds(maker=True)` already existed; `spreads.py` composes them. Maker round trip at the operator's skills = broker 1.300% in + broker 1.300% out + sales tax 3.375% = **5.975%**. Nothing here contradicts §17: both readings are true at once, because they are prices paid by opposite participants. | **The dust bid is the failure mode, and it was measured before the page was designed.** Ranking the raw book by spread produces garbage: a 0.02 ISK bid against a 129,000 ISK ask reads as a **608,000,000%** edge and nothing will ever sell into that bid. Median raw `net_pct` across 16,709 two-sided Forge types is **+181%**, p90 **+37,492%** — numbers that are arithmetically correct and economically meaningless. Anchoring on the **traded average** (the ESI daily mean, the one price transactions are known to have happened at), of 16,381 types with both a two-sided book and an average: **39.7%** have a best bid under half the average (19.8% under a tenth, 9.3% under a hundredth) and **23.6%** have a best ask above twice it. With the guards — bid ≥ 0.5× average, ask ≤ 2× average, ≥100 units/day — **2,230** names survive and **1,590** carry a positive net maker edge, median **+13.0%**, p90 **+57.3%**, top name *Capital Ion Thruster* at bid 301,700 / avg 597,400 / ask 871,600. **CORRECTED by §21 R4 (2026-08-20):** the sentence above originally read that these guards were *derived* from measurement. That was an overclaim and the original wording is left visible here so the correction is auditable. The measurement counted how many observations fall beyond cutoffs that had **already been chosen** — which describes the cutoffs, it does not derive them. They are **operator heuristics**; deriving them would need an outcome-based, preregistered, preferably out-of-sample study of which quotes actually filled, and no such study exists. The counts (39.7% / 23.6%) and the thresholds (0.5x, 2.0x) are **unchanged** — only the claim about their provenance is. Guards are **page controls, not constants**, and 'show excluded' returns the rejects with their `DUST_BID`/`WIDE_ASK`/`NO_AVG` flags so the guard can be checked rather than trusted. **What is still unmeasured and is stated on the page rather than modelled:** whether a posted order ever fills. Undercut risk (0.01 ISK inside your order, defended only by relisting at a broker fee each time) and waiting time are **not** in the lake and no number here bounds them. Volume, top-of-book depth and the top order's share are reported as evidence, never as a probability. A book older than `costs.book_staleness_minutes` prices **nothing** — on the operator's 121-minute-old sweep the page correctly showed an honest zero. |
 | D-32 | **The paper ledger records two fill models, and a `mid` fill is refused.** §12.2's taker rules are unchanged and remain the default; `maker` posts one tick in front of the executable quote, pays the broker fee on both legs, and is stamped `fill_assumed`. `paper report` and the desk's PAPER page score the two populations apart under the same frozen §12.4 rule. `config/config.toml` gains `paper.default_fill_model` and `paper.maker_tick_isk`. | **Operator directive 2026-08-21**, asked as "fill at the mid point to simulate a real fill". The mid was declined with the reason stated and the operator chose the maker model instead: no EVE order type fills at the midpoint, so mid is not a simulation of a real fill but an average of two prices the operator could get — and on the 2026-08-21 Forge sweep, Helium Fuel Block quoted a taker round trip of **−11.5%** against a maker round trip of **+2.7%** on the same book at the same second. A number sitting between those two describes no trade anyone can make. **This is the same reading as D-31**, moved from a page that *shows* maker edge to a ledger that *records* it, and it inherits D-31's unmeasured limit verbatim: whether a posted order ever fills is not in the lake, so the ledger flags the assumption on every row rather than pricing it. The §17 verdicts were all measured on takers and none of them moves. |
+| D-33 | **HAULING phases H1–H4 built in one push**, overriding the one-phase-per-session rule and the H0-before-H1 ordering — the same override pattern as D-1. The per-phase gates are **batched, not waived**: they become one consolidated owed live-validation checklist in `CURRENT_CHECKPOINT.md`, and H0 converts from a build/don't-build gate into a **keep/park** gate decided after the two-week shadow. | **Operator directive 2026-08-25**, reason as stated: *"build first, evaluate against competitors and live gates afterwards"*. Three things this authorization explicitly does **not** touch, and did not: **H5 and H6 are out of scope entirely** (both would need authenticated ESI, and §10.8 makes that a plan-level decision rather than a convenience); no hard invariant is weakened; and nothing existing changed — the whole track is additive, with a regression test asserting `book_summary`'s frame is byte-identical through the modified sweep path. The competitor set the directive named was checked live the same day and corrected in §23.2: **ISK Scout** was missing from it, **EVE Flipper** is further along than assumed (v1.6.14, Jul 2026 — VWAP depth walking, multi-hop route trading, contract arbitrage, paper backtesting), **eve-meta is defunct** and **evetrade.space has lapsed**. |
 
 ### §0 named checks — status after this build
 
@@ -2470,3 +2471,383 @@ mistake with fresher numbers.
 **Owed live gate (§22 S8).** Run the TOP measurement report on the operator's
 lake and commit its output under `data/reports/`, so §20.3's prose can cite a
 dated artefact instead of a floating number.
+
+## §23 — The personalized HAULING tab (operator-authorized 2026-08-25)
+
+**Why this exists.** Every surface this system has built so far answers "is
+this item mispriced?". None of them answers the question the operator actually
+asks when he undocks: *given where I am, what I fly, what ISK I have and how
+long I have got, what should I put in the hold right now?* That question has a
+different shape. It is personal (position, ship, capital, session length),
+spatial (routes, jumps, security), and it is decided at a **quantity**, not at
+a notional tier — the right size is a breakpoint in two order books, not a
+number chosen in advance.
+
+This track builds that tab. It is **additive**: no existing page, CLI output,
+formula, verdict rule or data contract changes, and every invariant in
+`CLAUDE.md` and §10 holds without exception.
+
+### §23.1 What it is, and what it is not
+
+| It is | It is not |
+|---|---|
+| A decision-support screen ranking (item, source, destination, quantity) plans against the operator's own constraints | An autopilot, a route-runner, or anything that touches the EVE client (§10.1–.2) |
+| A reader of the **local** depth lake, the local SDE graph and the local bar lake | A second ESI consumer. The GUI page still cannot fetch, and nothing under `gui/` may import an ESI client, `httpx` or `urllib` |
+| Honest about what it cannot measure — fill probability, competitors, the destination price days from now | A promise that the ranked row is money |
+
+**The measured reality this page lives inside, stated up front.** The Forge's
+median spread is **98.8%** and only ~932 types trade inside a 5% spread at all;
+of 151,113 hub pairs measured at 0.25B in §17, **10–14** cleared real freight
+and tax. A hauling scan whose normal output is a short list or an honest zero
+is the machinery working, not failing.
+
+### §23.2 The competitive landscape — AMENDED 2026-08-25 (adversarial review)
+
+The original directive named EVE Flipper, EVE Profits, eve-meta and
+evetrade.space as the comparison set. That set was checked against the live
+sites on 2026-08-25 and is corrected here; the original naming is left visible
+in this sentence rather than deleted.
+
+| Tool | State (checked 2026-08-25) | What it already does that this tab must not pretend to invent |
+|---|---|---|
+| **EVE Flipper** | **live, v1.6.14 (Jul 2026)** — first tier | VWAP **depth walking**, **multi-hop route trading**, **contract arbitrage**, **paper backtesting**. This is the closest thing to the tab being built and it is further along than the directive assumed |
+| **EVE Profits** | live — first tier | Station and region trading screens, margin/volume filters |
+| **ISK Scout** (`iskscout.com`) | **live — first tier, added by this amendment** | Hauling-shaped route/profit screening. Absent from the original directive entirely |
+| **Trading Matrix** | live | **Free tier is Jita-only**; multi-hub work is paid. Relevant to what a free alternative actually gives the operator |
+| eve-meta | **defunct** | — |
+| evetrade.space | **domain lapsed** | — |
+
+**Consequence for H0.** The benchmark set is **EVE Flipper + EVE Profits +
+ISK Scout**, and H0 **moves after the two-week shadow period** (§23.15). It
+converts from a build/don't-build gate into a **keep/park** gate: the honest
+comparison is between this tab's *measured* behaviour on the operator's own
+data and what the competitors show, not between a specification and a
+screenshot.
+
+### §23.3 The operator's inputs — what "personalized" means
+
+A profile, not a preference file:
+
+| Input | Why it changes the answer |
+|---|---|
+| current system | Pickup jumps are a real cost and they are not the same for everyone |
+| intended destination (optional) | In `along_route` mode only the **incremental** detour is charged |
+| ship: usable cargo m³, EHP, hull value, seconds/jump, handling minutes | Cargo caps the quantity; the rest price the time and state the exposure |
+| capital, max exposure | The breakpoint that maximizes profit is usually not the one he can afford |
+| session minutes, max wait days | A plan that does not fit the evening is not a plan |
+| security profile, max jumps, avoid list | A route through nullsec is a different trade, not a cheaper one |
+
+### §23.4 What already exists and is reused unchanged
+
+`books.reduce_orders` and `book_summary` (byte-identical — a regression test
+proves it), `CostModel` including `broker_fee_at` (§21 R4) and
+`broker_fee_overrides` (§22 S6), `load_validated_book`'s staleness semantics,
+`BookLake`'s atomic-write and complete-only `latest()`, the reason vocabulary
+and the §19.4 refusal pattern, `crossregion.quote_freight` (H4), the desk's
+`DeskPage` compute/paint contract, `SortableTable`'s blanks-last idiom.
+
+### §23.5 Costs — and one formula that is recorded but quarantined
+
+Fees are the existing model and nothing here re-derives them:
+
+* **broker fee** = 3% − 0.3%/Broker Relations level − 0.03%/faction standing −
+  0.02%/corp standing, floored at 1%; **a taker order pays no broker fee**;
+  Broker Relations does not apply to orders in Upwell structures;
+* **sales tax** 7.5% base → 3.37% at Accounting V;
+* **relist fee** = `max(0, BR·(P2−P1)) + (1−RD)·BR·P2`, where BR is the broker
+  rate and RD the Advanced Broker Relations discount.
+
+**The relist formula closes the *shape* of §0 open check #5 and nothing more.**
+It is recorded here so the shape stops being guessed at; it has **not** been
+verified in-client, so `costs.relist_cost_unverified` stays quarantined from
+every analytical path exactly as §21 R4 left it, and a test still asserts no
+module under `src/` consumes it. A verified-looking formula that has never met
+a wallet is the failure mode §21 R4 exists to prevent.
+
+**One book generation per region, and both are pinned on every row.** A hauling
+row joins two regions' books. Those are two independent sweeps with two
+independent ages, so every row carries **both** `generation_id`s and both ages,
+and the **older** one decides staleness. A single "book age" on a two-region
+row would be a number describing neither leg.
+
+**One ISK-day metric, not two.** The original directive carried both a
+`capital_turnover` figure and an ISK-per-capital-day figure, which are the same
+statement twice. They are merged into **`isk_per_capital_day`** =
+`net_profit / (capital_committed × liquidation_days)`, and in `immediate` exit
+mode the denominator's days are the **travel time**, because that is the whole
+period the ISK is committed for.
+
+### §23.6 Depth — the reduction this track adds
+
+`book_summary` answers "what is the executable quote for this type in this
+region". A hauling plan needs "what does it cost to buy 1,200 of these at
+*this station*, and what do 1,200 fetch at *that* one". That is a **price-level
+curve per execution station**, which nothing in the lake carries. `reduce_depth`
+adds it, reading the **same in-memory pages** as `reduce_orders` in one pass:
+no extra ESI traffic, no cadence change, no new feed.
+
+**`generation_id ≡ (region_id, sweep_ts)`** — identical to `book_summary`'s, so
+a depth row and a book row from one sweep are provably the same generation and
+a row can name the sweep it came from.
+
+**The reachability doctrine (buy side).** CCP matches a buy order by its
+**range from the order's own location**, and the seller transacts from the
+station he is standing in. A bid is therefore executable from the operator's
+station iff **any** of:
+
+1. it rests at that station; or
+2. its range is `region`; or
+3. its range is `solarsystem` and its system **is** the station's system; or
+4. its range is numeric and the **stargate-graph jump distance** between its
+   system and the station's system is ≤ that number.
+
+Anything unresolvable — unknown system, missing or unrecognised range, a jump
+distance the graph cannot answer — is **excluded and counted**. UNKNOWN fails
+(§4). Rule 4 is the one R1 could not evaluate and left failing closed; the SDE
+graph built in H1a is what makes it decidable, and the `station` range at a
+*different* station remains correctly unreachable.
+
+**The `min_volume` rule (conservative v1, recorded as such).** A buy order with
+`min_volume > 1` will not accept a smaller parcel. Rather than model the
+packing problem — which interacts with every other level in the walk — such an
+order is **excluded from executable levels** and its volume accumulated into a
+per-level `min_volume_excluded_qty` diagnostic, so the depth it represents is
+visible rather than silently gone. This under-states reachable exit depth by
+construction, which is the safe direction, and it is a v1 simplification rather
+than a claim about the game. Sell orders carry `min_volume = 1` by
+construction and need no rule.
+
+**Aggregation and truncation.** Identical prices aggregate **after** the
+filters above, keeping `level_order_count`, `oldest_issued`, `newest_issued`
+and the structure-resident share of that level's volume. Levels are persisted
+best-first only until cumulative notional ≥ `max_scan_capital_isk ×
+depth_safety_margin` **and** cumulative volume ≥ the largest configured cargo ×
+the same margin; a curve cut short sets `depth_complete = False`, and a walk
+that reaches that boundary is **UNKNOWN, never extrapolated**.
+
+**Order age is what it is.** `oldest_issued`/`newest_issued` are the `issued`
+timestamps ESI publishes. Whether `issued` updates when an order is repriced
+is **unverified in either direction**, so the page labels the column "last
+placed **or repriced** (unverified)" and never treats it as order age.
+
+### §23.7 Liquidity, liquidation, and three labelled assumptions
+
+Getting in is measured; getting out is **assumed**, and the page never blurs
+the two. Per (type, destination region) over **completed bars only**:
+
+`liquidation_days(q, scenario) = q / (quantile_units × destination_share_prior
+× capture_share_{low,base,high})`
+
+* **`quantile_units`** is measured from the bars (low/base/high quantiles of
+  daily units, default 0.25/0.5/0.75).
+* **`destination_share_prior`** (default 0.25) is a **labelled operator prior**
+  — the share of a region's traded volume that happens at the destination hub.
+  It is not measurable from regional history, which carries no station split.
+  It stays a prior, displayed as an ASSUMPTION, **until the operator's own
+  recorded fills can replace it**, at which point it becomes a measurement with
+  a sample size.
+* **`capture_share`** (0.05 / 0.15 / 0.35) is the share of that flow the
+  operator's own order wins. Also an assumption, also displayed.
+
+**A zero or unmeasurable quantile makes liquidation UNKNOWN**, and an UNKNOWN
+liquidation **fails every maker-mode cap** rather than defaulting to a fast
+one. Fewer than `min_liquidity_bars` completed bars does the same. A dead
+market does not become tradeable by dividing by a small number.
+
+### §23.8 Routes
+
+A local graph over `mapStargates` edges, built once from SQLite. Profiles:
+**shortest** (BFS), **safer** (Dijkstra with a configured penalty on edges
+entering non-highsec), **highsec-only** (the graph restricted before the
+search), plus an operator avoid-list applied by removing systems before the
+search. `RouteFacts` carries the ordered system list, jumps, minimum displayed
+security, the counts of nullsec / lowsec / exactly-0.5 systems, the profile
+used and the `sde_build` it was computed from. **No route is UNKNOWN**, never a
+guess and never a straight-line estimate. The same jump-distance function
+resolves numeric order ranges (§23.6 rule 4), so reachability and routing
+cannot disagree.
+
+**Production routing is local, by CCP's own guidance.** `POST /route` exists,
+is uncached and has its own 3,600/15-min token group; it is used for **spot
+verification only**, never in a scan loop.
+
+### §23.9 Security is what the client displays
+
+High-sec is decided on **displayed** security, not on the raw float:
+
+```
+display = round(true_sec, 1)          # half-up
+except: 0 < true_sec <= 0.05  ->  0.1
+high_sec  ==  display >= 0.5          # i.e. true_sec >= 0.45
+```
+
+A system at 0.4499 is **not** high-sec and a system at 0.45 **is**, which is
+exactly the boundary a hauler gets ganked on. The boundaries 0.449 / 0.45 /
+0.5 / 0.049 / −0.1 are fixtured.
+
+### §23.10 Ranking
+
+Candidate quantities are **every source-ask and destination-bid cumulative
+breakpoint**, capped by capital, exposure, cargo and (maker mode) the liquidity
+caps. Each feasible breakpoint is priced end to end — source WAP, destination
+WAP, sales tax through `CostModel.sell_proceeds(maker=False)`, net profit, net
+ROI, profit/m³, cargo utilisation, the **marginal net of the final chunk**
+(which must be > 0), route facts, active minutes, net ISK per active minute and
+`isk_per_capital_day`.
+
+The default objective is **conservative net ISK per active minute**; the
+max-profit, max-ROI and max-ISK/m³ quantities are recorded beside it whenever
+they differ, because they usually do and the difference is the interesting
+part.
+
+`active_minutes = jumps × seconds_per_jump / 60 + 2 × handling_minutes`, and
+the per-minute denominator is floored at the handling time — a zero-jump plan
+still costs the time it takes to load and unload.
+
+### §23.11 The page
+
+Control strip: system autocomplete from `sde_solar_systems`, ship-profile
+picker, capital / exposure / session minutes / max jumps / security controls,
+mode, destination, saved filters in `state.db`'s `meta` table.
+
+Default columns: **Item** (THIN/UNKNOWN badged) · **Route** · **Qty** ·
+**Capital** · **Net profit** · **Net ROI** · **Cargo** · **Pickup** · **Trip** ·
+**Liquidation** · **Route risk** · **Reliability** · **Rank**. Everything else
+is optional. Blanks sort last in both directions. "Nearest first" is a preset
+sorting on Pickup.
+
+Detail drawer on click: both price ladders with the consumed levels
+highlighted, the breakpoint table ("why this size"), the route's system list
+with per-system displayed security, the fee and cost audit, the liquidity
+scenarios, and the rejected alternatives with their reason codes. Charts go
+through the existing `chart_requested` signal — one chart window, still.
+
+The page must visibly carry, at all times: both generation ages, **"a snapshot
+is not a tape — books move while you fly"**, the order-age caveat, the
+`min_volume`-excluded depth, the route provenance (SDE build) and every
+UNKNOWN's reason.
+
+### §23.12 Who computes what
+
+| Producer | Product |
+|---|---|
+| `daemon` / CLI | **Ingest products**: depth generations written by `sweep-books`, route cache, destination bars |
+| GUI page worker | **Per-profile feasibility and ranking**, off the GUI thread, from local data only |
+| `haul scan` (CLI) | The **audit artefact**: an immutable report under `data/reports/` |
+
+The page and the CLI call the same `hauling.py`, so a disagreement between them
+is a bug rather than two opinions. Every new file the page depends on joins
+`desk_input_key`, or the desk would keep painting a stale generation.
+
+### §23.13 Rejection vocabulary
+
+Every rejected candidate carries exactly one, and the rejected set is
+**queryable rather than discarded**: `STALE_BOOK`, `DEPTH_TRUNCATED`,
+`DEST_DEPTH_SHORT`, `MIN_VOLUME_BLOCKED`, `ROUTE_BLOCKED_SECURITY`, `NO_ROUTE`,
+`OVER_CAPITAL`, `OVER_EXPOSURE`, `OVER_CARGO`, `OVER_JUMPS`, `OVER_TIME`,
+`LIQUIDATION_UNKNOWN`, `MARGINAL_NET_NEGATIVE`. "Nothing cleared" with a
+denominator and a reason histogram is an answer; an empty table is not.
+
+### §23.14 What this track never does
+
+No SSO and no acting scopes (**H5 and H6 are out of scope for this build
+entirely**). No fetch before `Expires`; ETags always; existing self-caps
+unchanged. No `open` column and none synthesized. No change to the frozen AVWAP
+σ formula or to any frozen verdict rule. No page under `gui/` may import an ESI
+client. Tri-state everywhere, UNKNOWN always fails, and an honest zero is a
+valid scanner result.
+
+### §23.15 Phases, and the single-push deviation
+
+| phase | scope |
+|---|---|
+| **H1a** | SDE extension (security, stargates, NPC stations) + the route engine |
+| **H1b** | Station depth reduction, the executable walk, the depth lake |
+| **H2** | The hauling engine, the report, the `haul` CLI, the GUI page |
+| **H3** | Liquidity scenarios, the maker display, **mixed-cargo packing** (the greedy basket) |
+| **H4** | Opportunistic detour mode, self-haul vs PushX |
+| ~~H5, H6~~ | **OUT OF SCOPE.** They would need authenticated ESI |
+| **H0** | The competitor comparison — **moved after the shadow period** (§23.2, §23.20) |
+
+**H1–H4 were built in one push under operator authorization 2026-08-25**,
+recorded as §17 **D-33** with the operator's stated reason. The per-phase gates
+are **not waived**: they are batched into one consolidated owed live-validation
+checklist in `CURRENT_CHECKPOINT.md`.
+
+The CLI subcommand is **`haul`**. Mixed-cargo packing belongs to **H3**, not
+H2 — it is a heuristic over the single-item plans and cannot exist before they
+do.
+
+**LOC budget for this track: ≤ 7,000 lines including tests**, and the final
+count is reported in `CHANGELOG.md`. §1's repo-wide budget remains exceeded by
+authorization (§17 D-9, D-20); this is a per-track ceiling, not a new licence.
+
+### §23.16 Tests and fixtures
+
+Golden fixtures land **before** the code they pin (§11 D5): the synthetic
+10-system graph (shortest / safer / highsec-only / avoid / disconnected) and
+the displayed-security boundaries; the real-SDE graph fixture carrying its
+build number; `min_volume` exclusion; `solarsystem` and numeric-range
+reachability; a structure-resting region-ranged bid included; truncation →
+UNKNOWN; the §23.17 worked example end to end. Plus: `book_summary`
+byte-stability through the modified sweep path, the headless import walk and
+the GUI network-isolation probe extended to every new module, `desk_input_key`
+moving on a depth or report change, and an additive-migration test against a
+fixture database built with the **old** schema.
+
+### §23.17 The worked example (fixtured end to end)
+
+Source asks: 800 @ 100,000 and 400 @ 107,250. Destination bids: 500 @ 120,000
+and 700 @ 115,500. Quantity **1,200** — a cumulative breakpoint on both sides.
+
+| | |
+|---|---|
+| source WAP | **102,416.67** (122,900,000 ISK committed) |
+| destination WAP | **117,375** (140,850,000 ISK gross) |
+| sales tax @ 3.375% | **4,753,687.50** |
+| **net profit** | **13,196,312.50** |
+| **net ROI** | **10.74%** |
+
+### §23.18 Config
+
+`[hauling]` — `enabled`, `hub_station_ids`, `extra_destination_station_ids`,
+`max_scan_capital_isk`, `depth_safety_margin`, `default_objective`,
+`liquidity_quantiles`, `destination_share_prior`, `capture_share`,
+`min_liquidity_bars`, `default_session_minutes`, `default_max_wait_days`,
+`default_seconds_per_jump`, `default_handling_minutes`,
+`max_exposure_pct_per_trade`, `max_exposure_pct_per_destination`.
+`[routes]` — `security_profile`, `safer_penalty`, `avoid_systems`, `cache`.
+
+Every value is an operator-editable default and is commented as one. **Hub
+station ids are resolved from the SDE, never from memory**; the resolved ids
+and the systems they sit in are recorded in `CHANGELOG.md` with the build
+number they were read from.
+
+### §23.19 What is owed before any of this is trusted
+
+Nothing in this track is `LIVE_VALIDATED`. The consolidated checklist lives in
+`CURRENT_CHECKPOINT.md` and covers: ten in-game route spot checks including a
+0.45–0.49 boundary system; ten in-game quote/depth spot checks against the
+ladders; one unit sold into a ranged bid (one of them structure-resting) with
+where the goods and ISK landed recorded; one liquid `order_id` tracked across
+sweeps to settle whether `issued` moves on reprice; the measured depth rows and
+bytes per five-hub generation, from which retention is then set; broker-fee
+overrides transcribed for two hubs (§22 S6); a two-week shadow of the tab; and
+then §23.20.
+
+### §23.20 H0 — the deferred comparison, as a keep/park gate
+
+After the shadow period, the tab is compared against **EVE Flipper**, **EVE
+Profits** and **ISK Scout** on the same day, on the operator's own hubs, on
+these questions:
+
+1. Does any of them price a **quantity** against **executable** depth at a
+   named station, or do they price a margin at top of book?
+2. Do they charge the **operator's own** route, ship and session, or a generic one?
+3. Do they say **why not** — a rejected-candidate view with reasons?
+4. Do they distinguish **measured** from **assumed** anywhere at all?
+
+**Keep** if the answers show this tab is doing something they do not, on
+evidence rather than on taste. **Park** if a live third-party site does the
+same job better — parking is a real, expected outcome, and it is cheaper than
+maintaining a worse copy of EVE Flipper.

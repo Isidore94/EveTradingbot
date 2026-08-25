@@ -5,6 +5,20 @@ verification stamp. `plan.md` owns the roadmap; `CHANGELOG.md` owns history.
 
 ## Active item
 
+**plan.md §23 — the personalized HAULING tab, phases H1–H4** (operator
+authorization 2026-08-25, recorded as §17 D-33: *"build first, evaluate against
+competitors and live gates afterwards"*). H5 and H6 are **out of scope**; H0 is
+deferred to a keep/park decision after the shadow period.
+
+**State: PLAN LANDED, CODE IN PROGRESS.** The consolidated owed live-validation
+checklist for this track is written at the end of this file when the build
+lands. Nothing in the track is `LIVE_VALIDATED`.
+
+Everything below this item — the paper desk, §21, §22 and the consolidated
+checklist — is unchanged and still owed in full.
+
+## Previous item — the paper desk's fill models (plan.md §12.2 amended 2026-08-21, §17 D-32)
+
 **The paper desk's fill models** (plan.md §12.2 amended 2026-08-21, §17 D-32)
 — see the ACTIVE section below — sitting on top of **the consolidated
 live-validation gate** (plan.md §17 D-1), which covers the desk and the

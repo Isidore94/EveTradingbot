@@ -5,6 +5,49 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — plan.md §23 opened: the personalized HAULING tab (§17 D-33)
+
+**Status: PLAN ONLY in this commit — no code.** `plan.md` gains §23, the
+contract for a hauling tab that answers "given where I am, what I fly, what ISK
+I have and how long I have got, what should I put in the hold?" — a question no
+existing surface asks, because it is decided at a **quantity** rather than at a
+notional tier.
+
+- **§17 D-33 records the single-push authorization** (operator, 2026-08-25:
+  *"build first, evaluate against competitors and live gates afterwards"*),
+  covering H1–H4 only. **H5 and H6 are out of scope entirely** — both need
+  authenticated ESI. The per-phase gates are **batched, not waived**.
+- **The competitor set was checked live the same day and corrected.**
+  **ISK Scout** (`iskscout.com`) was missing from the directive and is now a
+  first-tier benchmark; **EVE Flipper** is at v1.6.14 (Jul 2026) and already
+  does VWAP depth walking, multi-hop route trading, contract arbitrage and
+  paper backtesting; **eve-meta is defunct**; **evetrade.space has lapsed**;
+  Trading Matrix's free tier is Jita-only. H0 therefore **moves after** the
+  shadow period and becomes a **keep/park** gate rather than a build gate —
+  parking is a real expected outcome, and cheaper than maintaining a worse copy
+  of a live tool.
+- **Recorded in the contract before any code:** `generation_id ≡ (region_id,
+  sweep_ts)` with **both** regions' generations pinned on every row and the
+  older one deciding staleness; the buy-side **reachability doctrine** (station
+  / region / solarsystem / numeric jump range, everything else excluded and
+  counted); the conservative **`min_volume` rule** (an order demanding a
+  minimum parcel is excluded from executable levels and its volume carried as a
+  diagnostic); **displayed-security** rounding (`round(true_sec, 1)` half-up,
+  except `0 < true_sec ≤ 0.05 → 0.1`; high-sec is display ≥ 0.5); a
+  zero or unmeasurable volume quantile making liquidation **UNKNOWN** and
+  failing every maker cap; `destination_share_prior` and `capture_share` as
+  **labelled assumptions** rather than estimates; and the merge of the
+  duplicated capital-turnover metric into one `isk_per_capital_day`.
+- **The relist fee formula is recorded and stays quarantined.**
+  `max(0, BR·(P2−P1)) + (1−RD)·BR·P2` closes the *shape* of §0 check #5 and
+  nothing else: it has never met a wallet, so `relist_cost_unverified` remains
+  unconsumed by any analytical path and the test that enforces that is
+  unchanged.
+- **Compute ownership is stated** so it cannot drift: the daemon and CLI
+  produce ingest products (depth generations, routes, destination bars), the
+  GUI page computes per-profile feasibility in its own worker, and `haul scan`
+  writes the immutable audit artefact.
+
 ## 2026-08-21 — Two fill models, and a paper form that refuses before it asks (§12.2, §17 D-32)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §12.2 as amended, §17 D-32.

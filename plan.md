@@ -2696,6 +2696,19 @@ ROI, profit/m³, cargo utilisation, the **marginal net of the final chunk**
 (which must be > 0), route facts, active minutes, net ISK per active minute and
 `isk_per_capital_day`.
 
+**The mixed-cargo basket admits at most one plan per `(type, source)` and per
+`(type, destination)`.** *(Corrected 2026-08-25 after the audit: the basket
+packed every ranked plan, so one 1,000-unit Jita ask sold to two hubs became
+2,000 units of cargo out of a 1,000-unit book, and the mirror case
+double-counted one destination's bid depth. The scan is right to rank those
+plans independently — they are alternatives — but a book can only be spent
+once.)* Plans withheld for overlap are **counted and named on the basket**.
+**The known refinement, deliberately not built:** a shared consumption ledger,
+so part of a book could go to one hub and the rest to another. It needs the
+marginal chunks re-priced against what a sibling plan already took, which is a
+different computation rather than a filter, and it is worth doing only if real
+baskets look starved.
+
 **The first chunk's marginal IS its net** — it is the step from zero, so a
 first size that loses money is refused as `MARGINAL_NET_NEGATIVE` like any
 other. *(Corrected 2026-08-25 after an adversarial audit reproduced the

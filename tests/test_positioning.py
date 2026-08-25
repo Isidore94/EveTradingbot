@@ -11,6 +11,8 @@ wins.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from evescreener.hauling import HaulPlan, Station
@@ -182,3 +184,77 @@ def test_the_per_destination_cap_reaches_the_basket_from_config(config):
     # Without the config the cap is simply absent, which is the old behaviour:
     # two 400-ISK chunks fit the 1,000 wallet and the third does not.
     assert haul_basket(scan).capital_isk == pytest.approx(800.0)
+
+
+# -- 4. one book, spent once -----------------------------------------------
+
+DODIXIE = Station(60011866, 30002659, 10000032, "Dodixie")
+
+
+def _scan_of(config, plans):
+    from evescreener.hauling import HaulProfile, HaulScan, ShipProfile
+
+    profile = HaulProfile(
+        current_system=30000142,
+        ship=ShipProfile(name="test", usable_cargo_m3=1e9),
+        capital_isk=1e12,
+        max_exposure_isk=1e12,
+    )
+    scan = HaulScan(generated_at="2026-08-25T12:00:00+00:00", profile=profile)
+    scan.plans = list(plans)
+    return scan
+
+
+def test_one_source_book_cannot_be_packed_twice_into_the_same_hold(config):
+    """The same 1,000-unit Jita ask sold to two hubs is ONE 1,000-unit ask.
+
+    The scan ranks (item, source, destination) plans independently, which is
+    right — they are alternatives. The basket then packed all of them, so a
+    thousand units of measured depth became two thousand units of cargo.
+    """
+    from evescreener.haulreport import haul_basket
+
+    to_amarr = _plan(34, "Tritanium", [(1000.0, 10_000.0, 5_000.0)], destination=DEST)
+    to_dodixie = _plan(34, "Tritanium", [(1000.0, 10_000.0, 4_000.0)], destination=DODIXIE)
+    basket = haul_basket(_scan_of(config, [to_amarr, to_dodixie]))
+    packed = sum(item.quantity for item in basket.items if item.type_id == 34)
+    assert packed <= 1000.0, "the source book was spent twice"
+    assert len(basket.items) == 1
+    assert any("withheld" in note for note in basket.notes), "the restriction must be visible"
+
+
+def test_one_destination_book_cannot_be_sold_into_twice(config):
+    """The mirror case: two sources feeding one destination bid book."""
+    from evescreener.hauling import Station as _Station
+    from evescreener.haulreport import haul_basket
+
+    other_source = _Station(60005686, 30002053, 10000042, "Hek")
+    first = _plan(34, "Tritanium", [(1000.0, 10_000.0, 5_000.0)], destination=DEST)
+    second = _plan(34, "Tritanium", [(1000.0, 10_000.0, 4_000.0)], destination=DEST)
+    second = replace(second, source=other_source)
+    basket = haul_basket(_scan_of(config, [first, second]))
+    assert sum(item.quantity for item in basket.items) <= 1000.0
+
+
+def test_two_distinct_types_are_both_packed(config):
+    """The restriction must not over-reach: different books do not overlap."""
+    from evescreener.haulreport import haul_basket
+
+    first = _plan(34, "Tritanium", [(100.0, 1000.0, 900.0)])
+    second = _plan(35, "Pyerite", [(100.0, 1000.0, 800.0)])
+    basket = haul_basket(_scan_of(config, [first, second]))
+    assert {item.type_id for item in basket.items} == {34, 35}
+    assert not any("withheld" in note for note in basket.notes)
+
+
+def test_the_item_cap_admits_what_it_says_it_admits():
+    """`while len(taken) <= max_items` admitted max_items + 1."""
+    plans = [_plan(100 + index, f"T{index}", [(10.0, 100.0, 90.0)]) for index in range(6)]
+    basket = greedy_basket(plans, capital_isk=1e9, cargo_m3=1e9, max_items=3)
+    assert len(basket.items) == 3
+
+
+def test_a_chunk_knows_which_book_it_came_from():
+    chunk = marginal_chunks(_plan(34, "Tritanium", [(100.0, 1000.0, 900.0)]))[0]
+    assert chunk.source == SOURCE.station_id
+    assert chunk.destination == DEST.station_id

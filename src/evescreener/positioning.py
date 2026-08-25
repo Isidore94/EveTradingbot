@@ -41,6 +41,9 @@ class Chunk:
     capital_isk: float
     net_isk: float
     volume_m3: float | None
+    #: Which books this chunk consumes. A basket that packs two plans sharing
+    #: one of them is spending measured depth twice (see `haul_basket`).
+    source: int | None
     destination: int | None
 
     @property
@@ -78,6 +81,7 @@ def marginal_chunks(plan, plan_index: int = 0) -> list[Chunk]:
                 capital_isk=step_cost,
                 net_isk=step_net,
                 volume_m3=(step_quantity * unit_volume) if unit_volume else None,
+                source=plan.source.station_id,
                 destination=plan.destination.station_id,
             )
         )
@@ -174,7 +178,7 @@ def greedy_basket(
     taken: dict[int, list[Chunk]] = {}
     per_destination: dict[int, float] = {}
     per_plan_capital: dict[int, float] = {}
-    while len(taken) <= max_items:
+    while len(taken) < max_items:
         best: tuple[float, int] | None = None
         for position, chunks in enumerate(available):
             if not chunks:

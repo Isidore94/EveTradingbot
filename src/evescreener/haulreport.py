@@ -53,18 +53,70 @@ def haul_basket(scan: HaulScan, *, config: Config | None = None):
     from .positioning import greedy_basket
 
     profile = scan.profile
+    plans, withheld = _non_overlapping(scan)
     per_destination = None
     if config is not None and config.hauling.max_exposure_pct_per_destination:
         per_destination = (
             profile.capital_isk * float(config.hauling.max_exposure_pct_per_destination) / 100.0
         )
-    return greedy_basket(
-        scan.plans,
+    basket = greedy_basket(
+        plans,
         capital_isk=profile.capital_isk,
         cargo_m3=profile.ship.usable_cargo_m3,
         exposure_per_trade_isk=profile.max_exposure_isk,
         exposure_per_destination_isk=per_destination,
     )
+    if withheld:
+        basket.notes.append(
+            f"{withheld} plan(s) withheld for depth overlap: they share a source or a "
+            "destination book with a plan already in the basket, and one book can only "
+            "be spent once. The scan still ranks them as alternatives."
+        )
+    return basket
+
+
+def _non_overlapping(scan: HaulScan):
+    """At most one plan per `(type, source)` and per `(type, destination)`.
+
+    The scan ranks `(item, source, destination)` plans **independently**, which
+    is right — they are alternatives, and the operator picks one. The basket
+    then packed all of them, so one 1,000-unit Jita ask sold to two hubs became
+    2,000 units of cargo out of a 1,000-unit book. The mirror case
+    double-counts one destination's bid depth.
+
+    The restriction is the smallest one that cannot double-spend: keep the best
+    plan (by the run's own objective) touching each book, and say how many were
+    withheld. **The known refinement, deliberately not built here:** a shared
+    consumption ledger, so a basket could take *part* of a book to one hub and
+    the rest to another. That is worth doing if real baskets ever look starved,
+    and it needs the marginal chunks to be re-priced against what a sibling
+    plan already took — which is a different computation, not a filter.
+    """
+    objective = scan.profile.objective
+    ordered = sorted(
+        scan.plans,
+        key=lambda plan: (
+            -(
+                plan.objective_value(objective)
+                if plan.objective_value(objective) is not None
+                else plan.net_profit
+            )
+        ),
+    )
+    seen_source: set[tuple[int, int | None]] = set()
+    seen_destination: set[tuple[int, int | None]] = set()
+    kept = []
+    withheld = 0
+    for plan in ordered:
+        source_key = (plan.type_id, plan.source.station_id)
+        dest_key = (plan.type_id, plan.destination.station_id)
+        if source_key in seen_source or dest_key in seen_destination:
+            withheld += 1
+            continue
+        seen_source.add(source_key)
+        seen_destination.add(dest_key)
+        kept.append(plan)
+    return kept, withheld
 
 
 def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:

@@ -405,3 +405,58 @@ def test_the_scan_reports_its_own_denominators(config, worked):
     assert payload["sde_build"] == 3478781
     assert any("snapshot is not a tape" in caveat for caveat in payload["caveats"])
     assert any("UNVERIFIED" in caveat for caveat in payload["caveats"])
+
+
+def test_min_volume_blocked_names_the_depth_the_exit_cannot_reach(config):
+    """A bid demanding a big parcel is depth the book shows and you cannot use.
+
+    It is excluded from the executable curve by construction (§23.6), and when
+    that exclusion is what caps the size, the rejection says so by name rather
+    than reporting a destination that looks merely shallow.
+    """
+    asks = _orders([(100.0, 5000.0)], buy=False, station=JITA_44, system=JITA)
+    bids = _orders([(200.0, 100.0)], buy=True, station=AMARR_8, system=AMARR)
+    blocked = _orders([(200.0, 4000.0)], buy=True, station=AMARR_8, system=AMARR, min_volume=500)
+    blocked[0]["order_id"] = 9999
+    depths = {
+        FORGE: _snapshot(asks, region=FORGE, station=JITA_44, system=JITA),
+        DOMAIN: _snapshot(bids + blocked, region=DOMAIN, station=AMARR_8, system=AMARR),
+    }
+    scan = scan_hauls(
+        config,
+        _profile(),
+        stations=[SOURCE, DEST],
+        depths=depths,
+        graph=_graph(),
+        names={34: "Tritanium"},
+        packaged_volume={34: 0.01},
+        now=NOW,
+    )
+    rejection = scan.rejected_for("MIN_VOLUME_BLOCKED")
+    assert rejection, f"expected MIN_VOLUME_BLOCKED; got {scan.rejection_counts}"
+    assert "4,000 units of bid depth" in rejection[0].detail
+    assert scan.plans[0].quantity == pytest.approx(100.0), "only the usable bid is fillable"
+    assert scan.plans[0].min_volume_excluded_qty == pytest.approx(4000.0)
+
+
+def test_a_source_shallower_than_the_destination_refuses_nothing(config):
+    """Every quantity the source could supply was priced. Reporting the
+    destination as short would name a side that is not short at all."""
+    asks = _orders([(100.0, 100.0)], buy=False, station=JITA_44, system=JITA)
+    bids = _orders([(200.0, 5000.0)], buy=True, station=AMARR_8, system=AMARR)
+    depths = {
+        FORGE: _snapshot(asks, region=FORGE, station=JITA_44, system=JITA),
+        DOMAIN: _snapshot(bids, region=DOMAIN, station=AMARR_8, system=AMARR),
+    }
+    scan = scan_hauls(
+        config,
+        _profile(),
+        stations=[SOURCE, DEST],
+        depths=depths,
+        graph=_graph(),
+        names={34: "Tritanium"},
+        packaged_volume={34: 0.01},
+        now=NOW,
+    )
+    assert scan.plans[0].quantity == pytest.approx(100.0)
+    assert not scan.rejected_for("DEST_DEPTH_SHORT")

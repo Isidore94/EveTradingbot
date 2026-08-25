@@ -927,32 +927,51 @@ def _best_plan(
     if not quantities:
         return None
 
-    # The cap bit: say which side ran out, and whether it ran out because the
-    # curve was truncated rather than because the book is shallow.
+    # The cap bites when one side runs out before the other, and *which* fact
+    # that is matters. Three cases, and one of them is deliberately silent:
+    #
+    #   * either curve was cut short by the storage bound -> DEPTH_TRUNCATED,
+    #     because the levels that would have answered were never written;
+    #   * the DESTINATION cannot absorb what the source could sell -> a real
+    #     exit constraint, and `min_volume` names it exactly when the bids that
+    #     are missing are the ones demanding a minimum parcel;
+    #   * the SOURCE simply has less depth than the destination would buy ->
+    #     nothing was refused. Every quantity the source could supply was
+    #     priced, and the deeper ones were never candidate plans. A rejection
+    #     here would report a destination that is not short at all as short.
     ceiling = min(ask.available_qty, bid.available_qty)
-    if bid.available_qty < ask.available_qty:
-        binding, curve = DEST_DEPTH_SHORT, bid
-    else:
-        binding, curve = DEPTH_TRUNCATED if not ask.complete else DEST_DEPTH_SHORT, ask
-    if (
-        max(ask.breakpoints or (0,)) > ceiling + 1e-9
-        or max(bid.breakpoints or (0,)) > ceiling + 1e-9
-    ):
-        scan.rejected.append(
-            Rejection(
-                reason=DEPTH_TRUNCATED if not curve.complete else binding,
-                type_id=int(type_id),
-                type_name=name,
-                source_station=source.station_id,
-                dest_station=destination.station_id,
-                quantity=float(ceiling),
-                detail=(
-                    "quantities beyond this are capped by the shallower side"
-                    if curve.complete
-                    else "the curve was cut short by the depth bound, so deeper sizes are UNKNOWN"
-                ),
+    deepest = max(max(ask.breakpoints or (0.0,)), max(bid.breakpoints or (0.0,)))
+    if deepest > ceiling + 1e-9:
+        reason: str | None
+        detail = ""
+        if not ask.complete or not bid.complete:
+            reason = DEPTH_TRUNCATED
+            detail = "the curve was cut short by the depth bound, so deeper sizes are UNKNOWN"
+        elif bid.available_qty < ask.available_qty:
+            if bid.min_volume_excluded_qty > 0:
+                reason = MIN_VOLUME_BLOCKED
+                detail = (
+                    f"{bid.min_volume_excluded_qty:,.0f} units of bid depth demand a "
+                    "minimum parcel larger than one unit and are excluded from the "
+                    "executable curve — the exit is shallower than the book looks"
+                )
+            else:
+                reason = DEST_DEPTH_SHORT
+                detail = "the destination cannot absorb what the source could sell"
+        else:
+            reason = None
+        if reason is not None:
+            scan.rejected.append(
+                Rejection(
+                    reason=reason,
+                    type_id=int(type_id),
+                    type_name=name,
+                    source_station=source.station_id,
+                    dest_station=destination.station_id,
+                    quantity=float(ceiling),
+                    detail=detail,
+                )
             )
-        )
 
     best: HaulPlan | None = None
     priced: list[tuple[float, float, float]] = []  # (quantity, capital, net profit)

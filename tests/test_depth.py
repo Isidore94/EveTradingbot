@@ -339,3 +339,39 @@ def test_every_station_gets_its_own_curve():
 def test_the_frame_has_exactly_the_declared_columns():
     reduction = reduce_depth([_order()], region_id=10000002, stations={JITA_44: JITA}, bound=BOUND)
     assert list(reduction.frame.columns) == DEPTH_COLUMNS
+
+
+def test_the_reduction_searches_from_the_station_not_from_every_order():
+    """A Forge sweep carries orders resting in thousands of systems.
+
+    Jump distance is symmetric on a stargate graph, so a search rooted at each
+    order's system gives the same answers as one rooted at the station — and
+    builds thousands of distance maps to do it. This asserts the cheap
+    direction is the one taken, because the expensive one is correct enough to
+    pass every other test in this file while making a real sweep unusable.
+    """
+    from evescreener.routes import RouteGraph
+
+    systems = {JITA: 0.9, PERIMETER: 0.9, AMARR_SYS: 0.9}
+    graph = RouteGraph([(JITA, PERIMETER), (PERIMETER, AMARR_SYS)], systems, sde_build=1)
+    orders = [
+        _order(
+            order_id=index,
+            is_buy_order=True,
+            range="5",
+            location_id=99,
+            system_id=system,
+            price=90.0 + index,
+            volume_remain=10.0,
+        )
+        for index, system in enumerate((PERIMETER, AMARR_SYS))
+    ]
+    reduction = reduce_depth(
+        orders,
+        region_id=10000002,
+        stations={JITA_44: JITA},
+        bound=BOUND,
+        jump_distance=graph.jump_distance,
+    )
+    assert len(reduction.frame) == 2, "both bids reach a five-jump range"
+    assert list(graph._distance_cache) == [(JITA, 40)], "one search, rooted at the station"

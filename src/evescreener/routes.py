@@ -432,9 +432,17 @@ class RouteGraph:
         """
         if origin is None or destination is None:
             return None
-        if int(origin) == int(destination):
+        origin, destination = int(origin), int(destination)
+        if origin == destination:
             return 0
-        return self.distances_from(int(origin), max_jumps=max_jumps).get(int(destination))
+        # The graph is undirected, so either endpoint answers — and answering
+        # from one we have already searched from costs nothing at all.
+        if (origin, int(max_jumps)) not in self._distance_cache and (
+            destination,
+            int(max_jumps),
+        ) in self._distance_cache:
+            origin, destination = destination, origin
+        return self.distances_from(origin, max_jumps=max_jumps).get(destination)
 
 
 class RouteCache:

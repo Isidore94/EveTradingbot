@@ -11,7 +11,7 @@ competitors and live gates afterwards"*). H5 and H6 are **out of scope**; H0 is
 deferred to a keep/park decision after the shadow period.
 
 **State: H1–H4 IMPLEMENTED + GREEN. NOTHING IS `LIVE_VALIDATED`.**
-**Gate stamp:** `uv run pytest -q` → **1,027 passed, 7 deselected**, ruff check
+**Gate stamp:** `uv run pytest -q` → **1,028 passed, 7 deselected**, ruff check
 + format clean, `python -m evescreener selftest` → **12/12**.
 
 Everything below this item — the paper desk, §21, §22 and the consolidated

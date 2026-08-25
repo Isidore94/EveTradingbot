@@ -8,7 +8,7 @@ recorded, `PROMOTED` = explicit operator decision.
 ## 2026-08-25 — §23 H1–H4 handed off: the hauling tab, and what it owes
 
 **Status: IMPLEMENTED + GREEN across H1a, H1b, H2, H3 and H4. NOTHING IS
-`LIVE_VALIDATED`.** `uv run pytest -q` → **1,027 passed, 7 deselected**, ruff
+`LIVE_VALIDATED`.** `uv run pytest -q` → **1,028 passed, 7 deselected**, ruff
 check + format clean, `python -m evescreener selftest` → **12/12**.
 
 - **The end-to-end test is the one that would catch a seam.** Synthetic ESI
@@ -32,6 +32,13 @@ check + format clean, `python -m evescreener selftest` → **12/12**.
   refuses **nothing** — every quantity it could supply was priced, and the
   deeper ones were never candidate plans, so a `DEST_DEPTH_SHORT` there would
   have named a side that is not short at all.
+- **The reachability search is rooted at the station, once per station.**
+  Jump distance is symmetric on a stargate graph, so searching from each
+  order's system gives identical answers — and a real Forge sweep carries
+  orders resting in thousands of distinct systems, so it would have built
+  thousands of distance maps to get them. Same numbers, three orders of
+  magnitude less work and memory, and a test pins the direction because the
+  expensive one is correct enough to pass everything else.
 - **LOC: 8,953 for the track against a ≤7,000 target — 1,953 over, recorded as
   §17 D-34.** 4,024 in seven new core modules plus the page, 3,021 in eleven
   new test modules, 1,908 added to existing files (658 of them the depth

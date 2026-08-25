@@ -2771,7 +2771,7 @@ valid scanner result.
 | **H0** | The competitor comparison — **moved after the shadow period** (§23.2, §23.20) | owed, after the shadow |
 
 **Nothing in this track is `LIVE_VALIDATED`.** The gate stamp for all five
-phases is `uv run pytest -q` → **1,027 passed, 7 deselected**, ruff check +
+phases is `uv run pytest -q` → **1,028 passed, 7 deselected**, ruff check +
 format clean, `selftest` **12/12**. The consolidated owed checklist is in
 `CURRENT_CHECKPOINT.md`.
 

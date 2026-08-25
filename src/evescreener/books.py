@@ -1086,6 +1086,10 @@ def reduce_depth(
     a station whose system is unknown can still take its own resting orders and
     region-ranged bids, and everything else against it is UNKNOWN.
 
+    `jump_distance(a, b)` must be **symmetric**, which the stargate graph is by
+    construction: this walks it from the station's system outward, once per
+    station, rather than from each of the thousands of systems orders rest in.
+
     The **`min_volume` rule** (§23.6, conservative v1): a buy order demanding a
     minimum parcel larger than one unit is excluded from the executable levels
     and its volume accumulated into `min_volume_excluded_qty`. Modelling the
@@ -1102,12 +1106,25 @@ def reduce_depth(
     live = _live(list(orders))
     for station in station_ids:
         station_system = stations.get(station)
+
+        # **Search from the station, not from the order.** Jump distance on a
+        # stargate graph is symmetric — gates are two-way — so the answer is
+        # the same either way, but the work is not: a real Forge sweep carries
+        # orders resting in thousands of distinct systems, and a breadth-first
+        # search rooted at each of them would build thousands of distance maps
+        # instead of one per station. Same numbers, three orders of magnitude
+        # less of everything.
+        def station_first(origin, destination, _station_system=station_system):
+            if jump_distance is None:
+                return None
+            return jump_distance(_station_system, origin)
+
         for order in live:
             reachable, reason = reachable_from_station(
                 order,
                 station_id=station,
                 station_system=station_system,
-                jump_distance=jump_distance,
+                jump_distance=station_first,
             )
             if not reachable:
                 if reason == EXCLUDED_UNRESOLVABLE:

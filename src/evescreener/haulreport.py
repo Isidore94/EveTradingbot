@@ -25,6 +25,7 @@ from .timeutil import parse_iso
 __all__ = [
     "CALC_VERSION",
     "build_haul_report",
+    "haul_basket",
     "latest_haul_report",
     "render_haul_report",
     "write_haul_report",
@@ -35,6 +36,24 @@ __all__ = [
 CALC_VERSION = "haul-1"
 
 REPORT_PREFIX = "hauling"
+
+
+def haul_basket(scan: HaulScan):
+    """The mixed-cargo read for a scan, built one way for every surface.
+
+    Computed here rather than in the engine so the CLI and the desk cannot
+    drift into two baskets, and so the engine stays pure arithmetic over depth
+    and routes.
+    """
+    from .positioning import greedy_basket
+
+    profile = scan.profile
+    return greedy_basket(
+        scan.plans,
+        capital_isk=profile.capital_isk,
+        cargo_m3=profile.ship.usable_cargo_m3,
+        exposure_per_trade_isk=profile.max_exposure_isk,
+    )
 
 
 def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:
@@ -58,6 +77,7 @@ def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:
         "rejection_counts": scan.rejection_counts,
         "unknown_pairs": scan.unknown_pairs,
         "rows": [_row(plan) for plan in scan.plans],
+        "basket": haul_basket(scan).as_dict(),
         "rejected": [rejection.as_dict() for rejection in scan.rejected],
         "notes": scan.notes,
         "caveats": [SNAPSHOT_CAVEAT, ORDER_AGE_CAVEAT],
@@ -106,7 +126,8 @@ def _row(plan) -> dict:
         "why_this_size": {
             "objective": plan.rank_score,
             "breakpoints": [
-                {"quantity": quantity, "net_profit": net} for quantity, net in plan.breakpoints
+                {"quantity": quantity, "capital_isk": cost, "net_profit": net}
+                for quantity, cost, net in plan.breakpoints
             ],
             "marginal_net_isk": plan.marginal_net_isk,
             "alternatives": plan.alternatives,
@@ -233,6 +254,29 @@ def render_haul_report(report: dict) -> str:
                 f"| {(row.get('active_minutes') or 0):.0f} "
                 f"| {_isk(row.get('isk_per_active_minute'))} |"
             )
+    basket = report.get("basket") or {}
+    if basket.get("items"):
+        lines.extend(
+            [
+                "",
+                f"## Mixed cargo — {basket.get('method', 'HEURISTIC')} (not an optimum)",
+                "",
+                f"{basket['capital_isk']:,.0f} ISK committed · {basket['net_isk']:,.0f} ISK net "
+                f"· {basket['volume_m3']:,.0f} of {basket['cargo_m3']:,.0f} m³",
+                "",
+                "| item | qty | capital | net | m³ |",
+                "|---|---:|---:|---:|---:|",
+            ]
+        )
+        for item in basket["items"]:
+            lines.append(
+                f"| {item.get('type_name') or item['type_id']} | {item['quantity']:,.0f} "
+                f"| {_isk(item['capital_isk'])} | {_isk(item['net_isk'])} "
+                f"| {item['volume_m3']:,.0f} |"
+            )
+        for note in basket.get("notes", []):
+            lines.extend(["", f"_{note}_"])
+
     unknown = report.get("unknown_pairs") or []
     if unknown:
         lines.extend(["", "## Pairs that priced nothing", ""])

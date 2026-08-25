@@ -44,6 +44,8 @@ from ...hauling import (
     scan_hauls,
     scan_inputs,
 )
+from ...haulreport import haul_basket
+from ...positioning import render_basket
 from ...routes import PROFILES
 from ..widgets import BLANK, SortableTable, format_isk
 from .base import DeskPage
@@ -205,7 +207,15 @@ class HaulingPage(DeskPage):
     def _drawer(self) -> QWidget:
         self.drawer = QTabWidget()
         self.panes: dict[str, QPlainTextEdit] = {}
-        for name in ("ladders", "why this size", "route", "costs", "liquidity", "rejected"):
+        for name in (
+            "ladders",
+            "why this size",
+            "route",
+            "costs",
+            "liquidity",
+            "mixed cargo",
+            "rejected",
+        ):
             pane = QPlainTextEdit()
             pane.setReadOnly(True)
             pane.setLineWrapMode(QPlainTextEdit.NoWrap)
@@ -342,6 +352,9 @@ class HaulingPage(DeskPage):
             scan.notes.append(note)
         return {
             "scan": scan,
+            # Built here, on the worker, by the same function the CLI calls, so
+            # the desk and the report cannot drift into two baskets.
+            "basket": render_basket(haul_basket(scan)),
             "systems": sorted(system_names.values()),
             "ships": [ship["name"] for ship in ships],
             "ship": ship.name,
@@ -381,6 +394,7 @@ class HaulingPage(DeskPage):
         )
         self.stamp.setText(_generation_stamp(scan))
         self.panes["rejected"].setPlainText(_rejected_text(scan))
+        self.panes["mixed cargo"].setPlainText(result.get("basket") or "")
         if not scan.plans:
             for name in ("ladders", "why this size", "route", "costs", "liquidity"):
                 self.panes[name].setPlainText(
@@ -585,11 +599,11 @@ def _why_text(plan) -> str:
     lines = [
         f"ranked on {plan.rank_score:,.2f} ({'the objective for this run'})",
         "",
-        "quantity      net profit",
+        "quantity         capital      net profit",
     ]
-    for quantity, net in plan.breakpoints:
+    for quantity, cost, net in plan.breakpoints:
         marker = "  <- chosen" if abs(quantity - plan.quantity) < 1e-9 else ""
-        lines.append(f"{quantity:>12,.0f}  {net:>14,.0f}{marker}")
+        lines.append(f"{quantity:>12,.0f}  {cost:>14,.0f}  {net:>14,.0f}{marker}")
     if plan.marginal_net_isk is not None:
         lines.append("")
         lines.append(f"the final chunk netted {plan.marginal_net_isk:,.0f} ISK")

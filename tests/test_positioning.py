@@ -1,0 +1,156 @@
+"""Mixed cargo, and the word HEURISTIC on the label (plan.md §23, H3).
+
+Filling a hold optimally is a knapsack over marginal chunks whose prices move
+as you take them. This is greedy, it is not optimal, and it says so on every
+output. What these tests pin is that it is **checkable**: the chunks are the
+same breakpoints the ranker already priced, the order is by conservative profit
+per m³, and every cap is re-tested before each chunk rather than once at the
+end — the case where a cap must bind is as important as the case where mixing
+wins.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from evescreener.hauling import HaulPlan, Station
+from evescreener.positioning import greedy_basket, marginal_chunks, render_basket
+from evescreener.routes import RouteFacts
+
+SOURCE = Station(60003760, 30000142, 10000002, "Jita")
+DEST = Station(60008494, 30002187, 10000043, "Amarr")
+UNKNOWN_ROUTE = RouteFacts.unknown(None, None, "shortest", "")
+
+
+def _plan(type_id, name, breakpoints, *, volume_m3=1.0, destination=DEST) -> HaulPlan:
+    quantity, cost, net = breakpoints[-1]
+    return HaulPlan(
+        type_id=type_id,
+        type_name=name,
+        badge=None,
+        source=SOURCE,
+        destination=destination,
+        quantity=quantity,
+        source_wap=cost / quantity,
+        source_cost=cost,
+        source_levels=1,
+        source_marginal_next_price=None,
+        dest_wap=(cost + net) / quantity,
+        gross_sale=cost + net,
+        dest_levels=1,
+        dest_marginal_next_price=None,
+        sales_tax_isk=0.0,
+        net_profit=net,
+        net_roi_pct=net / cost * 100.0,
+        marginal_net_isk=None,
+        packaged_volume_m3=volume_m3,
+        cargo_m3=(quantity * volume_m3) if volume_m3 else None,
+        cargo_utilisation_pct=None,
+        profit_per_m3=(net / (quantity * volume_m3)) if volume_m3 else None,
+        pickup=UNKNOWN_ROUTE,
+        haul=UNKNOWN_ROUTE,
+        total_jumps=1,
+        detour_jumps=None,
+        active_minutes=10.0,
+        isk_per_active_minute=net / 10.0,
+        breakpoints=tuple(breakpoints),
+    )
+
+
+# -- 1. the chunks ---------------------------------------------------------
+
+
+def test_the_chunks_are_the_breakpoints_the_ranker_already_priced():
+    plan = _plan(34, "Tritanium", [(100.0, 1000.0, 500.0), (200.0, 2500.0, 700.0)])
+    chunks = marginal_chunks(plan)
+    assert [chunk.quantity for chunk in chunks] == [100.0, 100.0]
+    assert [chunk.capital_isk for chunk in chunks] == [1000.0, 1500.0]
+    assert [chunk.net_isk for chunk in chunks] == [500.0, 200.0]
+    assert chunks[0].profit_per_m3 == pytest.approx(5.0)
+
+
+def test_a_chunk_that_does_not_pay_for_itself_is_not_offered():
+    """It is the same size the ranker refused as MARGINAL_NET_NEGATIVE."""
+    plan = _plan(34, "Tritanium", [(100.0, 1000.0, 500.0), (200.0, 3000.0, 400.0)])
+    assert len(marginal_chunks(plan)) == 1
+
+
+# -- 2. mixing wins ---------------------------------------------------------
+
+
+def test_a_mixed_hold_beats_the_best_single_item_when_the_hold_is_the_binding_cap():
+    """The best item runs out of book long before the hold runs out of space."""
+    dense = _plan(34, "Tritanium", [(100.0, 1000.0, 900.0)], volume_m3=1.0)
+    bulky = _plan(35, "Pyerite", [(400.0, 4000.0, 1200.0)], volume_m3=1.0)
+    basket = greedy_basket([dense, bulky], capital_isk=1e9, cargo_m3=500.0)
+    assert len(basket.items) == 2
+    assert basket.net_isk == pytest.approx(2100.0)
+    assert basket.net_isk > dense.net_profit, "mixing beat the best single plan"
+    assert basket.volume_m3 == pytest.approx(500.0)
+    assert basket.method == "HEURISTIC"
+
+
+def test_the_hold_is_filled_by_profit_per_cubic_metre_first():
+    thin = _plan(34, "Tritanium", [(100.0, 1000.0, 100.0)], volume_m3=1.0)
+    rich = _plan(35, "Pyerite", [(100.0, 1000.0, 900.0)], volume_m3=1.0)
+    basket = greedy_basket([thin, rich], capital_isk=1e9, cargo_m3=100.0)
+    assert [item.type_id for item in basket.items] == [35]
+
+
+# -- 3. and the caps still bind --------------------------------------------
+
+
+def test_the_exposure_cap_binds_and_the_basket_must_not_beat_it():
+    """A cap tested against the total is a cap already exceeded on the way."""
+    plan = _plan(
+        34,
+        "Tritanium",
+        [(100.0, 1000.0, 500.0), (200.0, 2000.0, 900.0), (300.0, 3000.0, 1200.0)],
+        volume_m3=1.0,
+    )
+    basket = greedy_basket([plan], capital_isk=1e9, cargo_m3=1e9, exposure_per_trade_isk=2000.0)
+    assert basket.capital_isk <= 2000.0
+    assert basket.items[0].quantity == pytest.approx(200.0)
+
+
+def test_capital_binds_across_items_not_just_within_one():
+    first = _plan(34, "A", [(100.0, 1000.0, 900.0)], volume_m3=1.0)
+    second = _plan(35, "B", [(100.0, 1000.0, 800.0)], volume_m3=1.0)
+    basket = greedy_basket([first, second], capital_isk=1500.0, cargo_m3=1e9)
+    assert basket.capital_isk <= 1500.0
+    assert len(basket.items) == 1, "the second item does not fit the wallet"
+
+
+def test_a_per_destination_cap_binds_across_plans_going_to_the_same_hub():
+    first = _plan(34, "A", [(100.0, 1000.0, 900.0)])
+    second = _plan(35, "B", [(100.0, 1000.0, 800.0)])
+    basket = greedy_basket(
+        [first, second],
+        capital_isk=1e9,
+        cargo_m3=1e9,
+        exposure_per_destination_isk=1000.0,
+    )
+    assert basket.capital_isk <= 1000.0
+
+
+def test_an_item_with_no_measurable_volume_is_skipped_and_named():
+    """Packing a hold with something whose size nobody knows is how a plan
+    becomes unexecutable at the station."""
+    unknown = _plan(34, "Mystery", [(100.0, 1000.0, 900.0)], volume_m3=None)
+    basket = greedy_basket([unknown], capital_isk=1e9, cargo_m3=1e9)
+    assert basket.items == []
+    assert any("packaged volume UNKNOWN" in note for note in basket.skipped)
+
+
+def test_a_basket_that_fits_nothing_says_so_rather_than_rendering_empty():
+    plan = _plan(34, "Tritanium", [(100.0, 1_000_000.0, 900.0)])
+    basket = greedy_basket([plan], capital_isk=1.0, cargo_m3=1e9)
+    assert basket.items == []
+    assert any("Nothing fits" in note for note in basket.notes)
+
+
+def test_the_render_leads_with_the_label():
+    plan = _plan(34, "Tritanium", [(100.0, 1000.0, 900.0)])
+    text = render_basket(greedy_basket([plan], capital_isk=1e9, cargo_m3=1e9))
+    assert text.startswith("MIXED CARGO — HEURISTIC")
+    assert "not an optimum" in text

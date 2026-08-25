@@ -356,3 +356,55 @@ def test_the_haul_tally_leads_with_refusals(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "refused: **0**" in out
     assert "UNKNOWN" in out
+
+
+def test_hauling_history_is_an_honest_zero_before_the_hubs_are_swept(tmp_path, monkeypatch, capsys):
+    """The exit happens in the destination region, whose history this system
+    has never fetched — but there is nothing to fetch until a hub book exists."""
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "ingest-history", "--scope", "hauling"]) == 0
+    assert "sweep-books --secondary" in capsys.readouterr().out
+
+
+def test_the_hauling_history_scope_is_bounded_per_region_and_says_so(tmp_path, monkeypatch):
+    """A cap that is not reported reads as 'we fetched everything'."""
+    import pandas as pd
+
+    from evescreener.cli import _hauling_history_scope, resolve_config
+    from evescreener.store.db import Database
+    from evescreener.store.lake import DEPTH_COLUMNS, DepthLake
+
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    args = build_parser().parse_args(["--example-config", "ingest-history"])
+    config = resolve_config(args)
+    config.paths.ensure()
+    with Database(config.paths.db) as db:
+        db.replace_solar_systems([(30002187, 10000043, "Amarr", 0.9)])
+        db.replace_npc_stations([(60008494, 30002187, 1, 1, None)])
+        rows = [
+            {
+                "region_id": 10000043,
+                "sweep_ts": "2026-08-25T11:00:00+00:00",
+                "fetched_at": "2026-08-25T11:00:00+00:00",
+                "expires_ts": None,
+                "execution_location_id": 60008494,
+                "type_id": type_id,
+                "side": "buy",
+                "price": 100.0,
+                "level_qty": 10.0,
+                "cumulative_qty": 10.0,
+                "cumulative_notional": 1000.0 * type_id,
+                "level_order_count": 1,
+                "min_volume_excluded_qty": 0.0,
+                "oldest_issued": None,
+                "newest_issued": None,
+                "structure_share": 0.0,
+                "depth_complete": True,
+            }
+            for type_id in range(1, 11)
+        ]
+        DepthLake(config.paths).write(pd.DataFrame(rows, columns=DEPTH_COLUMNS))
+        scope = _hauling_history_scope(config, db, 3)
+    assert list(scope) == [10000043]
+    assert len(scope[10000043]) == 3, "the bound binds"
+    assert scope[10000043][0] == 10, "the deepest bid books come first"

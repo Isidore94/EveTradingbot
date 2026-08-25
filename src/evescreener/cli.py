@@ -45,9 +45,17 @@ def build_parser() -> argparse.ArgumentParser:
     ingest = sub.add_parser("ingest-history", help="refresh daily bars for the tracked universe")
     ingest.add_argument(
         "--scope",
-        choices=("tracked", "watchlist", "all"),
+        choices=("tracked", "watchlist", "all", "hauling"),
         default="tracked",
-        help="which types to refresh (default: the tracked universe)",
+        help="which types to refresh (default: the tracked universe). `hauling` "
+        "fetches DESTINATION bars: the hauling candidates in each non-home hub "
+        "region, which is the only history that can say how long an exit takes",
+    )
+    ingest.add_argument(
+        "--max-types",
+        type=int,
+        default=400,
+        help="cap per region on the `hauling` scope (default: 400) — a bound, not a target",
     )
     ingest.add_argument("--type-id", type=int, action="append", help="one type; repeatable")
 
@@ -441,6 +449,37 @@ def _cmd_census(config: Config, args) -> int:
     return asyncio.run(run())
 
 
+def _hauling_history_scope(config: Config, db, limit: int) -> dict[int, list[int]]:
+    """Destination types per non-home hub region (plan.md §23, H3).
+
+    The exit is what the liquidity scenarios are about, and the exit happens in
+    the destination region — whose history this system has never fetched,
+    because every earlier surface lives in The Forge. The candidate set is what
+    the depth generations actually carry a **bid** for at that hub: fetching
+    the whole catalogue of five regions would be tens of thousands of requests
+    for bars nothing reads.
+
+    Bounded per region, and the bound is reported rather than silently applied.
+    """
+    from .books import depth_stations
+    from .store.lake import DepthLake
+
+    lake = DepthLake(config.paths)
+    scope: dict[int, list[int]] = {}
+    for region in config.esi.secondary_region_ids:
+        if not depth_stations(config, db, int(region)):
+            continue
+        frame = lake.latest(int(region))
+        if frame.empty:
+            continue
+        bids = frame[frame["side"] == "buy"]
+        if bids.empty:
+            continue
+        ranked = bids.groupby("type_id")["cumulative_notional"].max().sort_values(ascending=False)
+        scope[int(region)] = [int(value) for value in ranked.index[: max(0, int(limit))]]
+    return scope
+
+
 def _cmd_ingest_history(config: Config, args) -> int:
     from .bars import ingest_history
     from .esi.client import EsiClient
@@ -448,6 +487,41 @@ def _cmd_ingest_history(config: Config, args) -> int:
     from .universe import tracked_type_ids, watchlist_type_ids
 
     region = _region(config, args)
+
+    async def run_hauling() -> int:
+        """Destination bars, one hub region at a time, inside the 150/min cap."""
+        with _open_db(config) as db:
+            scope = _hauling_history_scope(config, db, args.max_types or 400)
+            if not scope:
+                print(
+                    "no hauling destinations with a swept bid book — run `sweep-books "
+                    "--secondary` first (honest zero, not an error)"
+                )
+                return 0
+            client = EsiClient(config, db)
+            outcomes = []
+            try:
+                for hub_region, ids in sorted(scope.items()):
+                    result = await ingest_history(
+                        client,
+                        BarLake(config.paths),
+                        ids,
+                        region_id=hub_region,
+                        skip_type_ids=db.history_missing(hub_region),
+                    )
+                    if result.missing_type_ids:
+                        db.mark_history_missing(result.missing_type_ids, hub_region)
+                    outcomes.append(
+                        {
+                            "region_id": hub_region,
+                            "requested_cap": args.max_types,
+                            **result.as_dict(),
+                        }
+                    )
+            finally:
+                await client.aclose()
+        print(json.dumps(outcomes, indent=2))
+        return 0
 
     async def run() -> int:
         with _open_db(config) as db:
@@ -484,7 +558,7 @@ def _cmd_ingest_history(config: Config, args) -> int:
         print(json.dumps(result.as_dict(), indent=2))
         return 0
 
-    return asyncio.run(run())
+    return asyncio.run(run_hauling() if args.scope == "hauling" else run())
 
 
 def _cmd_sweep_books(config: Config, args) -> int:
@@ -1183,6 +1257,7 @@ def _cmd_haul(config: Config, args) -> int:
     from .hauling import HaulProfile, scan_hauls, scan_inputs
     from .haulledger import HaulLedger, HaulRefusal
     from .haulreport import build_haul_report, render_haul_report, write_haul_report
+    from .liquidity import liquidity_attachment
     from .routes import RouteCache
 
     paths = config.paths.ensure()
@@ -1228,6 +1303,7 @@ def _cmd_haul(config: Config, args) -> int:
             return 2
 
         stations, depths, graph, names, badges, packaged = scan_inputs(config, db)
+        liquidity = liquidity_attachment(config, db, depths, profile)
         scan = scan_hauls(
             config,
             profile,
@@ -1238,6 +1314,7 @@ def _cmd_haul(config: Config, args) -> int:
             names=names,
             badges=badges,
             packaged_volume=packaged,
+            liquidity=liquidity,
         )
         report = build_haul_report(scan, config=config)
 

@@ -103,6 +103,12 @@ ALONG_ROUTE = "along_route"
 MODES = (DEDICATED, ALONG_ROUTE)
 
 IMMEDIATE = "immediate"
+#: Posting the goods at the destination instead of dumping them into the bid.
+#: Display-only in this build's default; selecting it makes the liquidity caps
+#: binding, because a plan that cannot be liquidated inside the operator's own
+#: patience is not a plan (§23.7).
+MAKER = "maker"
+EXIT_MODELS = (IMMEDIATE, MAKER)
 
 #: Said on every surface this engine feeds. It is the difference between what
 #: the page shows and what the operator will meet when he arrives.
@@ -191,6 +197,8 @@ class HaulProfile:
             raise ValueError(f"unknown objective {self.objective!r}; known: {OBJECTIVES}")
         if self.mode not in MODES:
             raise ValueError(f"unknown mode {self.mode!r}; known: {MODES}")
+        if self.exit_model not in EXIT_MODELS:
+            raise ValueError(f"unknown exit model {self.exit_model!r}; known: {EXIT_MODELS}")
         if self.security_profile not in PROFILES:
             raise ValueError(
                 f"unknown security profile {self.security_profile!r}; known: {PROFILES}"
@@ -947,7 +955,7 @@ def _best_plan(
         )
 
     best: HaulPlan | None = None
-    priced: list[tuple[float, float]] = []  # (quantity, net profit)
+    priced: list[tuple[float, float, float]] = []  # (quantity, capital, net profit)
     alternatives: dict[str, dict] = {}
     for quantity in quantities:
         scan.candidates_considered += 1
@@ -1022,7 +1030,7 @@ def _best_plan(
         net = proceeds - cost
         marginal = None
         if priced:
-            previous_quantity, previous_net = priced[-1]
+            previous_quantity, _previous_cost, previous_net = priced[-1]
             marginal = net - previous_net
             if marginal <= 0:
                 # The last chunk did not pay for itself. Bigger is not better;
@@ -1041,9 +1049,9 @@ def _best_plan(
                         ),
                     )
                 )
-                priced.append((quantity, net))
+                priced.append((quantity, cost, net))
                 continue
-        priced.append((quantity, net))
+        priced.append((quantity, cost, net))
 
         minutes = trip.active_minutes
         per_minute = (net / minutes) if minutes else None
@@ -1081,13 +1089,22 @@ def _best_plan(
             detour_jumps=trip.detour_jumps,
             active_minutes=minutes,
             isk_per_active_minute=per_minute,
-            liquidation_days=days,
-            isk_per_capital_day=(net / (cost * days) if days and cost > 0 else None),
+            # An IMMEDIATE exit commits the capital for the trip and nothing
+            # more, so ISK-days are charged over travel time. A MAKER exit is
+            # a different question entirely — how long the destination takes to
+            # absorb the goods — and travel time is no answer to it, so it
+            # stays UNKNOWN until the liquidity scenarios attach one.
+            liquidation_days=(days if profile.exit_model == IMMEDIATE else None),
+            isk_per_capital_day=(
+                net / (cost * days)
+                if profile.exit_model == IMMEDIATE and days and cost > 0
+                else None
+            ),
             liquidation_reason=(
                 "immediate exit: the capital is committed for the trip, so ISK-days are "
                 "charged over travel time"
                 if profile.exit_model == IMMEDIATE
-                else ""
+                else "maker exit: liquidation is the destination's own volume, not travel time"
             ),
             source_generation=ask.generation,
             dest_generation=bid.generation,
@@ -1102,7 +1119,37 @@ def _best_plan(
         )
         if liquidity is not None:
             plan = liquidity(plan)
-            if plan is None:
+        if profile.exit_model == MAKER:
+            # A maker exit is the one that depends on the assumption, so it is
+            # the one the assumption is allowed to refuse.
+            if plan.liquidation_days is None:
+                scan.rejected.append(
+                    Rejection(
+                        reason=LIQUIDATION_UNKNOWN,
+                        type_id=int(type_id),
+                        type_name=name,
+                        source_station=source.station_id,
+                        dest_station=destination.station_id,
+                        quantity=quantity,
+                        detail=plan.liquidation_reason or "no measurable volume at the destination",
+                    )
+                )
+                continue
+            if profile.max_wait_days and plan.liquidation_days > profile.max_wait_days:
+                scan.rejected.append(
+                    Rejection(
+                        reason=OVER_TIME,
+                        type_id=int(type_id),
+                        type_name=name,
+                        source_station=source.station_id,
+                        dest_station=destination.station_id,
+                        quantity=quantity,
+                        detail=(
+                            f"{plan.liquidation_days:.1f} days to liquidate against a "
+                            f"{profile.max_wait_days:.0f}-day patience"
+                        ),
+                    )
+                )
                 continue
         for objective in OBJECTIVES:
             value = plan.objective_value(objective)

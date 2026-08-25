@@ -5,6 +5,133 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — §23 H1–H4 handed off: the hauling tab, and what it owes
+
+**Status: IMPLEMENTED + GREEN across H1a, H1b, H2, H3 and H4. NOTHING IS
+`LIVE_VALIDATED`.** `uv run pytest -q` → **1,027 passed, 7 deselected**, ruff
+check + format clean, `python -m evescreener selftest` → **12/12**.
+
+- **The end-to-end test is the one that would catch a seam.** Synthetic ESI
+  pages for two regions go in at the top; a governed sweep reduces them twice;
+  the depth lake writes and the validator reads them back; the engine ranks;
+  the report renders; and the desk page paints — and the **same
+  13,196,312.50 ISK** survives all six steps. Every number in it was written
+  into `plan.md` §23.17 before any of the code existed.
+- **The desk cannot paint a generation the lake has replaced**: depth
+  partitions and stored hauling reports are both in `desk_input_key`, with a
+  test for each.
+- **A boundary the page must never cross is now asserted by name.**
+  `haulfreight` reaches PushX through `crossregion`, which imports `httpx` at
+  module scope — so a test fails if any module under `gui/` imports either. The
+  page may *show* a freight column; it may not be able to *fetch* one.
+- **The rejection vocabulary is complete, and one label was wrong.**
+  `MIN_VOLUME_BLOCKED` now fires where it belongs: when the bids that would
+  have absorbed a bigger size are the ones demanding a minimum parcel, the
+  refusal names that rather than reporting a destination that merely looks
+  shallow. And a source with less depth than the destination would buy now
+  refuses **nothing** — every quantity it could supply was priced, and the
+  deeper ones were never candidate plans, so a `DEST_DEPTH_SHORT` there would
+  have named a side that is not short at all.
+- **LOC: 8,953 for the track against a ≤7,000 target — 1,953 over, recorded as
+  §17 D-34.** 4,024 in seven new core modules plus the page, 3,021 in eleven
+  new test modules, 1,908 added to existing files (658 of them the depth
+  reduction in `books.py`). Executable lines, excluding blanks, comments and
+  docstrings, come to 5,387 — inside the target, but the target said "lines
+  including tests" and the first number is the honest reading. Nothing was
+  trimmed to make it: no test was dropped, and no explanation of *why* a rule
+  exists was cut, because this repository's defence against re-litigating
+  settled decisions is that the reasoning sits next to the code.
+- **The consolidated owed live-validation checklist is in
+  `CURRENT_CHECKPOINT.md`**, and every item on it is an operator action: ten
+  in-game route checks including a 0.45–0.49 boundary system, ten quote/depth
+  checks against the ladders, one unit sold into a ranged bid (one of them
+  structure-resting) with where the goods and ISK landed, one `order_id`
+  tracked to settle whether `issued` moves on reprice, the measured depth size
+  per five-hub generation, broker-fee overrides for two hubs, a two-week
+  shadow, and then the deferred H0 keep/park comparison.
+- **Said plainly, because the tab will look empty and that is not a bug:** the
+  Forge's median spread is 98.8%, ~932 types trade inside a 5% spread at all,
+  and 10–14 of 151,113 hub pairs cleared costs when §17 measured them. A short
+  list or an honest zero is the expected normal state, and the rejected view
+  with its reason histogram is the more informative half of the page.
+
+## 2026-08-25 — §23 H4: charge the detour, and price your own flying time
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,021 passed, 7
+deselected**, ruff check + format clean, `selftest` **12/12**. **Not
+LIVE_VALIDATED**: no detour has been flown and no quote here has become an
+invoice.
+
+- **`along_route` mode charges the incremental jumps, not the trip.** The
+  baseline is the route the operator was flying anyway; the detour is
+  `(current → source → destination → intended) − (current → intended)`. If the
+  destination is on the way, the detour is **zero jumps** — and the plan still
+  pays **two lots of handling**, because loading and unloading are real minutes
+  even when the flying is free. An intended destination the graph cannot reach
+  rejects the pair rather than quietly falling back to a dedicated trip.
+- **Extra stations are destinations, never sources.** An operator's extra
+  station is somewhere he wants to *deliver* to; ranking plans that buy from it
+  would rank a book he chose that station despite, not because of.
+- **Self-haul vs PushX is a column, never a dependency.**
+  `crossregion.quote_freight` is reused **verbatim** — same cache, same
+  staleness haircut, same "a failure is UNKNOWN with its reason". No quote →
+  the column reads UNKNOWN and the self-haul row stays exactly as priced from
+  swept depth. Quoting is **opt-in** (`haul scan --freight`) and bounded to the
+  top plans, because each quote is a request to somebody else's service.
+- **What the column actually answers** is "what is my flying time worth on this
+  haul": the fee avoided, per active minute. That is the only form of the
+  question with a number in it.
+- **Two things from `scan_cross_region` are deliberately NOT inherited.** Its
+  same-notional two-leg fill walk is known-optimistic and `q_walk` supersedes
+  it; and its "needs docking rights" flag contradicts the reachability doctrine
+  the depth reduction already applies — **range decides**, not ownership
+  (§22 S2a). A test asserts the phrase never appears on a hauling row.
+
+## 2026-08-25 — §23 H3: getting out is assumed, and the page says which parts
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,010 passed, 7
+deselected**, ruff check + format clean. **Not LIVE_VALIDATED**: no liquidation
+estimate here has met a real sell order.
+
+- **`liquidity.py` separates measured from assumed, on the row.** Measured:
+  daily units at the destination over **completed bars only** — median,
+  low/base/high quantiles, zero days, missing days, a recent-vs-window volume
+  ratio and a robust price dispersion. Assumed and **labelled ASSUMED wherever
+  they appear**: `destination_share_prior` (regional history carries no station
+  split, so it is not derivable from this lake at any price) and
+  `capture_share`. `liquidation_days = q / (units × share × capture)`.
+- **A zero or unmeasurable quantile is UNKNOWN, never fast.** Fewer than
+  `min_liquidity_bars` completed bars does the same. A dead market does not
+  become tradeable by dividing by something small.
+- **The maker exit is the one the assumption may refuse.** Selecting it makes
+  the liquidity caps binding: an UNKNOWN liquidation rejects the size as
+  `LIQUIDATION_UNKNOWN`, and one slower than the operator's own patience is
+  `OVER_TIME`. An immediate exit charges ISK-days over travel time, because
+  that is the whole period the capital is committed; a maker exit does **not**
+  inherit that number — travel time is no answer to "how long will this take to
+  sell".
+- **The maker scenario is display only and stamped as such.** Proposed list
+  price one tick inside the destination's best ask, the queue ahead of it, the
+  per-station broker fee (§21 R4), and the **downside**: what dumping into the
+  bid today would actually pay. Undercutting the whole book puts nothing in
+  front of you, which is exactly the position that invites being undercut back
+  — so the competing depth is reported beside the zero rather than instead of it.
+- **The reliability grade is about the data, and says so in its own note.**
+  Generation freshness ×2, depth completeness ×2, destination bars, route
+  provenance; **any UNKNOWN component caps the grade at D**. An A means
+  "everything this row rests on was measured", not "this trade works".
+- **`positioning.py` fills the rest of the hold, labelled HEURISTIC.** Greedy
+  over the same marginal chunks the ranker already priced, ordered by
+  conservative profit per m³, with every cap re-tested **before each chunk**
+  rather than once at the end — a cap tested against the total is a cap already
+  exceeded on the way there. An item whose packaged volume is unknown is
+  skipped and named. The basket is built by one function for the CLI and the
+  desk alike, and always sits **beside** the best single-item plan.
+- **`ingest-history --scope hauling` fetches destination bars** for the
+  candidates each non-home hub actually carries a bid for, bounded per region
+  (default 400) with the bound reported, inside the existing 150/min self-cap,
+  and 404s recorded in `history_missing` exactly as the home region's are.
+
 ## 2026-08-25 — §23 H2: the engine, the report, the `haul` CLI and the page
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **982 passed, 7

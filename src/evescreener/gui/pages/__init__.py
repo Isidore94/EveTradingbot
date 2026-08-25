@@ -19,6 +19,7 @@ from .board import BoardPage
 from .charts import ChartsPage
 from .desk import DeskReviewPage
 from .focus import FocusPage
+from .hauling import HaulingPage
 from .health import HealthPage
 from .learning import LearningPage
 from .market import MarketPage
@@ -33,6 +34,7 @@ __all__ = [
     "ChartsPage",
     "DeskReviewPage",
     "FocusPage",
+    "HaulingPage",
     "HealthPage",
     "LearningPage",
     "MarketPage",
@@ -54,6 +56,7 @@ PAGES = (
     ("SCANNER", ScannerPage),
     ("TOP", PerformersPage),
     ("SPREADS", SpreadsPage),
+    ("HAULING", HaulingPage),
     ("PAPER", PaperPage),
     ("LEARNING", LearningPage),
     ("HEALTH", HealthPage),

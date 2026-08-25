@@ -205,6 +205,109 @@ def build_parser() -> argparse.ArgumentParser:
     anchors.add_argument("--list", action="store_true", help="show the calendar and stop")
     anchors.add_argument("--all", action="store_true", help="include non-market-relevant posts")
 
+    haul = sub.add_parser(
+        "haul", help="the personalized hauling scan, ship profiles, and paper hauls (§23)"
+    )
+    haul_sub = haul.add_subparsers(dest="haul_command", required=True)
+
+    haul_scan = haul_sub.add_parser("scan", help="rank hauling plans for one profile")
+    haul_scan.add_argument("--from", dest="current_system", help="the system you are in, by name")
+    haul_scan.add_argument("--from-id", dest="current_system_id", type=int, help="…or by id")
+    haul_scan.add_argument("--to", dest="intended_destination", help="where you were going anyway")
+    haul_scan.add_argument("--to-id", dest="intended_destination_id", type=int)
+    haul_scan.add_argument(
+        "--mode",
+        choices=("dedicated", "along_route"),  # authority: hauling.MODES
+        default="dedicated",
+        help="dedicated: the trip IS the haul. along_route: charge only the detour",
+    )
+    haul_scan.add_argument("--ship", help="a saved ship profile, by name")
+    haul_scan.add_argument("--cargo", type=float, help="usable cargo m³ (overrides the profile)")
+    haul_scan.add_argument("--seconds-per-jump", type=float)
+    haul_scan.add_argument("--handling-minutes", type=float)
+    haul_scan.add_argument("--capital", type=float, help="ISK you can actually commit")
+    haul_scan.add_argument("--exposure", type=float, help="most ISK in one trade")
+    haul_scan.add_argument("--minutes", type=float, help="how long you have (session minutes)")
+    haul_scan.add_argument("--max-wait-days", type=float)
+    haul_scan.add_argument("--max-jumps", type=int)
+    haul_scan.add_argument(
+        "--security",
+        choices=("highsec", "safer", "shortest"),  # authority: routes.PROFILES
+        help="highsec: never leave it. safer: penalise leaving it. shortest: fewest jumps",
+    )
+    haul_scan.add_argument(
+        "--objective",
+        choices=("isk_per_active_minute", "net_profit", "net_roi", "isk_per_m3"),
+        help="what 'best' means for this run (default: config)",
+    )
+    haul_scan.add_argument("--top", type=int, default=15, help="rows to print (default: 15)")
+    haul_scan.add_argument(
+        "--show-rejected",
+        action="store_true",
+        help="print the rejected candidates and their reasons",
+    )
+    haul_scan.add_argument(
+        "--no-write", action="store_true", help="print it, do not write a report"
+    )
+
+    haul_profile = haul_sub.add_parser("profile", help="ship profiles, stored in state.db")
+    profile_sub = haul_profile.add_subparsers(dest="profile_command", required=True)
+    profile_add = profile_sub.add_parser("add", help="add or update one ship profile")
+    profile_add.add_argument("--name", required=True)
+    profile_add.add_argument("--cargo", type=float, required=True, help="usable cargo m³")
+    profile_add.add_argument("--ehp", type=float, help="effective hitpoints, for the risk read")
+    profile_add.add_argument("--value", type=float, help="hull value in ISK, exposure if ganked")
+    profile_add.add_argument("--seconds-per-jump", type=float)
+    profile_add.add_argument("--handling-minutes", type=float)
+    profile_sub.add_parser("list", help="every stored ship profile")
+    profile_remove = profile_sub.add_parser("remove", help="operator action, the only removal path")
+    profile_remove.add_argument("--name", required=True)
+
+    haul_record = haul_sub.add_parser(
+        "record", help="paper hauls: what you took, what you passed, and why"
+    )
+    record_sub = haul_record.add_subparsers(dest="record_command", required=True)
+    record_open = record_sub.add_parser("open", help="record a haul you are taking")
+    record_open.add_argument("--type-id", type=int)
+    record_open.add_argument("--name", help="type name, resolved against the SDE")
+    record_open.add_argument("--quantity", type=float, required=True)
+    record_open.add_argument("--source", type=int, help="source station id")
+    record_open.add_argument("--dest", type=int, help="destination station id")
+    record_open.add_argument("--cost", type=float, help="ISK committed at the source")
+    record_open.add_argument("--expected-net", type=float, help="what the scan said it would net")
+    record_open.add_argument("--jumps", type=int)
+    record_open.add_argument(
+        "--thesis", required=True, help="why — one sentence you can argue with"
+    )
+    record_open.add_argument(
+        "--like",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help="from config/reasons.jsonl (repeatable; at least one required)",
+    )
+    record_open.add_argument("--reason-text", default="")
+    record_close = record_sub.add_parser("close", help="record what the haul really paid")
+    record_close.add_argument("--haul-id", required=True)
+    record_close.add_argument("--proceeds", type=float, help="ISK actually received, net of tax")
+    record_close.add_argument("--cost", type=float, help="ISK actually paid, if it differed")
+    record_close.add_argument("--note", default="")
+    record_pass = record_sub.add_parser("pass", help="record a haul you deliberately did not take")
+    record_pass.add_argument("--type-id", type=int)
+    record_pass.add_argument("--name")
+    record_pass.add_argument("--action", choices=("not_today", "bad_signal"), default="not_today")
+    record_pass.add_argument(
+        "--dislike",
+        action="append",
+        default=[],
+        metavar="TAG",
+        help="from config/reasons.jsonl (repeatable; at least one required)",
+    )
+    record_pass.add_argument("--reason-text", default="")
+    record_pass.add_argument("--source", type=int)
+    record_pass.add_argument("--dest", type=int)
+    record_sub.add_parser("report", help="the tally: refusals first")
+
     sub.add_parser("report", help="regenerate the viability report (plan.md §16)")
 
     sub.add_parser(
@@ -1027,6 +1130,232 @@ def _cmd_gui(config: Config, args) -> int:
     return run_desk(config)
 
 
+def _resolve_system(db, name: str | None, system_id: int | None) -> int | None:
+    """`--from-id` wins; a name resolves loudly or not at all (never a guess)."""
+    if system_id is not None:
+        return int(system_id)
+    if not name:
+        return None
+    row = db.system_by_name(name)
+    if row is None:
+        raise ConfigError(
+            f"no solar system named {name!r} in the SDE — run `sde` first, or check the spelling"
+        )
+    return int(row["solar_system_id"])
+
+
+def _ship_profile(config: Config, db, args):
+    """The ship this scan is for: a saved profile, flags, or a loud refusal."""
+    from .hauling import ShipProfile
+
+    ship = None
+    if getattr(args, "ship", None):
+        row = db.haul_profile(args.ship)
+        if row is None:
+            names = [entry["name"] for entry in db.haul_profiles()]
+            raise ConfigError(
+                f"no ship profile named {args.ship!r}; stored: {names or 'none'} — "
+                "add one with `haul profile add`"
+            )
+        ship = ShipProfile.from_row(row)
+    if ship is None:
+        if args.cargo is None:
+            raise ConfigError(
+                "give --cargo or --ship: cargo is what caps the size, and guessing it "
+                "would rank plans you cannot actually carry"
+            )
+        ship = ShipProfile.from_config(config, name="ad hoc", cargo_m3=args.cargo)
+    overrides = {}
+    if args.cargo is not None:
+        overrides["usable_cargo_m3"] = float(args.cargo)
+    if args.seconds_per_jump is not None:
+        overrides["seconds_per_jump"] = float(args.seconds_per_jump)
+    if args.handling_minutes is not None:
+        overrides["handling_minutes"] = float(args.handling_minutes)
+    if overrides:
+        from dataclasses import replace as _replace
+
+        ship = _replace(ship, **overrides)
+    return ship
+
+
+def _cmd_haul(config: Config, args) -> int:
+    from .hauling import HaulProfile, scan_hauls, scan_inputs
+    from .haulledger import HaulLedger, HaulRefusal
+    from .haulreport import build_haul_report, render_haul_report, write_haul_report
+    from .routes import RouteCache
+
+    paths = config.paths.ensure()
+    with _open_db(config) as db:
+        if args.haul_command == "profile":
+            return _cmd_haul_profile(config, db, args)
+        if args.haul_command == "record":
+            ledger = HaulLedger(paths.paper_hauls, config)
+            try:
+                return _cmd_haul_record(db, ledger, args)
+            except HaulRefusal as refusal:
+                print(f"REFUSED: {refusal}", file=sys.stderr)
+                print("The refusal is recorded in the ledger; it is a result, not a crash.")
+                return 3
+
+        try:
+            ship = _ship_profile(config, db, args)
+            current = _resolve_system(db, args.current_system, args.current_system_id)
+            intended = _resolve_system(db, args.intended_destination, args.intended_destination_id)
+        except ConfigError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+        overrides = {"current_system": current, "intended_destination": intended, "mode": args.mode}
+        for flag, key in (
+            ("capital", "capital_isk"),
+            ("exposure", "max_exposure_isk"),
+            ("minutes", "session_minutes"),
+            ("max_wait_days", "max_wait_days"),
+            ("max_jumps", "max_jumps"),
+            ("security", "security_profile"),
+            ("objective", "objective"),
+        ):
+            value = getattr(args, flag, None)
+            if value is not None:
+                overrides[key] = value
+        overrides = {key: value for key, value in overrides.items() if value is not None}
+
+        try:
+            profile = HaulProfile.from_config(config, ship=ship, **overrides)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+        stations, depths, graph, names, badges, packaged = scan_inputs(config, db)
+        scan = scan_hauls(
+            config,
+            profile,
+            stations=stations,
+            depths=depths,
+            graph=graph,
+            route_cache=RouteCache(db, enabled=config.routes.cache),
+            names=names,
+            badges=badges,
+            packaged_volume=packaged,
+        )
+        report = build_haul_report(scan, config=config)
+
+    if not args.no_write:
+        json_path, md_path = write_haul_report(config, report)
+    print(render_haul_report({**report, "rows": report["rows"][: args.top]}))
+    if args.show_rejected:
+        print("\n## Rejected candidates\n")
+        for rejection in scan.rejected[:200]:
+            print(
+                f"- `{rejection.reason}` {rejection.type_name or rejection.type_id or ''} "
+                f"{rejection.source_station or ''}→{rejection.dest_station or ''} "
+                f"{rejection.detail}"
+            )
+    if not args.no_write:
+        print(f"\nwritten: {json_path}\n         {md_path}")
+    return 0
+
+
+def _cmd_haul_profile(config: Config, db, args) -> int:
+    from .timeutil import iso, utcnow
+
+    if args.profile_command == "add":
+        # An omitted flag stores the configured default explicitly rather than
+        # NULL: a profile that reads back 0 seconds per jump would price every
+        # trip as instantaneous.
+        db.put_haul_profile(
+            {
+                "name": args.name,
+                "usable_cargo_m3": float(args.cargo),
+                "ehp": args.ehp,
+                "ship_value_isk": args.value,
+                "seconds_per_jump": (
+                    args.seconds_per_jump
+                    if args.seconds_per_jump is not None
+                    else config.hauling.default_seconds_per_jump
+                ),
+                "handling_minutes": (
+                    args.handling_minutes
+                    if args.handling_minutes is not None
+                    else config.hauling.default_handling_minutes
+                ),
+                "created_at": iso(utcnow()),
+            }
+        )
+        print(json.dumps({"stored": args.name, "usable_cargo_m3": args.cargo}, indent=2))
+        return 0
+    if args.profile_command == "remove":
+        if db.delete_haul_profile(args.name):
+            print(f"removed {args.name!r} — an operator action, the only removal path")
+            return 0
+        print(f"no ship profile named {args.name!r}", file=sys.stderr)
+        return 1
+    rows = [dict(row) for row in db.haul_profiles()]
+    if not rows:
+        print("no ship profiles yet — add one with `haul profile add`")
+        return 0
+    print(json.dumps(rows, indent=2, default=str))
+    return 0
+
+
+def _cmd_haul_record(db, ledger, args) -> int:
+    from .haulledger import render_haul_tally
+
+    if args.record_command == "report":
+        print(render_haul_tally(ledger.tally()))
+        return 0
+    if args.record_command == "close":
+        print(
+            json.dumps(
+                ledger.record_close(
+                    haul_id=args.haul_id,
+                    actual_proceeds_isk=args.proceeds,
+                    actual_cost_isk=args.cost,
+                    note=args.note,
+                ),
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
+    type_id = _resolve_type_id(db, args)
+    if type_id is None:
+        return 2
+    row = db.type_by_id(type_id)
+    name = row["name"] if row else None
+    if args.record_command == "open":
+        record = ledger.record_open(
+            type_id=type_id,
+            type_name=name,
+            quantity=args.quantity,
+            source_station=args.source,
+            dest_station=args.dest,
+            thesis=args.thesis,
+            like_tags=args.like,
+            reason_text=args.reason_text,
+            expected_cost_isk=args.cost,
+            expected_net_isk=args.expected_net,
+            route_jumps=args.jumps,
+            vocabulary=_vocabulary(),
+        )
+    elif args.record_command == "pass":
+        record = ledger.record_pass(
+            type_id=type_id,
+            type_name=name,
+            action=args.action,
+            dislike_tags=args.dislike,
+            reason_text=args.reason_text,
+            source_station=args.source,
+            dest_station=args.dest,
+            vocabulary=_vocabulary(),
+        )
+    else:  # pragma: no cover - argparse restricts the set
+        record = {}
+    print(json.dumps(record, indent=2, default=str))
+    return 0
+
+
 def _cmd_report(config: Config, args) -> int:
     from .paper import PaperLedger
     from .report import build_viability_report, render_viability, write_viability
@@ -1179,6 +1508,7 @@ HANDLERS = {
     "reasons": _cmd_reasons,
     "learning": _cmd_learning,
     "anchors": _cmd_anchors,
+    "haul": _cmd_haul,
     "report": _cmd_report,
     "gui": _cmd_gui,
     "daemon": _cmd_daemon,

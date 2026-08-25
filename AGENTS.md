@@ -86,7 +86,7 @@ files — `config/sectors.jsonl`, `config/setups.jsonl`, `config/reasons.jsonl`;
 SQLite `state.db` + JSONL streams under `./data/`. Entry:
 `python -m evescreener <selftest|sde|census|ingest-history|sweep-books|anchors|
 screen|digest|backtest|killmails|cross-region|paper|watch|brief|board|scan|
-setups|reasons|learning|gui|report|daemon>`, or `launch_gui.py` for a Windows
+setups|reasons|learning|haul|gui|report|daemon>`, or `launch_gui.py` for a Windows
 shortcut. All timestamps tz-aware UTC.
 
 ## Commands (gate before every commit)

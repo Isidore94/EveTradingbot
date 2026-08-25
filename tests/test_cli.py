@@ -245,3 +245,114 @@ def test_forcing_utf8_tolerates_a_stream_that_cannot_reconfigure(monkeypatch):
     monkeypatch.setattr(sys, "stdout", Bare())
     monkeypatch.setattr(sys, "stderr", Bare())
     _force_utf8_console()
+
+
+# -- §23: the haul surface --------------------------------------------------
+
+
+def test_the_haul_command_is_wired_with_its_three_verbs():
+    assert "haul" in HANDLERS
+    parser = build_parser()
+    for verb in ("scan", "profile", "record"):
+        assert parser.parse_args(["haul", verb, *_verb_args(verb)]).haul_command == verb
+
+
+def _verb_args(verb: str) -> list[str]:
+    return {
+        "scan": ["--cargo", "60000"],
+        "profile": ["list"],
+        "record": ["report"],
+    }[verb]
+
+
+def test_haul_requires_a_subcommand():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["haul"])
+
+
+def test_a_haul_scan_with_no_ship_refuses_rather_than_guessing_a_hold(
+    tmp_path, monkeypatch, capsys
+):
+    """Cargo is what caps the size. A guessed hold ranks plans you cannot carry."""
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "haul", "scan"]) == 2
+    assert "give --cargo or --ship" in capsys.readouterr().err
+
+
+def test_a_haul_scan_on_an_empty_lake_is_an_honest_zero(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "haul", "scan", "--cargo", "60000", "--no-write"]) == 0
+    out = capsys.readouterr().out
+    assert "Nothing clears costs today" in out
+    assert "STALE_BOOK" in out, "the refusals are the denominator, and they are printed"
+
+
+def test_a_haul_scan_writes_an_immutable_report(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "haul", "scan", "--cargo", "60000"]) == 0
+    reports = sorted((tmp_path / "data" / "reports").glob("hauling-*.json"))
+    assert len(reports) == 1
+    assert "written:" in capsys.readouterr().out
+
+
+def test_ship_profiles_round_trip_through_the_state_database(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert (
+        main(
+            ["--example-config", "haul", "profile", "add", "--name", "Bestower", "--cargo", "6000"]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert main(["--example-config", "haul", "profile", "list"]) == 0
+    listed = capsys.readouterr().out
+    assert "Bestower" in listed
+    # An omitted flag stores the configured default, never a NULL that would
+    # read back as an instantaneous jump.
+    assert '"seconds_per_jump": 55.0' in listed
+    assert main(["--example-config", "haul", "profile", "remove", "--name", "Bestower"]) == 0
+    assert main(["--example-config", "haul", "profile", "remove", "--name", "Bestower"]) == 1
+
+
+def test_a_scan_naming_an_unknown_ship_says_which_ones_exist(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "haul", "scan", "--ship", "Charon"]) == 2
+    assert "no ship profile named 'Charon'" in capsys.readouterr().err
+
+
+def test_an_unresolvable_origin_system_is_a_loud_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    code = main(["--example-config", "haul", "scan", "--cargo", "1", "--from", "Jitta"])
+    assert code == 2
+    assert "no solar system named 'Jitta'" in capsys.readouterr().err
+
+
+def test_a_refused_haul_record_exits_three_and_says_it_was_recorded(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    code = main(
+        [
+            "--example-config",
+            "haul",
+            "record",
+            "open",
+            "--type-id",
+            "34",
+            "--quantity",
+            "1200",
+            "--thesis",
+            "the Amarr bid is over the Jita ask",
+        ]
+    )
+    assert code == 3
+    captured = capsys.readouterr()
+    assert "REFUSED" in captured.err
+    assert "recorded in the ledger" in captured.out
+    assert (tmp_path / "data" / "streams" / "paper_hauls.jsonl").exists()
+
+
+def test_the_haul_tally_leads_with_refusals(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "haul", "record", "report"]) == 0
+    out = capsys.readouterr().out
+    assert "refused: **0**" in out
+    assert "UNKNOWN" in out

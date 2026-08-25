@@ -59,7 +59,15 @@ def desk_input_key(config, region_id: int, *, root: Path | None = None) -> tuple
     paths = config.paths
     parts: list[tuple] = [("region", int(region_id))]
 
-    for directory, pattern in ((paths.bars, "**/*.parquet"), (paths.books, "**/*.parquet")):
+    for directory, pattern in (
+        (paths.bars, "**/*.parquet"),
+        (paths.books, "**/*.parquet"),
+        # H1b's depth generations and H2's stored scans. A page that reads a
+        # file the key does not watch keeps painting a generation the lake has
+        # already replaced (§22 S3).
+        (paths.depth, "**/*.parquet"),
+        (paths.reports, "hauling-*.json"),
+    ):
         try:
             found = sorted(Path(directory).glob(pattern))
         except OSError:

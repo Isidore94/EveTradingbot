@@ -5,6 +5,59 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — §23 H2: the engine, the report, the `haul` CLI and the page
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **982 passed, 7
+deselected**, ruff check + format clean, `selftest` **12/12**. **Not
+LIVE_VALIDATED**: no plan this ranks has been flown, and no ladder has been
+compared to a market window.
+
+- **`hauling.py` ranks (item, source, destination, quantity) plans** against
+  the operator's own constraints. Candidate sizes are **every cumulative
+  breakpoint of both books**, capped by capital, exposure and cargo — between
+  two breakpoints the marginal price does not move, so the best plan in an
+  interval is always at one of its ends, and the whole quantity space reduces
+  to a handful of numbers.
+- **§23.17's worked example passes end to end**, from synthetic sweeps through
+  `reduce_depth` to the ranked plan: 1,200 units, 102,416.67 / 117,375 WAPs,
+  4,753,687.50 tax, **13,196,312.50** net, **10.74%** ROI.
+- **Both generations are pinned on every row and the older one decides.** A
+  row joining a 15-minute-old book to a 200-minute-old one reports 200, and if
+  either region is stale the pair prices **nothing** — not the fresh leg, not a
+  partial row. It renders as an UNKNOWN row carrying its reason.
+- **The rejection vocabulary is enforced and queryable.** Thirteen reasons,
+  every rejected candidate carrying exactly one, and a histogram on the page,
+  in the report and in the CLI output. "Nothing cleared" now comes with its
+  denominator.
+- **The last chunk has to pay for itself.** `MARGINAL_NET_NEGATIVE` is what
+  stops the ranker choosing the largest fillable size: somewhere the book stops
+  rewarding volume, and the objective's chosen quantity is recorded beside what
+  max-profit, max-ROI and max-ISK/m³ would have picked when they differ.
+- **A blocked route says which kind of blocked.** A pair with no route at all
+  is `NO_ROUTE`; one the operator's own security profile refuses is
+  `ROUTE_BLOCKED_SECURITY`, which is a fact he can act on.
+- **`haulreport.py` writes the immutable artefact** — profile, generations, SDE
+  build, calc version `haul-1`, every walk's consumed levels, the fee
+  arithmetic, the route decomposition, why-this-size, and the rejected set —
+  atomically, under a colon-free filename a Windows desktop can hold.
+- **`haul scan | profile | record`** joins the CLI, additively. `profile`
+  stores ship profiles in `state.db` (an omitted flag stores the configured
+  default rather than a NULL that would read back as an instantaneous jump);
+  `record` is the paper-haul ledger, which requires a thesis and a like tag to
+  open and a dislike tag to pass, and **writes the refusal itself** — §22 S7's
+  defect, not repeated.
+- **A scan with no ship refuses rather than guessing a hold.** Cargo is what
+  caps the size; a guessed hold ranks plans the operator cannot carry.
+- **The HAULING page** sits after SPREADS, `heavy = True`, computing in the
+  PageJob worker off local data only. Control strip with system autocomplete,
+  ship picker, capital/exposure/minutes/max-jumps/security/objective, filters
+  remembered in `state.db`'s `meta` table (never `config.toml`, which is the
+  hand-edited contract of §11 D1). Detail drawer: both ladders with the levels
+  consumed, the breakpoint table, the route's systems, the fee audit, the
+  liquidity pane and the rejected view with its reason codes.
+- **`desk_input_key` now watches depth partitions and stored hauling reports**,
+  so the desk cannot keep painting a generation the lake has replaced.
+
 ## 2026-08-25 — §23 H1b: what 1,200 units really cost, at one station
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **929 passed, 7

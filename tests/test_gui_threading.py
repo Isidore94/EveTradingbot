@@ -113,7 +113,7 @@ def test_every_page_declares_which_kind_it_is():
     from evescreener.gui.pages import PAGES
 
     heavy = {title for title, factory in PAGES if factory.heavy}
-    assert heavy == {"BOARD", "SCANNER", "TOP", "SPREADS", "LEARNING"}
+    assert heavy == {"BOARD", "SCANNER", "TOP", "SPREADS", "HAULING", "LEARNING"}
     for _title, factory in PAGES:
         assert issubclass(factory, DeskPage)
 

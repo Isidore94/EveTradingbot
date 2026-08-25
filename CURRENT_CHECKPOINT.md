@@ -13,6 +13,24 @@ Everything is **IMPLEMENTED + GREEN**. Nothing is `LIVE_VALIDATED`, and
 nothing may be promoted to real ISK until the checklist below is worked
 through.
 
+### Queued after this gate — personalized HAULING (§23)
+
+The operator's 2026-08-25 request has been researched and recorded in
+`plan.md` §23. It is **PLANNED ONLY**: no application code, configuration,
+schema, page or phase state changed. It remains behind every active live gate.
+Its first action is H0 — compare EVE Flipper/EVE Profits and the existing
+cross-region report on identical real scenarios — so implementation stops
+before H1 if the existing tools already answer the question adequately.
+
+The future page is additive and dedicated to trading/hauling. Manual current
+system is an MVP input, with sortable pickup, haul, total and intended-route
+detour distance; existing station-trading and desk behaviour remain unchanged.
+
+**Planning verification stamp (2026-08-25):** Markdown/control documents only;
+`uv run pytest -q` — **850 passed, 7 deselected**; ruff check and format check
+clean; `git diff --check` clean. No Python, configuration, schema or fixture
+changed.
+
 **The system already has an answer to the question it was built for, and it is
 a negative one.** Measured on the full lake — 3,116,848 bars, 2,654 tracked
 types, 108,441 setup instances:

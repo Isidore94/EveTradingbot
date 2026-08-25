@@ -1633,6 +1633,11 @@ clearing at 0.25B, best +13.63%. The tab must carry the caveat the CLI
 carries — **those are simultaneous snapshots for a haul that takes days** —
 visibly, not in a footnote.
 
+The operator's 2026-08-25 request expands this queued surface into a separate,
+personalized hauling decision tab. The researched product and technical
+contract is §23. It remains queued behind the active live-validation gate; §23
+does not change any existing page, scanner, recommendation, or frozen formula.
+
 ### §20.5 — ALERTS + ntfy
 
 Rule store, evaluation on refresh and in the daemon, dedupe state so one
@@ -2470,3 +2475,694 @@ mistake with fresher numbers.
 **Owed live gate (§22 S8).** Run the TOP measurement report on the operator's
 lake and commit its output under `data/reports/`, so §20.3's prose can cite a
 dated artefact instead of a floating number.
+
+---
+
+## §23 — Personalized trading and hauling decision tab (researched 2026-08-25; QUEUED)
+
+**Status: RESEARCHED + PLANNED ONLY. No product code exists.** This is the
+expanded specification for queued §20.4, written from CCP documentation and a
+current competitor review as of August 2026. It must not begin until the active
+paper/live-validation checkpoint is closed. It is an additive `HAULING` rail
+page; the existing DESK, SCANNER, SPREADS, PAPER, cross-region CLI, formulas,
+data contracts and recommendations remain unchanged.
+
+The operator's target question is:
+
+> Given my current capital, ship, cargo capacity, location, available time and
+> risk tolerance, what are the best trades I can execute right now?
+
+“From me” is part of the economic problem, not a cosmetic filter. Every result
+must distinguish pickup distance (`current system -> source`), haul distance
+(`source -> destination`), total travel, and — when the operator already plans
+to travel somewhere — the *incremental detour* over that baseline trip.
+
+### §23.1 — Executive summary
+
+Do **not** build a general EVE market website or a second station-trading
+scanner. Adam4EVE, EVE Tycoon, EVE Profits, Trading Matrix and especially the
+open-source EVE Flipper already solve large parts of market browsing, hub
+comparison, cargo packing, order tracking and basic arbitrage. Building those
+again would consume time without creating an advantage.
+
+A narrow addition to this repository can still be worthwhile because most of
+the expensive primitives already exist here: expiry-safe ESI ingestion,
+validated atomic book generations, executable-location logic, depth walking at
+fixed tiers, cost models, history bars, packaged volume, staleness semantics,
+paper evidence, the local-only PySide desk, and cross-region scans. The missing
+product is a *personal trip optimizer* that combines those facts with:
+
+- current system and optional intended destination;
+- capital available now and maximum exposure per item/trip;
+- a saved ship profile (cargo, EHP, ship value and observed seconds/jump);
+- security constraints, pickup distance, haul distance and detour;
+- arbitrary-size station-specific depth rather than three fixed notionals;
+- conservative liquidation intervals and explicit data reliability; and
+- a default rank of conservative net ISK per active minute, with ROI,
+  ISK/m³ and ISK-days shown separately.
+
+The first useful release is deliberately smaller than the full request:
+manual location and ship inputs, five NPC trade hubs, high-sec static-gate
+routes, immediate source-ask to reachable destination-bid execution, exact
+depth within configured bounds, and a separate `HAULING` page. This mode has
+no speculative liquidation assumption: current destination bid depth either
+covers the proposed quantity or the row is not executable. Maker resale,
+regional distribution, route-aligned opportunistic hauling and read-only SSO
+follow only if the immediate-execution MVP changes decisions in a shadow test.
+
+### §23.2 — Current EVE trading-tool landscape
+
+The research standard is “what does the tool already do well?”, not “how can
+we describe it as incomplete?”
+
+| Tool | What it already does well | Consequence for this build |
+|---|---|---|
+| [Adam4EVE](https://www.adam4eve.eu/market_orders.php) | Deep public-market exploration: item/location filters, distance and security constraints, current orders, depth, age and long historical views. | Do not rebuild a universal market browser or a richer generic chart site. Link/reference it for broad investigation. |
+| [EVE Tycoon](https://evetycoon.com/market) | Strong market browser plus authenticated multi-character wallet, order and profit tracking; useful price/volume and competitor views. | Character accounting is not an MVP differentiator. Add it only when it removes manual input from a proven hauling workflow. |
+| [EVE Profits](https://eveprofits.com/updates) | Free five-hub comparisons, budget-aware trading, net-margin tools and June 2026 cargo-aware hub hauling that packs a hold by profit/m³. | Generic Jita/Amarr cargo packing already exists. We must beat it on executable depth, current-location pickup/detour, risk constraints or workflow time. |
+| [Trading Matrix](https://forums.eveonline.com/t/tool-trading-matrix-the-ultimate-market-arbitrage-sync-tool-web-pc/507278) | Integrated desktop/web hub and custom-station scans, filters, favourites, history, SSO order/outbid tracking and FIFO profit history. | Do not duplicate its broad trading cockpit. Preserve this repository's local, evidence-first focus. |
+| [EVE Flipper](https://github.com/ilyaux/Eve-flipper) | The closest competitor: local/open-source station and regional scans, radius and route opportunities, VWAP/depth walking, cargo/travel/ISK-hour estimates, liquidity/confidence ideas, gank-risk heuristics, optional read-only character data and SQLite history. | The proposed feature is not unique. Trial this tool before H1 and compare the same routes/results. If it answers the operator's question adequately, stop. |
+| [EVE Console](https://docs.eveconsole.com/tools/trade-opportunities/) | Station-to-station opportunities, budget/cargo shopping lists, profit/m³ and volume filters with clearly stated snapshot limitations. | A shopping-list screen alone is commodity functionality. |
+| [eve-meta](https://www.eve-meta.com/) | Current-location, wallet percentage, max-jump and current-ship/cargo-aware opportunity filtering. | “Distance from me” is useful but not novel; the custom case must include total/detour time and integrate with this bot's validated data. |
+
+Competitor claims are inputs to a trial, not trusted calculation contracts.
+Before implementation, run the same twenty candidate trips through EVE
+Flipper, EVE Profits and the current `cross-region` report; record freshness,
+prices, quantities, fees, routes and the action each tool recommends. This is
+the H0 benchmark and the first kill gate.
+
+### §23.3 — Available data/API capabilities and limitations
+
+CCP's [ESI overview](https://developers.eveonline.com/docs/services/esi/overview/)
+and API Explorer remain the route/schema authority. The relevant feeds are:
+
+| Need | ESI/SDE source | Authentication | What it can and cannot prove |
+|---|---|---|---|
+| Current regional orders | `GET /markets/{region_id}/orders` | Public | Price, remaining/total quantity, side, type, location, buy range/minimum, issue time and duration. It is a snapshot, not a transaction tape; issue time is not last-reprice time and does not reveal queue fills. |
+| Daily price/volume history | `GET /markets/{region_id}/history?type_id=...` | Public | Regional daily average/high/low, units and order count. It is not station-specific, has no buy/sell split, no individual trades and no historical order book. There is no `open`; this repo's frozen bar contract remains unchanged. |
+| Region-active types/global reference prices | `/markets/{region_id}/types`, `/markets/prices` | Public | Universe discovery/reference only; adjusted/average global prices are not executable quotes. |
+| Routes | `POST /route/{origin}/{destination}` | Public | Occasional Shorter/Safer/LessSecure routes. CCP recommends a local graph for many calculations. |
+| Systems, stations and names | `/universe/systems`, `/universe/stations`, `/universe/names` | Public | Identity and public metadata. NPC hubs are the MVP execution venues. |
+| Static map/type data | JSONL SDE: `types`, `mapSolarSystems`, `mapStargates`, NPC stations | Public download | Packaged volume, gate graph, names, coordinates and system security. CCP documents security in `mapSolarSystems` and stargate edges in `mapStargates`. |
+| Current character location/ship type | character location and ship routes | EVE SSO; `esi-location.read_location.v1`, `esi-location.read_ship_type.v1` | Can prefill location and ship type later. It does not reliably provide the current fitted cargo capacity or EHP, so a saved manual ship profile remains authoritative. |
+| Personal orders | character orders and order history | EVE SSO; `esi-markets.read_character_orders.v1` | Open/history for the operator's character, not competitors' fill histories. Useful for exposure and later calibration. |
+| Wallet/transactions | character wallet balance, journal and transactions | EVE SSO; `esi-wallet.read_character_wallet.v1` | Can replace manual capital and support realised P&L later. It does not make public opportunity data more current. |
+| Assets | character assets | EVE SSO; `esi-assets.read_assets.v1` | Existing inventory and capital-at-risk; not needed to prove the public-data MVP. |
+
+Authentication is unnecessary through the MVP. If H5 is authorized, use the
+current JWT/OIDC v2 flow — CCP removed legacy v1 tokens in May 2025 — request
+only the read scopes above, and re-check every scope in the API Explorer at
+implementation time. No order creation, waypoint-writing, client-control or
+other acting scope is permitted by §4/§10/§11.
+
+Important missing facts must stay visible:
+
+- Public ESI cannot say who bought or sold, how quickly a competing order
+  filled, how many times it was relisted, the exact queue position, or future
+  demand.
+- Regional history cannot directly estimate demand at one small station.
+- The visible book can change during travel; simultaneous snapshots are not
+  forward guarantees.
+- Player structures may have access/docking and visibility constraints.
+  MVP therefore prices configured NPC stations only.
+- Cargo capacity, align/warp performance and EHP depend on the current fit.
+  Manual observed profiles are more honest than pretending a ship type ID is
+  the fit.
+- Public order `issued` supports displayed order age, but not “time since last
+  modified.” The UI must label it accordingly.
+
+### §23.4 — Proposed trading strategies
+
+Each strategy is a separate execution model. Rows from different models must
+not be mixed under one unlabeled score.
+
+1. **Hub-to-hub immediate arbitrage (MVP).** Buy from actual asks at a
+   configured source NPC station and immediately-value the exit against buy
+   orders reachable from the configured destination station. Walk depth on
+   both sides, pay sales tax, and reject quantities not covered by current
+   destination depth. This is the most falsifiable starting point.
+
+2. **Regional distribution (post-MVP).** Buy at a major hub, haul to a smaller
+   NPC station or staging/mission/industrial system, then post a sell order.
+   This may be economically more interesting than five-hub arbitrage, but the
+   exit is speculative. It must display queue-ahead volume, broker/relist
+   costs, a liquidation interval and downside-to-current-bid beside the
+   optimistic list-price scenario.
+
+3. **Station trading.** The existing SPREADS page already measures maker
+   station opportunities. HAULING may link to it and later subtract inventory
+   already listed by the alt, but must not create a second station-trading
+   implementation.
+
+4. **Opportunistic hauling along an intended route.** The operator supplies
+   current system and intended destination. Compare a trade route against the
+   no-trade baseline and rank by *incremental* jumps/minutes:
+   `current -> pickup -> drop-off -> intended destination` minus
+   `current -> intended destination`. Travel the player was already going to
+   do is not charged to the opportunity; the detour is.
+
+5. **Later extensions.** Reverse/return cargo, a multi-item trip basket,
+   owned-inventory redistribution, and “self-haul versus PushX” comparison are
+   plausible. Contracts, wormholes, Ansiblex routing, universal player
+   structures and multi-stop travelling-salesman tours are explicitly outside
+   the first product.
+
+### §23.5 — Scanner calculations
+
+For quantity `q`, all prices are execution-mode specific and derived from one
+validated book generation:
+
+```text
+source_cost(q)     = sum(source ask price_i * filled quantity_i)
+source_wap(q)      = source_cost(q) / q
+gross_sale(q)      = sum(reachable destination bid_i * filled quantity_i)
+destination_wap(q) = gross_sale(q) / q
+gross_spread_isk   = gross_sale(q) - source_cost(q)
+gross_margin_pct   = gross_spread_isk / source_cost(q)
+net_profit(q)      = sale proceeds after applicable tax/fees
+                     - source cost - freight (if used) - explicit relist costs
+net_roi_pct        = net_profit(q) / capital_committed(q)
+profit_per_m3      = net_profit(q) / (q * packaged_volume_m3)
+capital_turnover   = net_profit(q) / (capital_committed * holding_days)
+profit_per_minute  = conservative_net_profit / active_player_minutes
+```
+
+Immediate marketable buys/sells and posted maker orders have different CCP fee
+paths. A non-immediate posted order pays the effective broker fee; a completed
+sale pays sales tax; a relist pays the current relist formula. The official
+[broker/tax documentation](https://support.eveonline.com/hc/en-us/articles/203218962-Broker-Fee-and-Sales-Tax)
+currently gives 3% base NPC broker fee (reduced by Broker Relations and
+standings, floor 1%) and 7.5% base sales tax (reduced by Accounting). Production
+continues to prefer operator-observed station overrides under §22 S6.
+
+Every result stores/displays at least:
+
+- source/destination, source WAP, destination WAP or maker scenario price;
+- gross spread, net spread/margin, fees/tax/freight and downside case;
+- quantity, capital, expected/conservative net profit and ROI;
+- current visible depth consumed, marginal next price and competing orders;
+- packaged cargo, profit/m³ and capacity utilization;
+- median/recent regional units, price/volume trends and position participation;
+- pickup/haul/total/detour jumps, minimum security and active-time estimate;
+- liquidation interval (or `immediate depth covered`), ISK-days and
+  concentration;
+- data age, book generation, assumptions, UNKNOWN reasons and reliability.
+
+Useful additions missing from the original list are: marginal profit on the
+last unit/chunk, downside liquidation value to current bids, capacity
+utilization, route detour versus baseline, book snapshot persistence,
+concentration by item/group/destination, structure/access status, and a full
+calculation/audit explanation.
+
+### §23.6 — Order-book execution model
+
+The current three fixed notional tiers are insufficient for arbitrary capital
+and cargo. Preserve `book_summary` for all existing consumers and add an
+optional, station-scoped **price-level curve**, not raw orders:
+
+```text
+book_depth:
+  generation_id, fetched_at, expires_at,
+  region_id, execution_location_id, type_id, side,
+  price, level_qty, cumulative_qty, cumulative_notional,
+  level_order_count, oldest_issued, newest_issued,
+  is_structure, depth_complete
+```
+
+For source acquisition, include only sell orders located at the source
+station, sorted ascending. For an immediate destination exit, include buy
+orders executable from the destination station — local plus remote orders
+whose range actually reaches it — sorted descending. Aggregate identical
+prices but retain order count and age bounds. Persist levels only for
+configured execution nodes and only until the configured maximum scan
+capital/cargo plus a safety margin; if the proposed quantity reaches the
+stored boundary, depth is UNKNOWN rather than extrapolated.
+
+The fill walk for each side is:
+
+```text
+remaining = q
+value = 0
+for price_level in economically_best_to_worst:
+    take = min(remaining, level_qty)
+    value += take * price
+    remaining -= take
+    if remaining == 0: break
+if remaining > 0: quantity is not executable
+```
+
+Position candidates occur at every source or destination cumulative-depth
+break, plus budget, cargo, exposure and liquidity caps. Evaluate those
+breakpoints; never interpolate through a missing price level and never assume
+unlimited stock at the best quote.
+
+A maker destination is not another symmetric depth walk. It is a proposed
+listing price with queue-ahead units/orders, broker fee, relist assumptions
+and a current-bid downside. It must never be described as “expected sale WAP”
+until operator fill data supports that language.
+
+### §23.7 — Liquidity model
+
+There are two honest cases:
+
+- **Immediate destination-bid exit:** liquidation is executable against the
+  current snapshot for `q`; model travel/book-change risk, not a fictional
+  multi-day fill probability.
+- **Posted destination sell:** ESI cannot reveal station-specific future
+  demand or queue fills. Report a range driven by explicit assumptions, not a
+  precise probability.
+
+For a posted sale, calculate robust regional observations over completed bars:
+median daily units, lower/upper quantiles, recent/long median ratio, zero/missing
+days, price dispersion, drawdown, and order-count stability. Estimate a
+destination share only after local book snapshots exist; until then, show the
+regional result and mark station share UNKNOWN. When share data exists:
+
+```text
+sellable_units_per_day_scenario =
+    regional_daily_units_quantile
+    * estimated_destination_share
+    * assumed_queue_capture_share
+
+liquidation_days_scenario = q / sellable_units_per_day_scenario
+```
+
+Use transparent low/base/high capture-share priors initially (configuration,
+not fitted truth), then replace or calibrate them only from the operator's own
+orders. Book persistence and repeated queue-ahead observations may widen or
+narrow the interval; they do not identify actual transactions.
+
+Competition inputs are units and orders priced ahead/equal, price-level churn
+between local snapshots, and concentration in the largest order. Price risk
+inputs are robust daily range/return volatility, recent trend, drawdown and
+the difference between proposed maker price and immediate bid value.
+
+`reliability` is a data-quality grade, **not probability of profit**. It
+combines snapshot completeness/freshness, price-level coverage, completed-bar
+freshness/sample size, station-share availability, route-data availability and
+book persistence. UNKNOWN always fails a hard gate.
+
+### §23.8 — Position-sizing model
+
+Apply constraints before optimization:
+
+```text
+q <= source executable quantity
+q <= destination executable quantity                 # immediate mode
+source_cost(q) <= available capital
+source_cost(q) <= per-trade exposure cap
+q * item_volume <= usable cargo
+q <= configured share of conservative daily volume   # maker mode
+liquidation_high_days <= maximum wait                 # maker mode
+route/security/concentration gates pass
+marginal net profit of the final chunk > 0
+```
+
+For a single row, evaluate every feasible depth breakpoint and select the
+quantity that maximizes the chosen objective, defaulting to conservative net
+ISK per active minute subject to the caps. Also expose “max net profit,” “max
+ROI,” and “max ISK/m³” quantities because they can differ. Position size must
+fall when worse source asks or destination bids make the marginal chunk
+unprofitable.
+
+For a mixed cargo plan, convert each item curve into marginal chunks between
+breakpoints. H2 may use a deterministic greedy pack by conservative
+profit/m³, with capital and exposure checks after each chunk; it must be
+labelled heuristic and compared against the best single-item plan. A later
+bounded dynamic program is justified only if real candidate sets show the
+greedy method leaves meaningful profit unused.
+
+Capital committed includes purchase cost and unavoidable fees. Capital
+turnover uses a liquidation *range*, not one invented holding day. Total item,
+market-group and destination exposure caps prevent a superficially optimal
+hold from concentrating the whole wallet in one slow item.
+
+### §23.9 — Risk model
+
+Risk is a collection of gates and visible dimensions, not one pseudo-scientific
+percentage.
+
+- **Route security:** raw/rounded system security, number of low/null systems,
+  number of 0.5 systems, minimum security, known configured avoid systems and
+  route alternatives. Default profile is high-sec-only; UNKNOWN route fails.
+- **High-sec gank exposure:** manual ship EHP and value, cargo value/EHP,
+  cargo+ship value, time through lower-security systems, chokepoint exposure
+  and optional recent system-destruction heat. This is a relative warning
+  band, not a prediction that a gank will occur.
+- **Market movement:** liquidation range, price volatility/drawdown,
+  destination-bid downside, spread/book persistence and position share of
+  normal volume.
+- **Illiquidity/competition:** missing bars, long estimated sale time,
+  queue-ahead units, few orders, concentrated depth and frequent repricing.
+- **Capital:** percentage of liquid wallet, item/group/destination
+  concentration, outstanding personal orders/assets later, and worst-case
+  mark-to-bid loss.
+- **Execution/access:** snapshot age, route age, partial depth, player
+  structure access and mismatched book generations.
+
+Avoid attacker-cost or “safe cargo” thresholds presented as universal truths:
+fits, pilot behaviour and gank economics change. Begin with operator-set hard
+limits and relative bands; calibrate only against recorded trips/losses.
+
+### §23.10 — Opportunity-ranking methodology
+
+Do not multiply profit, liquidity, execution probability, time and risk into a
+single opaque score. Several inputs are correlated, and “probability of
+execution” is not observed. The engine has two stages:
+
+1. **Hard feasibility:** fresh/complete data, positive marginal net, capital,
+   cargo, exposure, security, jump/time and liquidation constraints.
+2. **Multiple transparent ranks:** each answers a different operator goal.
+
+The default for a 30-minute/day operator is:
+
+```text
+time_efficiency =
+    conservative_net_profit / estimated_active_minutes
+```
+
+For an opportunistic trip, the denominator is incremental detour minutes; for
+a dedicated haul it is pickup + haul + docking/handling time. Display these
+additional ranks without blending them:
+
+- `net_profit` — absolute trip payoff;
+- `net_roi` — capital efficiency for the transaction;
+- `ISK-day` — conservative profit divided by committed ISK and liquidation
+  days;
+- `profit_per_m3` — scarce cargo efficiency;
+- `distance_from_me` — pickup jumps/minutes;
+- `risk-adjusted time` — conservative profit/minute after an explicit,
+  displayed loss-budget penalty, only after calibration.
+
+Reliability remains a separate grade. The UI explanation states which
+constraints bound quantity, which price level set the marginal unit, all
+costs, the chosen rank, and why higher-gross-profit alternatives lost. A
+rejected-opportunity view must expose reasons such as `STALE_BOOK`,
+`DEST_DEPTH_SHORT`, `ROUTE_LOWSEC`, `OVER_CAPITAL`, `OVER_TIME`,
+`LIQUIDATION_UNKNOWN` and `MARGINAL_NET_NEGATIVE`.
+
+### §23.11 — GUI design
+
+Add one independent `HAULING` rail page and optional DESK source tab after its
+own gate. Existing pages/classes remain untouched. Like every GUI page, it
+reads one local `DeskData` generation and never imports ESI.
+
+The control strip:
+
+- current solar system (manual autocomplete; “Use character location” only in
+  H5);
+- optional intended destination and `dedicated haul / along my route` mode;
+- saved ship profile: usable cargo m³, EHP, ship+fit value, observed
+  seconds/jump and fixed handling minutes;
+- available capital, maximum trade exposure, session minutes and maximum wait;
+- source/destination set, shortest/safer route, minimum security and max jumps;
+- exit model (`immediate bid` in MVP; `post sell order` later);
+- saved filter/profile and freshness stamp.
+
+Default columns, kept small enough to scan:
+
+| Default | Meaning |
+|---|---|
+| Item | Name plus THIN/UNKNOWN/access badges |
+| Route | Source -> destination |
+| Qty | Economically selected units |
+| Capital | Actual depth-walk acquisition cost |
+| Net profit | After applicable tax/fees |
+| Net ROI | Net / capital |
+| Cargo | m³ and hold utilization |
+| Pickup | Jumps from current system |
+| Trip | Total or incremental jumps/minutes |
+| Liquidation | `bid depth now` or low-base-high days |
+| Route risk | Minimum security + risk band |
+| Reliability | Data-quality grade |
+| Rank | Default net ISK/active minute |
+
+Optional columns include both WAPs, gross spread/margin, fee breakdown,
+profit/m³, daily/recent volume, price/volume trend, competing orders,
+displayed order age, depth consumed, marginal price, capital turnover,
+downside value, concentration, every route-security count and generation age.
+Clicking a row opens:
+
+- source/destination price-level ladders with proposed fills highlighted;
+- side-by-side price/volume history (no synthesized open);
+- quantity breakpoints and “why this size” chart/table;
+- route systems, security and pickup/haul/detour decomposition;
+- liquidity scenarios, competition and downside;
+- cost/rank audit and rejected alternatives;
+- `Add to watchlist`, `Save filter`, and later `Record paper haul`.
+
+Sorting by `Pickup` implements literal “distance from me.” The recommended
+default is Rank, with a one-click “Nearest first” preset because shortest
+pickup is not always the best use of thirty minutes.
+
+### §23.12 — Technical architecture
+
+Reuse the present layers and add bounded modules only after their phase gate:
+
+```text
+existing async ESI client/scheduler
+        -> existing validated book generation
+        -> additive station price-level reducer
+        -> Parquet book_depth + existing book_summary
+
+SDE types + systems + stargates
+        -> SQLite static route graph
+        -> local route/security/time engine
+
+bars + book_depth + route + operator profile
+        -> hauling feasibility/calculation engine (no Qt)
+        -> position/basket engine (no Qt)
+        -> immutable report generation
+        -> gui/data.py local read
+        -> HAULING QWidget
+```
+
+Suggested core boundaries:
+
+- `routes.py`: static graph, shortest/safer route, route facts and cache;
+- `hauling.py`: execution modes, depth walks, costs, constraints and rows;
+- `liquidity.py`: completed-bar scenarios and reliability;
+- `positioning.py`: breakpoint sizes and optional basket allocation;
+- GUI page: presentation/filtering only, with no ESI imports;
+- existing scheduler: refreshes inputs and atomically publishes a complete
+  hauling report; the page merely rereads it on its timer.
+
+Async/concurrent HTTP remains only in ingest. Analytics are vectorized/grouped
+where helpful, but local pathfinding and breakpoint walks can use stdlib data
+structures. Background calculation publishes a generation atomically so route,
+book and profile facts cannot be mixed across refreshes. Every detector,
+liquidity or scoring change requires golden fixtures first under §4.
+
+### §23.13 — Data/storage design
+
+Keep the locked SQLite + Parquet + JSONL architecture. DuckDB adds a second
+query engine without solving a measured problem; PostgreSQL adds installation,
+service and backup overhead inappropriate for a single-user desktop.
+
+- **Parquet:** existing daily bars and `book_summary`; new station-specific
+  aggregated `book_depth` levels partitioned by region/date and retained on
+  the same hourly/daily policy. No raw order archive by default.
+- **SQLite:** extended SDE systems (security/coordinates), stargate edges, NPC
+  station identities, route cache keyed by SDE build and route profile, ship
+  profiles, hauling profiles, report-generation metadata and later read-only
+  character sync state.
+- **JSONL:** append-only paper haul decisions/outcomes and later alerts,
+  preserving the evidence model. A recorded pass still needs a reason.
+- **Reports:** immutable local scan outputs with input identities, settings,
+  generation IDs, calculation version and rejected counts. The GUI opens only
+  a complete published report.
+
+An additive schema must not alter the frozen bar columns or existing
+`book_summary` consumers. The depth curve is an aggregation of levels for
+configured execution stations, not a reversal of §3.4's no-raw-book decision.
+
+### §23.14 — ESI request/caching strategy and performance
+
+CCP placed `/markets/{region_id}/orders` in the `market-order` group in
+February 2026: [12,000 tokens per 15-minute floating
+window](https://developers.eveonline.com/blog/market-orders-rate-limit-rolls-out-on-february-24-2026),
+with a five-minute cache. Current [rate-limit
+documentation](https://developers.eveonline.com/docs/services/esi/rate-limiting/)
+charges 2 tokens for 2xx, 1 for 3xx, 5 for most 4xx and 0 for 5xx, plus the
+legacy 100-error/minute limit. Existing 6,000-token/window and
+150-history-request/minute self-caps remain unchanged.
+
+The non-negotiable [ESI caching
+contract](https://developers.eveonline.com/docs/services/esi/best-practices/)
+also remains unchanged: descriptive User-Agent, pinned compatibility date,
+store `Expires`/`Last-Modified`/ETag, send conditionals, validate pages as one
+generation, and never request before expiry. A GUI refresh never triggers a
+network request.
+
+Feasibility:
+
+- Five hubs require five regional order sweeps, not one request per item.
+  Existing measured volumes are roughly 0.9M orders across the five hub
+  regions and remain well inside this repo's self-cap at WARM cadence.
+- Thousands of item comparisons are local joins/depth walks after each
+  regional sweep. Item count does not multiply order endpoint requests.
+- History *does* multiply by region and type. MVP reuses existing tracked
+  history and does not crawl every type in five regions on every run. Add
+  destination history in bounded batches after a candidate/universe gate.
+- Many route pairs use an SDE graph as CCP recommends in its [route
+  calculation guide](https://developers.eveonline.com/docs/guides/route-calculation/).
+  ESI `/route` is for spot verification, not candidate-by-candidate calls.
+- All 113 regions at hot cadence, universal station depth, permanent raw books
+  and every type/region history pair are feasible only in a theoretical sense
+  and are not an acceptable product design. Start with five NPC hubs and
+  operator-chosen distribution nodes.
+
+### §23.15 — Development roadmap
+
+Each row is a separate phase/session with its own fixtures, deterministic gate
+and operator handoff. Effort is focused senior-developer time, not elapsed
+calendar time; live observation gates can take longer.
+
+| Phase | Features / technical work | Dependencies | Difficulty / effort | What it teaches | Gate to continue |
+|---|---|---|---|---|---|
+| **H0 — validate need** | Finish the current paper/cost/book live gate. Trial EVE Flipper and EVE Profits on 20 identical real scenarios; capture calculation differences and time-to-decision. | Current active checkpoint; no code. | Low, 2–4 operator sessions. | Whether a custom tab changes an action or merely changes presentation. | At least one repeatable unmet decision need, and existing cost/depth prices agree with the client. Otherwise stop. |
+| **H1 — data proof** | Extend SDE import for security/stargates/NPC stations; local route engine; station price-level fixtures/reducer; exact source/destination walk for Jita-Amarr; manual profile in a report/CLI only. | H0, golden fixtures first. | Medium, 3–5 dev days. | Whether arbitrary-size executable opportunities exist after real depth/tax and whether routes match the client. | Ten in-game quote/route spot checks; partial/stale/depth-limit cases all UNKNOWN; no existing output changes. |
+| **H2 — useful MVP tab** | Independent HAULING page, five hubs, manual current location/ship/capital/time/security, position breakpoints, distance/detour columns, detail audit, nearest/time/ROI/profit ranks, paper-haul record. | H1 validated local report and GUI isolation tests. | Medium-high, 5–8 dev days. | Whether it saves time and produces actionable hauls in a 30-minute session. | Two-week shadow: results checked before departure and after arrival; record stale misses, realised spreads and minutes. Continue only if it beats the benchmark or saves meaningful time. |
+| **H3 — liquidity and sizing** | Destination history batches; low/base/high liquidation scenarios; repeated book persistence; maker downside; marginal-chunk mixed cargo; multiple transparent ranks and reliability grade. | H2 evidence, fixtures before every model. | High, 7–12 dev days. | Whether regional demand assumptions are calibrated enough to size inventory. | At least 20 closed/passed paper hauls and five real maker exits; interval coverage and bias reported, not merely “looks right.” |
+| **H4 — distribution/opportunistic route** | Operator-configured NPC destinations, posted-exit mode, queue/relist assumptions, intended-destination baseline, detour optimizer, self-haul versus PushX. | H3 liquidation evidence. | High, 7–12 dev days. | Whether non-hub scarcity/detours beat simple hub lanes. | A dated comparison shows positive conservative outcomes after costs/time and no systematic liquidation underestimation. |
+| **H5 — read-only character integration** | JWT/OIDC v2, minimum read scopes, location/ship prefill, wallet cap, open-order/assets exposure and realised transactions. No acting scopes. | Proven manual workflow and secret-storage design review. | Medium-high, 5–8 dev days plus security review. | Which manual inputs are error-prone enough to justify SSO risk/maintenance. | Token storage/revocation verified, scope audit clean, manual fallback works, headless/GUI isolation green. |
+| **H6 — calibrated intelligence** | Travel-time calibration, own fill/capture priors, exposure portfolio, optional route-destruction heat, alerts only for validated conditions. | Sufficient personal outcome sample; §20.5 delivery gate. | Open-ended; build one measured feature at a time. | Whether personalization creates persistent advantage. | Predeclared metric improves out-of-sample decisions; otherwise retain the simpler model. |
+
+No phase starts the next in the same session. H0 explicitly precedes H1 even
+though much of the infrastructure already exists.
+
+### §23.16 — Smallest useful MVP specification
+
+The MVP is H1 + H2, not the entire roadmap:
+
+- one additive `HAULING` page; no behaviour change to existing tabs/CLI;
+- configured NPC hubs: Jita, Amarr, Dodixie, Rens and Hek;
+- manual current system plus optional intended destination;
+- saved manual ship profile (usable cargo, EHP, value, seconds/jump, handling);
+- capital, exposure, session time, max jumps and high-sec/security controls;
+- immediate ask-to-reachable-bid mode only;
+- station-specific price-level depth up to the configured safe scan bound;
+- exact WAP, feasible breakpoint position size, tax, net profit/ROI/m³/minute;
+- pickup, haul, total and detour route facts with `Nearest first`;
+- fresh/completeness/reliability display and calculation explanation;
+- paper-haul/pass record for later validation;
+- optional deterministic cargo basket only after single-item rows are correct.
+
+Explicitly not MVP: SSO, automatic location, maker-sale liquidation,
+non-hub/player-structure markets, alerts, live gank prediction, contracts,
+multi-stop routing, wallet/P&L replacement or order/client automation.
+
+MVP success is not “the page has rows.” It must either (a) recommend a
+different executable cargo/route than the benchmark for a defensible reason,
+or (b) reduce the operator's daily decision time by a meaningful amount
+(target: at least 5–10 minutes in a 30-minute session). Otherwise do not fund
+H3.
+
+### §23.17 — Illustrative scanner result
+
+This is a calculation-shape example, **not a current EVE quote**:
+
+```text
+Item: Illustrative Module
+Mode: immediate ask -> reachable bid
+Route: current system -> Jita 4-4 -> Amarr VIII
+Pickup / haul / total: 3 / 9 / 12 jumps
+Route: high-sec only; minimum displayed security 0.5
+
+Selected quantity: 1,200
+Why this size: destination bid depth becomes unprofitable at the next
+               300-unit price level; cargo and capital are not binding
+Source asks: 200 @ 100,000; 700 @ 102,000; 300 @ 105,000
+Source WAP / capital: 102,416.67 ISK / 122.90M ISK
+Destination bids: 400 @ 119,000; 500 @ 117,500; 300 @ 115,000
+Destination WAP / gross sale: 117,375 ISK / 140.85M ISK
+Sales tax: 4.75M ISK (profile value shown in audit)
+Net profit / ROI: 13.20M ISK / 10.74%
+Cargo: 360 m³ (6% of configured hold)
+Estimated active time: 23 minutes
+Net ISK/min: 0.58M
+Liquidation: current reachable bid depth covers all 1,200 units
+Reliability: A- (fresh complete book; full stored depth; fresh route;
+                 regional history not needed for immediate execution)
+
+Rank explanation:
+  #2 by net profit, #1 by active-minute efficiency, #8 by ISK/m³.
+  The #1 gross-profit row was rejected because pickup + haul exceeded the
+  operator's 30-minute limit.
+```
+
+The detail view must reproduce every level and fee, show the next marginal
+chunk, and warn that destination bids can move during twelve jumps.
+
+### §23.18 — Comparison with existing websites
+
+1. **Already solved adequately:** generic order browsing and history;
+   top-of-book hub comparisons; basic cargo/budget packing; station-trading
+   discovery; character wallet/order/P&L dashboards; ordinary jump counts and
+   broad filters. Use Adam4EVE, EVE Tycoon, EVE Profits, Trading Matrix or EVE
+   Flipper rather than rebuilding those in isolation.
+
+2. **Custom convenience:** one local application; familiar tables/charts;
+   shared watchlists/settings; consistent tax/depth/staleness semantics;
+   evidence alongside paper decisions; local privacy; a single daily workflow
+   and future Discord/ntfy integration. Convenience can justify a small add-on,
+   not a new platform.
+
+3. **Potential genuine advantage:** optimize the whole marginal trip from the
+   operator's current system; distinguish pickup/haul/detour; use actual
+   capital/cargo/EHP/time/security/exposure constraints; size across exact
+   station depth; penalize committed ISK-days; account for owned inventory and
+   open orders later; and calibrate travel/liquidation assumptions from the
+   operator's own outcomes. These are personal objective-function advantages,
+   not secret public data.
+
+4. **Impressive-sounding but low-value:** all-New-Eden hot scans; machine-
+   learned fill probabilities from regional daily bars; exact gank probability;
+   synthetic intraday candles/order-book history; universal player-structure
+   coverage; optimal multi-stop routing before simple routes work; a generic
+   station-trader clone; automatic orders/client control. They add false
+   precision, maintenance or policy risk without improving a short daily
+   decision.
+
+### §23.19 — Major technical/product risks
+
+| Risk | Consequence | Control / falsification |
+|---|---|---|
+| Existing tools are already sufficient | Development has zero economic value. | H0 competitive trial and H2 kill gate. |
+| Book changes during travel | “Executable now” exit disappears before arrival. | Show snapshot age/travel duration, destination downside, and validate departure/arrival books; never call it guaranteed after travel. |
+| Regional history is mistaken for station demand | Liquidation looks more precise/faster than reality. | Regional/station labels, explicit share/capture assumptions, broad intervals and own-fill calibration. |
+| Fee/standing/relist model differs from client | Small apparent edges are fictional. | Existing operator-observed station overrides and active live cost gate. |
+| Depth reduction truncates an order curve | Position sizing extrapolates through missing levels. | Persist boundary/completeness; boundary contact => UNKNOWN. |
+| Route model differs from the in-game route | Time/risk rank is wrong. | SDE-build-keyed graph, CCP cost rules, fixtures and spot verification; manual avoid list. |
+| Ship EHP/cargo/time inputs are wrong | Cargo does not fit or risk/time is understated. | Saved manual fit profiles, observed calibration and visible assumptions. |
+| Composite score hides trade-offs | High-risk/illiquid rows rise for arbitrary weights. | Hard gates plus separate ranks and full explanation. |
+| Player-structure access is assumed | Apparent source/exit cannot be used. | NPC stations only in MVP; explicit access state later. |
+| SSO expands security/maintenance | Tokens become a larger liability than the feature's value. | Defer to H5, read scopes only, audited secret storage and manual fallback. |
+| Feature changes existing application behaviour | The add-on destabilizes a validated desk. | Additive page/module/report, existing outputs byte-stable, headless/import guards and regression suite. |
+| No profitable rows | Product appears “broken.” | Honest zero is success; measure time saved and rejection reasons, never lower gates to fill the table. |
+
+### §23.20 — Recommendation: should this be built?
+
+**Not as a new general trading application.** Current tools — particularly
+EVE Flipper and EVE Profits — already implement enough of the requested feature
+set that a from-scratch scanner is unlikely to repay its development time.
+Public ESI gives this project no exclusive data advantage.
+
+**A narrow, separately gated add-on to EveTradingbot is conditionally
+worthwhile.** This repository already owns most data/cost/UI primitives, and
+the operator's scarce resource is active play time. The personalized
+current-location -> pickup -> haul/detour optimizer, exact position bounds,
+and evidence-calibrated local workflow could improve decisions in a way a
+generic website cannot.
+
+Proceed only in this order:
+
+1. close the current live-validation/cost gate;
+2. benchmark EVE Flipper and EVE Profits on real operator scenarios;
+3. build H1/H2 only if a repeatable gap remains;
+4. shadow the MVP for two weeks; and
+5. stop if it neither changes decisions defensibly nor saves 5–10 minutes of
+   the operator's typical 30-minute session.
+
+That is a recommendation to test a small advantage, not a justification for a
+large project.

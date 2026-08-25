@@ -5,6 +5,30 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — Personalized HAULING decision tab researched and queued (§23)
+
+**Status: RESEARCHED + PLANNED ONLY. No product code changed.** The active
+paper/live-validation checkpoint remains open and still has priority.
+Commit gate: `uv run pytest -q` — **850 passed, 7 deselected**; ruff check and
+format check clean.
+
+- Reviewed current CCP ESI market, cache/rate-limit, route, SDE, security,
+  broker/tax and read-only character capabilities as of August 2026.
+- Compared Adam4EVE, EVE Tycoon, EVE Profits, Trading Matrix, EVE Flipper,
+  EVE Console and eve-meta. The broad product is not unique; EVE Flipper and
+  EVE Profits are mandatory H0 benchmarks before implementation.
+- Expanded queued §20.4 into §23's twenty-part product/technical contract for
+  an additive `HAULING` page. Existing GUI pages, station trading, scanner,
+  cross-region CLI and frozen calculations are unchanged.
+- Made current location a first-class input: pickup, haul, total and baseline
+  detour distance/time are separate, sortable facts.
+- Scoped the MVP to five NPC hubs, manual ship/location/capital/time/security
+  profiles, immediate ask-to-reachable-bid execution, arbitrary-size
+  station-level depth and transparent multiple rankings.
+- Added an explicit stop rule: do not build H1 unless a real competitor trial
+  finds a repeatable gap; do not fund H3 unless the two-week MVP shadow either
+  changes decisions defensibly or saves meaningful daily time.
+
 ## 2026-08-21 — Two fill models, and a paper form that refuses before it asks (§12.2, §17 D-32)
 
 **Status: IMPLEMENTED + GREEN.** `plan.md` §12.2 as amended, §17 D-32.

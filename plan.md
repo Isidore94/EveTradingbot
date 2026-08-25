@@ -2696,6 +2696,21 @@ ROI, profit/m³, cargo utilisation, the **marginal net of the final chunk**
 (which must be > 0), route facts, active minutes, net ISK per active minute and
 `isk_per_capital_day`.
 
+**The first chunk's marginal IS its net** — it is the step from zero, so a
+first size that loses money is refused as `MARGINAL_NET_NEGATIVE` like any
+other. *(Corrected 2026-08-25 after an adversarial audit reproduced the
+alternative: with the rule running only from the **second** breakpoint, a pair
+whose smallest fillable size netted −51.7% ranked as a plan with no rejection
+at all. On a market whose median spread is 98.8% that is most pairs, and the
+page would have filled with the hundred least-bad losses while "Nothing clears
+costs today" became unreachable.)*
+
+**The search stops at the first size that stops paying.** Per-unit marginal net
+is monotonically non-increasing in quantity — the ask WAP only rises and the
+bid WAP only falls — so a chunk whose aggregate is ≤ 0 guarantees every later
+one is too. Continuing cannot accept a larger size; it only floods the rejected
+set and burns walks.
+
 The default objective is **conservative net ISK per active minute**; the
 max-profit, max-ROI and max-ISK/m³ quantities are recorded beside it whenever
 they differ, because they usually do and the difference is the interesting

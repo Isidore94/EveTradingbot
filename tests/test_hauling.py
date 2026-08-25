@@ -460,3 +460,102 @@ def test_a_source_shallower_than_the_destination_refuses_nothing(config):
     )
     assert scan.plans[0].quantity == pytest.approx(100.0)
     assert not scan.rejected_for("DEST_DEPTH_SHORT")
+
+
+# -- 4. a plan is a trade that makes money, or it is not a plan -------------
+
+
+def _pair_scan(config, asks, bids, *, profile=None, packaged=0.01):
+    depths = {
+        FORGE: _snapshot(
+            _orders(asks, buy=False, station=JITA_44, system=JITA),
+            region=FORGE,
+            station=JITA_44,
+            system=JITA,
+        ),
+        DOMAIN: _snapshot(
+            _orders(bids, buy=True, station=AMARR_8, system=AMARR),
+            region=DOMAIN,
+            station=AMARR_8,
+            system=AMARR,
+        ),
+    }
+    return scan_hauls(
+        config,
+        profile or _profile(),
+        stations=[SOURCE, DEST],
+        depths=depths,
+        graph=_graph(),
+        names={34: "Tritanium"},
+        packaged_volume={34: packaged},
+        now=NOW,
+    )
+
+
+def test_a_pair_that_only_loses_money_produces_no_plan_at_all(config):
+    """The filled-panel failure, at its source.
+
+    The marginal rule only ran from the SECOND breakpoint, so a book whose
+    very first fillable size loses money had nothing to refuse it — and on a
+    market with a 98.8% median spread that is most books. The page would have
+    filled with the hundred least-bad losses and "Nothing clears costs today"
+    could never fire.
+
+    The first chunk's marginal IS its net: it is the step from zero.
+    """
+    scan = _pair_scan(config, [(100.0, 100.0)], [(50.0, 100.0)])
+    assert scan.plans == [], "a −51% round trip is not a plan"
+    rejections = scan.rejected_for(MARGINAL_NET_NEGATIVE)
+    assert len(rejections) == 1
+    assert rejections[0].quantity == pytest.approx(100.0)
+
+
+def test_the_search_stops_at_the_first_size_that_stops_paying(config):
+    """Per-unit marginal is monotonically non-increasing in quantity — the ask
+    WAP only rises and the bid WAP only falls — so once a chunk nets ≤ 0 every
+    larger one does too. Continuing past it cannot find a better size; it only
+    floods the rejected set and burns walks."""
+    asks = [(100.0, 100.0), (110.0, 100.0), (1000.0, 100.0), (1001.0, 100.0), (1002.0, 100.0)]
+    bids = [(200.0, 100.0), (190.0, 100.0), (180.0, 100.0), (170.0, 100.0), (160.0, 100.0)]
+    scan = _pair_scan(config, asks, bids)
+    assert scan.plans[0].quantity == pytest.approx(200.0)
+    assert len(scan.rejected_for(MARGINAL_NET_NEGATIVE)) == 1
+    # 100, 200, 300 — and then it stops rather than pricing 400 and 500.
+    assert scan.candidates_considered == 3
+
+
+def test_every_plan_in_a_mixed_scan_makes_money(config):
+    """The invariant that matters on a real book: a ranked row is a trade."""
+    winners = _orders([(100.0, 1000.0)], buy=False, station=JITA_44, system=JITA)
+    losers = _orders([(100.0, 1000.0)], buy=False, station=JITA_44, system=JITA, type_id=35)
+    for index, order in enumerate(losers):
+        order["order_id"] = 7000 + index
+    depths = {
+        FORGE: _snapshot(winners + losers, region=FORGE, station=JITA_44, system=JITA),
+        DOMAIN: _snapshot(
+            _orders([(300.0, 1000.0)], buy=True, station=AMARR_8, system=AMARR)
+            + [
+                {**order, "order_id": 8000 + index, "type_id": 35, "price": 50.0}
+                for index, order in enumerate(
+                    _orders([(50.0, 1000.0)], buy=True, station=AMARR_8, system=AMARR)
+                )
+            ],
+            region=DOMAIN,
+            station=AMARR_8,
+            system=AMARR,
+        ),
+    }
+    scan = scan_hauls(
+        config,
+        _profile(),
+        stations=[SOURCE, DEST],
+        depths=depths,
+        graph=_graph(),
+        names={34: "Tritanium", 35: "Pyerite"},
+        packaged_volume={34: 0.01, 35: 0.01},
+        now=NOW,
+    )
+    assert scan.plans, "the profitable type must still rank"
+    assert all(plan.net_profit > 0 for plan in scan.plans)
+    assert {plan.type_id for plan in scan.plans} == {34}
+    assert scan.rejected_for(MARGINAL_NET_NEGATIVE)

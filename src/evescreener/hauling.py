@@ -1047,29 +1047,40 @@ def _best_plan(
         proceeds = costs.sell_proceeds(sell.value, maker=False)
         tax = sell.value - proceeds
         net = proceeds - cost
-        marginal = None
-        if priced:
-            previous_quantity, _previous_cost, previous_net = priced[-1]
-            marginal = net - previous_net
-            if marginal <= 0:
-                # The last chunk did not pay for itself. Bigger is not better;
-                # this is the size the book stops rewarding.
-                scan.rejected.append(
-                    Rejection(
-                        reason=MARGINAL_NET_NEGATIVE,
-                        type_id=int(type_id),
-                        type_name=name,
-                        source_station=source.station_id,
-                        dest_station=destination.station_id,
-                        quantity=quantity,
-                        detail=(
-                            f"the chunk from {previous_quantity:,.0f} to {quantity:,.0f} units "
-                            f"nets {marginal:,.0f} ISK"
-                        ),
-                    )
+        # **The first chunk's marginal IS its net**: it is the step from zero,
+        # and a first size that loses money is a losing trade rather than a
+        # plan with a bad tail. Running this rule only from the second
+        # breakpoint left every book whose smallest fillable size loses money
+        # with nothing to refuse it — which, on a market with a 98.8% median
+        # spread (§17), is most books.
+        previous_quantity, previous_net = (priced[-1][0], priced[-1][2]) if priced else (0.0, 0.0)
+        marginal = net - previous_net
+        if marginal <= 0:
+            # Bigger is not better, and it cannot become better again.
+            # Per-unit marginal net is monotonically NON-INCREASING in q: the
+            # ask WAP only rises as the walk climbs the source book and the bid
+            # WAP only falls as it descends the destination's, and sales tax
+            # scales proceeds by a positive constant. So a chunk whose
+            # aggregate is <= 0 has a per-unit marginal <= 0 (its size is
+            # positive), and every later chunk's per-unit marginal is <= that.
+            # Continuing could not accept a larger size; it only floods the
+            # rejected set (measured: 16 per type per pair) and burns walks.
+            scan.rejected.append(
+                Rejection(
+                    reason=MARGINAL_NET_NEGATIVE,
+                    type_id=int(type_id),
+                    type_name=name,
+                    source_station=source.station_id,
+                    dest_station=destination.station_id,
+                    quantity=quantity,
+                    detail=(
+                        f"the chunk from {previous_quantity:,.0f} to {quantity:,.0f} units "
+                        f"nets {marginal:,.0f} ISK"
+                    ),
                 )
-                priced.append((quantity, cost, net))
-                continue
+            )
+            priced.append((quantity, cost, net))
+            break
         priced.append((quantity, cost, net))
 
         minutes = trip.active_minutes

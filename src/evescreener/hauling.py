@@ -40,7 +40,7 @@ import pandas as pd
 from .books import DepthCurve, DepthLevel, DepthSnapshot, q_walk
 from .config import Config
 from .costs import CostModel
-from .routes import HIGHSEC, PROFILES, RouteFacts, RouteGraph
+from .routes import HIGHSEC, PROFILES, SHORTEST, RouteFacts, RouteGraph
 from .timeutil import ensure_utc, iso, utcnow
 
 __all__ = [
@@ -611,21 +611,38 @@ class _Trip:
     detail: str = ""
 
 
-def _route(graph, cache, origin, destination, profile: HaulProfile) -> RouteFacts:
+def _route(
+    graph,
+    cache,
+    origin,
+    destination,
+    profile: HaulProfile,
+    *,
+    security: str | None = None,
+    avoid: Iterable[int] | None = None,
+) -> RouteFacts:
+    """One route under the operator's profile, or a named variation of it.
+
+    `security` and `avoid` override the profile so the diagnostic probes below
+    can ask "would this pair connect *without* that constraint" — through the
+    same cache, because a probe is as expensive as a route.
+    """
+    security = security if security is not None else profile.security_profile
+    avoid = tuple(profile.avoid_systems if avoid is None else avoid)
     if cache is not None:
         return cache.route(
             graph,
             origin,
             destination,
-            profile=profile.security_profile,
-            avoid=profile.avoid_systems,
+            profile=security,
+            avoid=avoid,
             safer_penalty=profile.safer_penalty,
         )
     return graph.route(
         origin,
         destination,
-        profile=profile.security_profile,
-        avoid=profile.avoid_systems,
+        profile=security,
+        avoid=avoid,
         safer_penalty=profile.safer_penalty,
     )
 
@@ -647,21 +664,39 @@ def _trip(
         )
     )
     if not haul.known:
-        # A security profile that blocks an otherwise-connected pair is a
-        # different fact from a pair that is not connected at all, and the
-        # operator can act on the first one by changing the profile.
-        blocked = (
-            profile.security_profile == HIGHSEC
-            and graph.route(source.system_id, destination.system_id).known
-        )
+        # **Which constraint severed this pair?** Both answers are actionable
+        # and they are different actions, so the probe asks each question
+        # separately instead of one loose "would it connect with nothing
+        # applied" — which reported anything the operator's own avoid list cut
+        # as blocked by security, a reason he cannot act on describing a
+        # constraint he set.
+        reason, detail = NO_ROUTE, haul.reason
+        if (
+            profile.avoid_systems
+            and _route(
+                graph, cache, source.system_id, destination.system_id, profile, avoid=()
+            ).known
+        ):
+            detail = (
+                f"{haul.reason} — the {len(profile.avoid_systems)}-system avoid list is "
+                "what severs this pair; it connects without it"
+            )
+        elif (
+            profile.security_profile != SHORTEST
+            and _route(
+                graph, cache, source.system_id, destination.system_id, profile, security=SHORTEST
+            ).known
+        ):
+            reason = ROUTE_BLOCKED_SECURITY
+            detail = f"{haul.reason} — a route exists, but not one this security profile will fly"
         return _Trip(
             pickup=pickup,
             haul=haul,
             total_jumps=None,
             detour_jumps=None,
             active_minutes=None,
-            reason=ROUTE_BLOCKED_SECURITY if blocked else NO_ROUTE,
-            detail=haul.reason,
+            reason=reason,
+            detail=detail,
         )
 
     detour_jumps = None

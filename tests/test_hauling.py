@@ -102,6 +102,7 @@ DEST = Station(AMARR_8, AMARR, DOMAIN, "Amarr")
 
 
 def _profile(**overrides) -> HaulProfile:
+    """A profile with test-friendly defaults; every field is overridable."""
     ship = ShipProfile(
         name="test hauler",
         usable_cargo_m3=overrides.pop("cargo_m3", 1_000_000.0),
@@ -653,3 +654,63 @@ def test_a_plan_with_no_measurable_minutes_is_counted_not_deleted(config):
     scan = _pair_scan(config, [(100.0, 1000.0)], [(300.0, 1000.0)], profile=profile)
     assert scan.plans == []
     assert scan.dropped_unrankable == {"ACTIVE_MINUTES_UNKNOWN": 1}
+
+
+# -- 6. name the blocker correctly -----------------------------------------
+
+
+def _blocked_scan(config, graph, profile):
+    depths = {
+        FORGE: _snapshot(
+            _orders([(100.0, 1000.0)], buy=False, station=JITA_44, system=JITA),
+            region=FORGE,
+            station=JITA_44,
+            system=JITA,
+        ),
+        DOMAIN: _snapshot(
+            _orders([(300.0, 1000.0)], buy=True, station=AMARR_8, system=AMARR),
+            region=DOMAIN,
+            station=AMARR_8,
+            system=AMARR,
+        ),
+    }
+    return scan_hauls(
+        config,
+        profile,
+        stations=[SOURCE, DEST],
+        depths=depths,
+        graph=graph,
+        names={34: "Tritanium"},
+        packaged_volume={34: 0.01},
+        now=NOW,
+    )
+
+
+def test_a_pair_severed_by_the_operators_avoid_list_is_not_a_security_block(config):
+    """The probe re-ran the route with the DEFAULT profile and no avoid list,
+    so anything the avoid list severed came back as blocked by security — a
+    reason the operator cannot act on, describing a constraint he set."""
+    # A corridor that is entirely high-sec, so the security profile cannot be
+    # what severs it — only the operator's own avoid list can.
+    graph = _graph(jumps=2)  # Jita — 90000 — Amarr, all 0.9
+    middle = 90_000
+    profile = _profile(security_profile="highsec", avoid_systems=(middle,))
+    scan = _blocked_scan(config, graph, profile)
+    assert scan.plans == []
+    assert not scan.rejected_for(ROUTE_BLOCKED_SECURITY)
+    rejection = scan.rejected_for(NO_ROUTE)[0]
+    assert "avoid list" in rejection.detail
+
+
+def test_a_pair_severed_by_the_security_profile_still_says_security(config):
+    profile = _profile(security_profile="highsec")
+    scan = _blocked_scan(config, _graph(jumps=2, security=0.2), profile)
+    assert scan.rejected_for(ROUTE_BLOCKED_SECURITY)
+    assert not scan.rejected_for(NO_ROUTE)
+
+
+def test_a_pair_with_no_route_at_all_is_neither(config):
+    graph = RouteGraph([], {JITA: 0.9, AMARR: 0.9}, sde_build=1)
+    scan = _blocked_scan(config, graph, _profile(security_profile="shortest"))
+    rejection = scan.rejected_for(NO_ROUTE)[0]
+    assert "avoid list" not in rejection.detail

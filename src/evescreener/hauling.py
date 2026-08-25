@@ -1222,13 +1222,20 @@ def liquidity_hook(fn) -> callable:
 def scan_inputs(config: Config, db, *, region_ids: Iterable[int] | None = None):
     """Everything a scan needs from disk, gathered once (never from ESI).
 
-    Returns `(stations, depths, graph, names, badges, packaged_volume)`.
+    Returns `(sources, destinations, depths, graph, names, badges, packaged)`.
+
+    **Sources are the hubs; destinations are the hubs plus the operator's extra
+    stations** (§23, H4). An extra station is somewhere he wants to *deliver*
+    to — a staging system, a corp office — and treating it as a place to buy
+    from would rank plans against a book he chose that station for despite,
+    not because of.
     """
     from .books import load_validated_depth
 
-    stations = stations_from_db(config, db)
+    sources = stations_from_db(config, db, include_extra=False)
+    destinations = stations_from_db(config, db, include_extra=True)
     regions = sorted(
-        {int(station.region_id) for station in stations if station.region_id is not None}
+        {int(station.region_id) for station in destinations if station.region_id is not None}
         if region_ids is None
         else {int(region) for region in region_ids}
     )
@@ -1249,4 +1256,4 @@ def scan_inputs(config: Config, db, *, region_ids: Iterable[int] | None = None):
         int(row["type_id"]): str(row["tier"])
         for row in db.conn.execute("SELECT type_id, tier FROM universe WHERE tier IS NOT NULL")
     }
-    return stations, depths, graph, names, badges, packaged
+    return sources, destinations, depths, graph, names, badges, packaged

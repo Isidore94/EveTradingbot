@@ -257,6 +257,16 @@ def build_parser() -> argparse.ArgumentParser:
     haul_scan.add_argument(
         "--no-write", action="store_true", help="print it, do not write a report"
     )
+    haul_scan.add_argument(
+        "--freight",
+        action="store_true",
+        help="quote PushX for the top plans and show what flying it yourself is worth. "
+        "Off by default: it is a request to somebody else's service, and the "
+        "self-haul row never depends on it",
+    )
+    haul_scan.add_argument(
+        "--freight-top", type=int, default=5, help="how many plans to quote (default: 5)"
+    )
 
     haul_profile = haul_sub.add_parser("profile", help="ship profiles, stored in state.db")
     profile_sub = haul_profile.add_subparsers(dest="profile_command", required=True)
@@ -1254,6 +1264,7 @@ def _ship_profile(config: Config, db, args):
 
 
 def _cmd_haul(config: Config, args) -> int:
+    from .haulfreight import attach_freight
     from .hauling import HaulProfile, scan_hauls, scan_inputs
     from .haulledger import HaulLedger, HaulRefusal
     from .haulreport import build_haul_report, render_haul_report, write_haul_report
@@ -1302,12 +1313,13 @@ def _cmd_haul(config: Config, args) -> int:
             print(str(exc), file=sys.stderr)
             return 2
 
-        stations, depths, graph, names, badges, packaged = scan_inputs(config, db)
+        sources, destinations, depths, graph, names, badges, packaged = scan_inputs(config, db)
         liquidity = liquidity_attachment(config, db, depths, profile)
         scan = scan_hauls(
             config,
             profile,
-            stations=stations,
+            stations=sources,
+            destinations=destinations,
             depths=depths,
             graph=graph,
             route_cache=RouteCache(db, enabled=config.routes.cache),
@@ -1316,6 +1328,10 @@ def _cmd_haul(config: Config, args) -> int:
             packaged_volume=packaged,
             liquidity=liquidity,
         )
+        if args.freight:
+            # A third-party quote is asked for deliberately, never on every
+            # scan: it is somebody else's service (§9 R10).
+            attach_freight(config, db, scan, limit=args.freight_top)
         report = build_haul_report(scan, config=config)
 
     if not args.no_write:

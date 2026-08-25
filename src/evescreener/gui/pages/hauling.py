@@ -298,7 +298,9 @@ class HaulingPage(DeskPage):
         with data.thread_local_db() as db:
             from ...routes import RouteCache
 
-            stations, depths, graph, names, badges, packaged = scan_inputs(data.config, db)
+            sources, destinations, depths, graph, names, badges, packaged = scan_inputs(
+                data.config, db
+            )
             system_names = db.system_names()
             by_name = {name.lower(): system for system, name in system_names.items()}
             ships = [dict(row) for row in db.haul_profiles()]
@@ -339,7 +341,8 @@ class HaulingPage(DeskPage):
             scan = scan_hauls(
                 data.config,
                 profile,
-                stations=stations,
+                stations=sources,
+                destinations=destinations,
                 depths=depths,
                 graph=graph,
                 route_cache=RouteCache(db, enabled=data.config.routes.cache),
@@ -657,8 +660,27 @@ def _costs_text(plan) -> str:
             if plan.isk_per_capital_day is not None
             else "ISK per capital-day    UNKNOWN",
             "",
+            _freight_line(plan),
+            "",
             SNAPSHOT_CAVEAT,
         ]
+    )
+
+
+def _freight_line(plan) -> str:
+    """Self-haul versus paying PushX. UNKNOWN never blocks the row above it."""
+    freight = plan.freight or {}
+    if freight.get("state") != "OK":
+        return f"self-haul vs PushX   UNKNOWN — {freight.get('reason', 'not quoted')}"
+    per_minute = freight.get("your_time_isk_per_minute")
+    return (
+        f"self-haul vs PushX   freight {freight['freight_isk']:,.0f} ISK "
+        f"({freight['route']}), net if shipped {freight['net_if_shipped']:,.0f}"
+        + (
+            f" — flying it yourself is worth {per_minute:,.0f} ISK/min"
+            if per_minute is not None
+            else ""
+        )
     )
 
 

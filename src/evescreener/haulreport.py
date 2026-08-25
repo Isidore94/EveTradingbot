@@ -156,6 +156,9 @@ def _row(plan) -> dict:
             "detour_jumps": plan.detour_jumps,
             "active_minutes": plan.active_minutes,
         },
+        # Self-haul versus paying PushX. UNKNOWN unless the operator asked for
+        # a quote, and never a condition of the row above it (§23, H4).
+        "freight_comparison": plan.freight or {"state": "UNKNOWN", "reason": "not quoted"},
         "generations": {
             "source": list(plan.source_generation) if plan.source_generation else None,
             "destination": list(plan.dest_generation) if plan.dest_generation else None,

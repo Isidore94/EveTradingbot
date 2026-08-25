@@ -288,6 +288,8 @@ def test_the_attachment_puts_scenarios_and_a_grade_on_a_plan(config, db, monkeyp
     assert plan.isk_per_capital_day == pytest.approx(
         plan.net_profit / (plan.source_cost * plan.liquidation_days)
     )
+    # Which clock that is, is the exit model's business — see the immediate /
+    # maker pair of tests below.
 
 
 def test_a_maker_exit_refuses_a_plan_whose_liquidation_is_unknown(config, db):
@@ -329,3 +331,58 @@ def test_a_maker_exit_refuses_a_plan_whose_liquidation_is_unknown(config, db):
     )
     assert scan.plans == []
     assert scan.rejected_for(LIQUIDATION_UNKNOWN)
+
+
+def test_an_immediate_exit_charges_isk_days_over_travel_time_not_sell_out_time(config, db):
+    """§23.5: an immediate exit dumps into the bid on arrival, so the capital is
+    committed for the trip and nothing longer.
+
+    The scenario is a different question — how long the destination would take
+    to absorb the goods at a price — and it belongs in the drawer, not in this
+    row's denominator. Attaching it there also left `liquidation_reason` still
+    saying "charged over travel time" beside a number that was not.
+    """
+    from evescreener.hauling import scan_hauls
+    from evescreener.store.lake import BarLake
+    from test_hauling import DEST, FORGE, SOURCE, _graph, _orders, _profile, _snapshot
+
+    config.paths.ensure()
+    BarLake(config.paths).write(_bars(list(range(100, 1300, 100))))
+    depths = {
+        FORGE: _snapshot(
+            _orders(
+                [(100.0, 2000.0)], buy=False, station=SOURCE.station_id, system=SOURCE.system_id
+            ),
+            region=FORGE,
+            station=SOURCE.station_id,
+            system=SOURCE.system_id,
+        ),
+        DOMAIN: _snapshot(
+            _orders([(200.0, 2000.0)], buy=True, station=DEST.station_id, system=DEST.system_id),
+            region=DOMAIN,
+            station=DEST.station_id,
+            system=DEST.system_id,
+        ),
+    }
+    profile = _profile()
+    assert profile.exit_model == "immediate"
+    scan = scan_hauls(
+        config,
+        profile,
+        stations=[SOURCE, DEST],
+        depths=depths,
+        graph=_graph(),
+        names={34: "Tritanium"},
+        packaged_volume={34: 0.01},
+        liquidity=liquidity_attachment(config, db, depths, profile, now=NOW),
+        now=NOW,
+    )
+    plan = scan.plans[0]
+    travel_days = plan.active_minutes / (60.0 * 24.0)
+    assert plan.liquidation_days == pytest.approx(travel_days)
+    assert plan.isk_per_capital_day == pytest.approx(
+        plan.net_profit / (plan.source_cost * travel_days)
+    )
+    assert "travel time" in plan.liquidation_reason
+    # The sell-out scenario is still measured and still shown — beside it.
+    assert plan.liquidity["known"] and plan.liquidity["scenarios"]["base"] > travel_days

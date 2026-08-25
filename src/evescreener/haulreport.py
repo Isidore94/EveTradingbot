@@ -38,21 +38,32 @@ CALC_VERSION = "haul-1"
 REPORT_PREFIX = "hauling"
 
 
-def haul_basket(scan: HaulScan):
+def haul_basket(scan: HaulScan, *, config: Config | None = None):
     """The mixed-cargo read for a scan, built one way for every surface.
 
     Computed here rather than in the engine so the CLI and the desk cannot
     drift into two baskets, and so the engine stays pure arithmetic over depth
     and routes.
+
+    `max_exposure_pct_per_destination` is applied **here**, because it is a cap
+    on a basket rather than on a plan: one haul to one hub cannot breach it, and
+    four of them can. Passing it is what makes the config key reachable at all —
+    a setting nothing reads is the §22 S6 defect wearing a different name.
     """
     from .positioning import greedy_basket
 
     profile = scan.profile
+    per_destination = None
+    if config is not None and config.hauling.max_exposure_pct_per_destination:
+        per_destination = (
+            profile.capital_isk * float(config.hauling.max_exposure_pct_per_destination) / 100.0
+        )
     return greedy_basket(
         scan.plans,
         capital_isk=profile.capital_isk,
         cargo_m3=profile.ship.usable_cargo_m3,
         exposure_per_trade_isk=profile.max_exposure_isk,
+        exposure_per_destination_isk=per_destination,
     )
 
 
@@ -77,7 +88,7 @@ def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:
         "rejection_counts": scan.rejection_counts,
         "unknown_pairs": scan.unknown_pairs,
         "rows": [_row(plan) for plan in scan.plans],
-        "basket": haul_basket(scan).as_dict(),
+        "basket": haul_basket(scan, config=config).as_dict(),
         "rejected": [rejection.as_dict() for rejection in scan.rejected],
         "notes": scan.notes,
         "caveats": [SNAPSHOT_CAVEAT, ORDER_AGE_CAVEAT],

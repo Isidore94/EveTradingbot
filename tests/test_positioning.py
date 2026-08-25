@@ -154,3 +154,31 @@ def test_the_render_leads_with_the_label():
     text = render_basket(greedy_basket([plan], capital_isk=1e9, cargo_m3=1e9))
     assert text.startswith("MIXED CARGO — HEURISTIC")
     assert "not an optimum" in text
+
+
+def test_the_per_destination_cap_reaches_the_basket_from_config(config):
+    """A setting nothing reads is §22 S6's defect wearing a different name."""
+    from evescreener.hauling import HaulProfile, HaulScan, ShipProfile
+    from evescreener.haulreport import haul_basket
+
+    profile = HaulProfile(
+        current_system=30000142,
+        ship=ShipProfile(name="test", usable_cargo_m3=1e9),
+        capital_isk=1000.0,
+        max_exposure_isk=1000.0,
+    )
+    scan = HaulScan(generated_at="2026-08-25T12:00:00+00:00", profile=profile)
+    scan.plans = [
+        _plan(34, "A", [(100.0, 400.0, 300.0)]),
+        _plan(35, "B", [(100.0, 400.0, 200.0)]),
+        _plan(36, "C", [(100.0, 400.0, 100.0)]),
+    ]
+    # 50% of 1,000 ISK caps one destination at 500, so the third 400-ISK chunk
+    # to the same hub cannot be taken however profitable it looks.
+    basket = haul_basket(scan, config=config)
+    assert config.hauling.max_exposure_pct_per_destination == 50.0
+    assert basket.capital_isk <= 500.0
+    assert len(basket.items) == 1
+    # Without the config the cap is simply absent, which is the old behaviour:
+    # two 400-ISK chunks fit the 1,000 wallet and the third does not.
+    assert haul_basket(scan).capital_isk == pytest.approx(800.0)

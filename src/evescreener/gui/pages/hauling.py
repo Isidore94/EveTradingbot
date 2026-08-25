@@ -357,7 +357,7 @@ class HaulingPage(DeskPage):
             "scan": scan,
             # Built here, on the worker, by the same function the CLI calls, so
             # the desk and the report cannot drift into two baskets.
-            "basket": render_basket(haul_basket(scan)),
+            "basket": render_basket(haul_basket(scan, config=data.config)),
             "systems": sorted(system_names.values()),
             "ships": [ship["name"] for ship in ships],
             "ship": ship.name,

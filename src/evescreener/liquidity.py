@@ -39,6 +39,7 @@ import pandas as pd
 from .books import DepthCurve, curve_from_frame, q_walk
 from .config import Config
 from .costs import CostModel
+from .hauling import IMMEDIATE
 from .timeutil import ensure_utc, last_completed_bar_date, utcnow
 
 __all__ = [
@@ -449,20 +450,31 @@ def liquidity_attachment(
             ),
         }
         grade = reliability_grade(components, RELIABILITY_WEIGHTS)
+        # **The exit model decides which clock ISK-days are charged on.** An
+        # IMMEDIATE exit dumps into the destination bid on arrival, so the
+        # capital is committed for the trip and nothing longer — §23.5 says
+        # travel time, and the scenario below is a different question that
+        # belongs in the drawer rather than in this row's denominator. Only a
+        # MAKER exit waits for the destination's own volume, and only then does
+        # the scenario become the number the row is charged over.
+        maker_exit = getattr(profile, "exit_model", IMMEDIATE) != IMMEDIATE
+        scenario_days = base_days if maker_exit else None
         return replace(
             plan,
             liquidity=scenario,
             maker=maker,
             reliability=grade,
-            liquidation_days=(base_days if base_days is not None else plan.liquidation_days),
+            liquidation_days=(
+                scenario_days if scenario_days is not None else plan.liquidation_days
+            ),
             liquidation_reason=(
-                plan.liquidation_reason
-                if base_days is not None
-                else (measured.reason if measured is not None else plan.liquidation_reason)
+                measured.reason
+                if maker_exit and base_days is None and measured is not None
+                else plan.liquidation_reason
             ),
             isk_per_capital_day=(
-                plan.net_profit / (plan.source_cost * base_days)
-                if base_days and plan.source_cost > 0
+                plan.net_profit / (plan.source_cost * scenario_days)
+                if scenario_days and plan.source_cost > 0
                 else plan.isk_per_capital_day
             ),
         )

@@ -208,6 +208,54 @@ class KillmailsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RoutesConfig:
+    """The route engine (plan.md §23.8). Every field is operator-editable.
+
+    Every field declares a default, which is what makes the whole section
+    optional: an operator's existing `config.toml` predates it and must keep
+    loading unchanged.
+    """
+
+    #: Which profile the hauling scan uses unless a run overrides it.
+    security_profile: str = "highsec"
+    #: Extra cost, in jumps, charged for entering a non-high-sec system on the
+    #: `safer` profile. 50 makes one low-sec hop worth fifty high-sec ones.
+    safer_penalty: float = 50.0
+    #: Systems removed from the graph before any search. Ids, not names.
+    avoid_systems: tuple[int, ...] = ()
+    cache: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class HaulingConfig:
+    """The hauling tab (plan.md §23). All defaults; the section is optional."""
+
+    enabled: bool = True
+    #: Execution stations, resolved from the SDE and never from memory
+    #: (build 3478781): Jita IV-4 60003760, Amarr VIII (Oris) 60008494,
+    #: Dodixie IX-20 60011866, Rens VI-8 60004588, Hek VIII-12 60005686.
+    hub_station_ids: tuple[int, ...] = (60003760, 60008494, 60011866, 60004588, 60005686)
+    #: Operator-added NPC destinations that are not trade hubs (§23, H4).
+    extra_destination_station_ids: tuple[int, ...] = ()
+    #: How deep the depth reduction bothers to store, before the safety margin.
+    max_scan_capital_isk: float = 5_000_000_000.0
+    depth_safety_margin: float = 1.5
+    default_objective: str = "isk_per_active_minute"
+    liquidity_quantiles: tuple[float, ...] = (0.25, 0.5, 0.75)
+    #: LABELLED ASSUMPTIONS, not measurements (§23.7). Regional history carries
+    #: no station split, so neither of these is derivable from the lake.
+    destination_share_prior: float = 0.25
+    capture_share: tuple[float, ...] = (0.05, 0.15, 0.35)
+    min_liquidity_bars: int = 10
+    default_session_minutes: int = 30
+    default_max_wait_days: int = 3
+    default_seconds_per_jump: float = 55.0
+    default_handling_minutes: float = 4.0
+    max_exposure_pct_per_trade: float = 25.0
+    max_exposure_pct_per_destination: float = 50.0
+
+
+@dataclass(frozen=True, slots=True)
 class FreightConfig:
     pushx_quote_url: str
     hub_systems: tuple[dict, ...]
@@ -234,6 +282,8 @@ class Config:
     backtest: BacktestConfig
     killmails: KillmailsConfig
     freight: FreightConfig
+    routes: RoutesConfig = field(default_factory=RoutesConfig)
+    hauling: HaulingConfig = field(default_factory=HaulingConfig)
     source_path: Path | None = field(default=None, compare=False)
 
     @property
@@ -266,7 +316,28 @@ _SECTIONS: dict[str, type] = {
     "backtest": BacktestConfig,
     "killmails": KillmailsConfig,
     "freight": FreightConfig,
+    "routes": RoutesConfig,
+    "hauling": HaulingConfig,
 }
+
+
+def optional_sections() -> set[str]:
+    """Sections every one of whose fields declares a default.
+
+    Such a section can be **absent entirely** from an operator's `config.toml`
+    without changing a single value, so requiring it would break a config that
+    is already correct. A section with even one required field stays required,
+    and drift in it still fails loudly — which is the property this check
+    exists for (the same rule `build_section` applies per field, §21 R2).
+    """
+    return {
+        name
+        for name, section_type in _SECTIONS.items()
+        if all(
+            f.default is not MISSING or f.default_factory is not MISSING
+            for f in fields(section_type)
+        )
+    }
 
 
 def _coerce(annotation: Any, value: Any, where: str) -> Any:
@@ -319,13 +390,16 @@ def build_section(section_type: type, data: dict, name: str):
 
 
 def config_from_mapping(raw: dict, source_path: Path | None = None) -> Config:
-    missing = sorted(set(_SECTIONS) - set(raw))
+    optional = optional_sections()
+    missing = sorted(set(_SECTIONS) - set(raw) - optional)
     unknown = sorted(set(raw) - set(_SECTIONS))
     if missing:
         raise ConfigError(f"config is missing sections: {', '.join(missing)}")
     if unknown:
         raise ConfigError(f"config has unknown sections: {', '.join(unknown)}")
-    sections = {name: build_section(kind, raw[name], name) for name, kind in _SECTIONS.items()}
+    sections = {
+        name: build_section(kind, raw.get(name, {}), name) for name, kind in _SECTIONS.items()
+    }
     return Config(source_path=source_path, **sections)
 
 

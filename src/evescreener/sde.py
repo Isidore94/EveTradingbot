@@ -26,6 +26,8 @@ from .store.db import Database
 TYPES_MEMBER = "types.jsonl"
 MARKET_GROUPS_MEMBER = "marketGroups.jsonl"
 SOLAR_SYSTEMS_MEMBER = "mapSolarSystems.jsonl"
+STARGATES_MEMBER = "mapStargates.jsonl"
+NPC_STATIONS_MEMBER = "npcStations.jsonl"
 
 
 class SdeError(RuntimeError):
@@ -40,6 +42,9 @@ class SdeLoadResult:
     solar_systems: int
     downloaded: bool
     bundle_path: Path
+    stargates: int = 0
+    npc_stations: int = 0
+    unresolved_stargates: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -47,6 +52,9 @@ class SdeLoadResult:
             "types": self.types,
             "market_groups": self.market_groups,
             "solar_systems": self.solar_systems,
+            "stargates": self.stargates,
+            "npc_stations": self.npc_stations,
+            "unresolved_stargates": self.unresolved_stargates,
             "downloaded": self.downloaded,
             "bundle_path": str(self.bundle_path),
         }
@@ -137,7 +145,13 @@ def parse_market_groups(bundle: Path) -> list[tuple]:
 
 
 def parse_solar_systems(bundle: Path) -> list[tuple]:
-    """Solar system -> region. This is what turns a killmail into demand data."""
+    """Solar system -> region, name and RAW security.
+
+    This is what turns a killmail into demand data, and — since H1a — what
+    decides whether a route is high-sec. The security stored is the raw float;
+    the displayed value that actually decides high-sec is computed once, in
+    `routes.display_security` (plan.md §23.9).
+    """
     rows: list[tuple] = []
     with zipfile.ZipFile(bundle) as archive, archive.open(SOLAR_SYSTEMS_MEMBER) as member:
         for line in member:
@@ -146,7 +160,98 @@ def parse_solar_systems(bundle: Path) -> list[tuple]:
             region_id = record.get("regionID")
             if system_id is None or region_id is None:
                 continue
-            rows.append((int(system_id), int(region_id), _english(record.get("name"))))
+            security = record.get("securityStatus")
+            rows.append(
+                (
+                    int(system_id),
+                    int(region_id),
+                    _english(record.get("name")),
+                    float(security) if security is not None else None,
+                )
+            )
+    return rows
+
+
+def _destination_system(record: dict) -> int | None:
+    """The system on the far side of one stargate.
+
+    Verified against build 3478781: `destination` is an object carrying both
+    `solarSystemID` and `stargateID`. An integer form is accepted too and
+    resolved through the gate index, because a schema this system does not own
+    can change shape — but anything else is left **unresolved and counted**
+    rather than guessed into an edge that does not exist.
+    """
+    destination = record.get("destination")
+    if isinstance(destination, dict):
+        system = destination.get("solarSystemID")
+        return int(system) if system is not None else None
+    return None
+
+
+def parse_stargates(bundle: Path) -> tuple[list[tuple], int]:
+    """The gate graph: `(stargate_id, system_id, destination_system_id)`.
+
+    Returns the rows and the count of gates whose destination could not be
+    resolved. A gate that cannot say where it goes is not an edge.
+    """
+    raw: list[dict] = []
+    with zipfile.ZipFile(bundle) as archive, archive.open(STARGATES_MEMBER) as member:
+        for line in member:
+            record = json.loads(line)
+            if record.get("_key") is not None and record.get("solarSystemID") is not None:
+                raw.append(record)
+
+    system_of_gate = {int(record["_key"]): int(record["solarSystemID"]) for record in raw}
+    rows: list[tuple] = []
+    unresolved = 0
+    for record in raw:
+        destination = _destination_system(record)
+        if destination is None:
+            # Integer destinations name the far *gate*; resolve it through the
+            # index rather than dropping the edge.
+            far = record.get("destination")
+            if isinstance(far, int):
+                destination = system_of_gate.get(int(far))
+        if destination is None:
+            unresolved += 1
+            continue
+        rows.append((int(record["_key"]), int(record["solarSystemID"]), int(destination)))
+    if raw and not rows:
+        raise SdeError(
+            f"{STARGATES_MEMBER} yielded no resolvable edges from {len(raw)} gates — "
+            "the destination field has changed shape and routing would be silently empty"
+        )
+    return rows, unresolved
+
+
+def parse_npc_stations(bundle: Path) -> list[tuple]:
+    """NPC stations: `(station_id, system_id, owner_id, operation_id, name)`.
+
+    **There is no name field in `npcStations.jsonl`** (verified against build
+    3478781: the record carries `solarSystemID`, `ownerID`, `operationID`,
+    `typeID` and geometry, and nothing else that names it). The name column is
+    therefore written NULL and the desk renders "<system> — station <id>". A
+    plausible-looking guessed name is worse than an id, because an id can be
+    checked in the client.
+    """
+    rows: list[tuple] = []
+    with zipfile.ZipFile(bundle) as archive, archive.open(NPC_STATIONS_MEMBER) as member:
+        for line in member:
+            record = json.loads(line)
+            station_id = record.get("_key")
+            system_id = record.get("solarSystemID")
+            if station_id is None or system_id is None:
+                continue
+            name = record.get("name")
+            rows.append(
+                (
+                    int(station_id),
+                    int(system_id),
+                    record.get("ownerID"),
+                    record.get("operationID"),
+                    _english(name) if name else None,
+                )
+            )
     return rows
 
 
@@ -179,6 +284,12 @@ def load_sde(
                 solar_systems=db.conn.execute(
                     "SELECT COUNT(*) AS n FROM sde_solar_systems"
                 ).fetchone()["n"],
+                stargates=db.conn.execute("SELECT COUNT(*) AS n FROM sde_stargates").fetchone()[
+                    "n"
+                ],
+                npc_stations=db.conn.execute(
+                    "SELECT COUNT(*) AS n FROM sde_npc_stations"
+                ).fetchone()["n"],
                 downloaded=False,
                 bundle_path=config.paths.sde / f"sde-{build}-jsonl.zip",
             )
@@ -192,12 +303,18 @@ def load_sde(
     types = db.replace_types(type_rows)
     groups = db.replace_market_groups(group_rows)
     systems = db.replace_solar_systems(parse_solar_systems(bundle))
+    stargate_rows, unresolved = parse_stargates(bundle)
+    stargates = db.replace_stargates(stargate_rows)
+    stations = db.replace_npc_stations(parse_npc_stations(bundle))
     db.set_meta("sde_build", str(build))
     return SdeLoadResult(
         build=build,
         types=types,
         market_groups=groups,
         solar_systems=systems,
+        stargates=stargates,
+        npc_stations=stations,
+        unresolved_stargates=unresolved,
         downloaded=downloaded,
         bundle_path=bundle,
     )

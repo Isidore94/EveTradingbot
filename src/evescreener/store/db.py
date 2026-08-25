@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..timeutil import iso, parse_iso, utcnow
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -66,12 +66,68 @@ CREATE INDEX IF NOT EXISTS idx_sde_types_name ON sde_types(name);
 CREATE INDEX IF NOT EXISTS idx_sde_types_group ON sde_types(market_group_id);
 
 -- Solar system -> region, so a killmail's system id becomes a market region.
+-- `security_status` is the RAW float CCP publishes. What decides high-sec is
+-- the DISPLAYED value, and the two disagree on exactly the band a hauler is
+-- ganked in -- see `routes.display_security` (plan.md §23.9).
 CREATE TABLE IF NOT EXISTS sde_solar_systems (
     solar_system_id INTEGER PRIMARY KEY,
     region_id INTEGER NOT NULL,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    security_status REAL
 );
 CREATE INDEX IF NOT EXISTS idx_sde_systems_region ON sde_solar_systems(region_id);
+
+-- The stargate graph (plan.md §23.8). One row per gate; the edge is
+-- `solar_system_id -> destination_system_id`. Routing is local, per CCP's own
+-- guidance: /route is uncached, has its own token group, and is for spot
+-- verification only -- never for a scan loop.
+CREATE TABLE IF NOT EXISTS sde_stargates (
+    stargate_id INTEGER PRIMARY KEY,
+    solar_system_id INTEGER NOT NULL,
+    destination_system_id INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sde_stargates_system ON sde_stargates(solar_system_id);
+
+-- NPC stations. `npcStations.jsonl` carries NO name field (verified against
+-- build 3478781), so a station with no operator-supplied name renders as
+-- "<system name> - station <id>". A guessed name is worse than an id.
+CREATE TABLE IF NOT EXISTS sde_npc_stations (
+    station_id INTEGER PRIMARY KEY,
+    solar_system_id INTEGER NOT NULL,
+    owner_id INTEGER,
+    operation_id INTEGER,
+    name TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sde_stations_system ON sde_npc_stations(solar_system_id);
+
+-- Computed routes, keyed by everything that could change the answer -- the SDE
+-- build included. A new build is a new key rather than an overwrite, so a
+-- cached route can never outlive the map it was computed on (plan.md §23.8).
+CREATE TABLE IF NOT EXISTS route_cache (
+    sde_build INTEGER NOT NULL,
+    origin INTEGER NOT NULL,
+    destination INTEGER NOT NULL,
+    profile TEXT NOT NULL,
+    avoid_hash TEXT NOT NULL,
+    systems TEXT,
+    jumps INTEGER,
+    known INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (sde_build, origin, destination, profile, avoid_hash)
+);
+
+-- Operator ship profiles for the hauling tab (plan.md §23.3). Operator-entered
+-- and operator-removed; nothing here is auto-created or auto-deleted.
+CREATE TABLE IF NOT EXISTS haul_profiles (
+    name TEXT PRIMARY KEY,
+    usable_cargo_m3 REAL NOT NULL,
+    ehp REAL,
+    ship_value_isk REAL,
+    seconds_per_jump REAL,
+    handling_minutes REAL,
+    created_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS sde_market_groups (
     market_group_id INTEGER PRIMARY KEY,
@@ -176,6 +232,9 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("universe", "median_unit_volume", "REAL"),
     ("universe", "tier", "TEXT"),
     ("universe", "price_pinned", "INTEGER NOT NULL DEFAULT 0"),
+    # H1a: the operator's deployed state.db has the three-column
+    # `sde_solar_systems` and no security. The next `sde` run fills it.
+    ("sde_solar_systems", "security_status", "REAL"),
 )
 
 
@@ -375,13 +434,108 @@ class Database:
             return conn.execute("SELECT COUNT(*) AS n FROM sde_market_groups").fetchone()["n"]
 
     def replace_solar_systems(self, rows) -> int:
+        """Replace the system table. Rows are `(id, region, name[, security])`.
+
+        A three-element row is accepted and stores security as NULL rather than
+        as a number nobody measured: a system whose security we do not know is
+        UNKNOWN, and UNKNOWN fails every high-sec test downstream (§4).
+        """
+        padded = [tuple(row) + (None,) * (4 - len(tuple(row))) for row in rows]
         with self.transaction() as conn:
             conn.execute("DELETE FROM sde_solar_systems")
             conn.executemany(
-                "INSERT INTO sde_solar_systems(solar_system_id, region_id, name) VALUES(?,?,?)",
-                rows,
+                "INSERT INTO sde_solar_systems(solar_system_id, region_id, name,"
+                " security_status) VALUES(?,?,?,?)",
+                padded,
             )
             return conn.execute("SELECT COUNT(*) AS n FROM sde_solar_systems").fetchone()["n"]
+
+    def replace_stargates(self, rows) -> int:
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM sde_stargates")
+            conn.executemany(
+                "INSERT INTO sde_stargates(stargate_id, solar_system_id,"
+                " destination_system_id) VALUES(?,?,?)",
+                rows,
+            )
+            return conn.execute("SELECT COUNT(*) AS n FROM sde_stargates").fetchone()["n"]
+
+    def replace_npc_stations(self, rows) -> int:
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM sde_npc_stations")
+            conn.executemany(
+                "INSERT INTO sde_npc_stations(station_id, solar_system_id, owner_id,"
+                " operation_id, name) VALUES(?,?,?,?,?)",
+                [tuple(row) + (None,) * (5 - len(tuple(row))) for row in rows],
+            )
+            return conn.execute("SELECT COUNT(*) AS n FROM sde_npc_stations").fetchone()["n"]
+
+    # -- the map -----------------------------------------------------------
+    def system_security(self) -> dict[int, float]:
+        """`system_id -> raw security`. A NULL security is absent, not zero."""
+        return {
+            int(row["solar_system_id"]): float(row["security_status"])
+            for row in self.conn.execute(
+                "SELECT solar_system_id, security_status FROM sde_solar_systems"
+                " WHERE security_status IS NOT NULL"
+            )
+        }
+
+    def system_names(self) -> dict[int, str]:
+        return {
+            int(row["solar_system_id"]): str(row["name"])
+            for row in self.conn.execute("SELECT solar_system_id, name FROM sde_solar_systems")
+        }
+
+    def system_by_name(self, name: str):
+        return self.conn.execute(
+            "SELECT * FROM sde_solar_systems WHERE name=? COLLATE NOCASE", (name,)
+        ).fetchone()
+
+    def stargate_edges(self) -> list[tuple[int, int]]:
+        """Undirected-in-practice system pairs. Both directions are stored."""
+        return [
+            (int(row["solar_system_id"]), int(row["destination_system_id"]))
+            for row in self.conn.execute(
+                "SELECT solar_system_id, destination_system_id FROM sde_stargates"
+            )
+        ]
+
+    def station_systems(self) -> dict[int, int]:
+        """`station_id -> system_id` for every NPC station in the SDE."""
+        return {
+            int(row["station_id"]): int(row["solar_system_id"])
+            for row in self.conn.execute("SELECT station_id, solar_system_id FROM sde_npc_stations")
+        }
+
+    def station_row(self, station_id: int):
+        return self.conn.execute(
+            "SELECT * FROM sde_npc_stations WHERE station_id=?", (int(station_id),)
+        ).fetchone()
+
+    # -- ship profiles ------------------------------------------------------
+    def put_haul_profile(self, record: dict) -> None:
+        self.conn.execute(
+            "INSERT INTO haul_profiles(name, usable_cargo_m3, ehp, ship_value_isk,"
+            " seconds_per_jump, handling_minutes, created_at)"
+            " VALUES(:name,:usable_cargo_m3,:ehp,:ship_value_isk,:seconds_per_jump,"
+            ":handling_minutes,:created_at)"
+            " ON CONFLICT(name) DO UPDATE SET usable_cargo_m3=excluded.usable_cargo_m3,"
+            " ehp=excluded.ehp, ship_value_isk=excluded.ship_value_isk,"
+            " seconds_per_jump=excluded.seconds_per_jump,"
+            " handling_minutes=excluded.handling_minutes",
+            record,
+        )
+
+    def haul_profiles(self) -> list:
+        return list(self.conn.execute("SELECT * FROM haul_profiles ORDER BY name"))
+
+    def haul_profile(self, name: str):
+        return self.conn.execute("SELECT * FROM haul_profiles WHERE name=?", (name,)).fetchone()
+
+    def delete_haul_profile(self, name: str) -> bool:
+        cursor = self.conn.execute("DELETE FROM haul_profiles WHERE name=?", (name,))
+        return cursor.rowcount > 0
 
     def system_region_map(self) -> dict[int, int]:
         return {

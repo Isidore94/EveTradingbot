@@ -5,6 +5,60 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — §23 H1a: the map, and a router that says no
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **894 passed, 7
+deselected**, ruff check + format clean, `selftest` **12/12**. **Not
+LIVE_VALIDATED**: no route this engine produces has been flown.
+
+- **The SDE now carries the map.** `mapSolarSystems` contributes
+  `securityStatus`, `mapStargates` becomes a system-to-system edge table, and
+  `npcStations` becomes `sde_npc_stations`. Verified against build **3478781**:
+  `destination` is an object carrying `solarSystemID`, and **`npcStations`
+  has no name field at all** — so a station with no operator-supplied name
+  renders as "<system> — station <id>" rather than as a guess that cannot be
+  checked in the client. A gate whose destination will not resolve is counted,
+  not invented, and a bundle where *none* resolve fails loudly rather than
+  producing a router that answers "no route" to everything.
+- **`routes.py`: shortest, safer, high-sec-only, and UNKNOWN.** BFS, Dijkstra
+  with a configured penalty for entering non-high-sec, and a graph restricted
+  before the search. A disconnected pair, an unmapped system or a filter that
+  empties the graph returns UNKNOWN **with its reason and no jump count** —
+  there is no straight-line fallback anywhere in this module.
+- **High-sec is what the client displays.** `display_security` rounds half-up
+  to one decimal — deliberately not Python's `round`, whose banker's rounding
+  would send 0.45 to 0.4 and move the boundary by a whole system class — with
+  the one irregular case `0 < true_sec ≤ 0.05 → 0.1`. So 0.4499 is **not**
+  high-sec and 0.45 **is**, which is the band a hauler is actually ganked in.
+  An unknown security is never high-sec.
+- **A route carrying an unmeasured system reports an UNKNOWN minimum**, not a
+  minimum over the systems we happen to know — that would report the safest
+  possible reading of missing data.
+- **Measured on the real map, and fixtured.** Jita → Amarr is **11 jumps**
+  through **Ahbazon (0.4)**, and **34** on the high-sec-only profile. The
+  fixture is the whole gated k-space graph from build 3478781 (5,268 systems,
+  6,989 edges) so the assertion is about EVE rather than about a stub.
+- **The same BFS resolves buy-order ranges.** `jump_distance` is memoised per
+  (origin, bound) because a sweep asks it once per resting order, and it
+  ignores security entirely — an order's range reaches as far as it reaches.
+  Beyond the bound is **None**, which fails closed at every call site.
+- **The route cache is keyed, never edited.** SDE build, origin, destination,
+  profile, avoid list **and penalty** are all in the key, so a new build cannot
+  read the old build's routes and two `safer` runs at different penalties
+  cannot be confused. An UNKNOWN route is cached *as* UNKNOWN: a failed search
+  is expensive too.
+- **The migration reaches a database that already exists.** `state.db` holds
+  the paper ledger and the watchlist and is not regenerable, so
+  `security_status` is added by `ALTER TABLE` and the next `sde` run fills it;
+  a test drives the whole thing against a database built with the **old**
+  three-column schema and asserts no row is lost and NULL stays NULL.
+- **A whole config section can now be optional.** `[hauling]` and `[routes]`
+  declare defaults for every field, so an operator's existing `config.toml`
+  loads unchanged and `selftest` parity still passes — the same rule §21 R2
+  applied per field, applied per section. **Hub station ids were resolved from
+  the SDE**, each checked to sit in its hub system: Jita 60003760, Amarr
+  60008494, Dodixie 60011866, Rens 60004588, Hek 60005686.
+
 ## 2026-08-25 — plan.md §23 opened: the personalized HAULING tab (§17 D-33)
 
 **Status: PLAN ONLY in this commit — no code.** `plan.md` gains §23, the

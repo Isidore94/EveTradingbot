@@ -265,3 +265,53 @@ staleness_haircut_pct = 10.0
 collateral_multiple = 1.0
 # No freight quote -> no cross-region row, ever.
 enabled = true
+
+[routes]
+# The local stargate graph (plan.md §23.8). Routing is computed here, from the
+# SDE; CCP's /route endpoint is uncached and is used for spot checks only.
+# Which profile the hauling scan uses: "highsec" | "shorter" is not a profile —
+# the three are "shortest", "safer", "highsec".
+security_profile = "highsec"
+# Extra cost in jumps for entering a non-high-sec system on the "safer"
+# profile. 50 makes one low-sec hop worth fifty high-sec ones.
+safer_penalty = 50.0
+# Solar system IDS (not names) removed from the graph before any search.
+avoid_systems = []
+cache = true
+
+[hauling]
+# The personalized hauling tab (plan.md §23). Every number here is an
+# operator-editable default, not a derived constant.
+enabled = true
+# Execution stations, RESOLVED FROM THE SDE (build 3478781) and never from
+# memory. Each was checked to sit in the hub system named beside it.
+hub_station_ids = [
+  60003760,  # Jita IV - Moon 4 - Caldari Navy Assembly Plant (Jita, 30000142)
+  60008494,  # Amarr VIII (Oris) - Emperor Family Academy (Amarr, 30002187)
+  60011866,  # Dodixie IX - Moon 20 - Federation Navy Assembly Plant (Dodixie, 30002659)
+  60004588,  # Rens VI - Moon 8 - Brutor Tribe Treasury (Rens, 30002510)
+  60005686,  # Hek VIII - Moon 12 - Boundless Creation Factory (Hek, 30002053)
+]
+# Extra NPC destinations for the opportunistic detour mode (§23 H4).
+extra_destination_station_ids = []
+# How much depth is worth storing: the reduction keeps levels until it can
+# cover this much capital AND the largest configured cargo, times the margin.
+max_scan_capital_isk = 5000000000.0
+depth_safety_margin = 1.5
+# "isk_per_active_minute" | "net_profit" | "net_roi" | "isk_per_m3"
+default_objective = "isk_per_active_minute"
+# Daily-unit quantiles the liquidation scenarios are read at (low/base/high).
+liquidity_quantiles = [0.25, 0.5, 0.75]
+# LABELLED ASSUMPTIONS, never estimates (plan.md §23.7). Regional history has
+# no station split, so neither of these is derivable from the lake. The share
+# below becomes a measurement only when the operator's own fills can replace it.
+destination_share_prior = 0.25
+capture_share = [0.05, 0.15, 0.35]
+# Fewer completed bars than this -> every liquidation scenario is UNKNOWN.
+min_liquidity_bars = 10
+default_session_minutes = 30
+default_max_wait_days = 3
+default_seconds_per_jump = 55.0
+default_handling_minutes = 4.0
+max_exposure_pct_per_trade = 25.0
+max_exposure_pct_per_destination = 50.0

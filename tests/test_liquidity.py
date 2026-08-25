@@ -386,3 +386,36 @@ def test_an_immediate_exit_charges_isk_days_over_travel_time_not_sell_out_time(c
     assert "travel time" in plan.liquidation_reason
     # The sell-out scenario is still measured and still shown — beside it.
     assert plan.liquidity["known"] and plan.liquidity["scenarios"]["base"] > travel_days
+
+
+def test_bars_outside_the_window_do_not_become_a_measurement(config):
+    """A fallback to `frame.tail(window_days)` measured a market that has not
+    traded for a year and called it 500 units a day.
+
+    The reason field came back empty, `known` came back True, and that fed the
+    maker caps, the scenarios drawer and the reliability grade's
+    `destination_bars: ok`. Missing data is uncertainty, never confirmation.
+    """
+    stale = _bars([500] * 15, end="2025-08-20")
+    profile = measure_liquidity(
+        stale,
+        type_id=34,
+        region_id=DOMAIN,
+        min_bars=config.hauling.min_liquidity_bars,
+        now=NOW,
+    )
+    assert profile.known is False
+    assert profile.median_units is None
+    assert profile.quantile_units == {}
+    assert profile.bars_used == 0
+    assert "window" in profile.reason
+
+
+def test_a_dead_destination_cannot_grade_its_bars_as_measured(config, db):
+    """The grade's `destination_bars` component must follow the same answer."""
+    from evescreener.liquidity import RELIABILITY_WEIGHTS, reliability_grade
+
+    stale = measure_liquidity(_bars([500] * 15, end="2025-08-20"), type_id=34, region_id=DOMAIN)
+    components = dict.fromkeys(RELIABILITY_WEIGHTS, "ok")
+    components["destination_bars"] = "ok" if stale.known else "unknown"
+    assert reliability_grade(components, RELIABILITY_WEIGHTS)["grade"] == "D"

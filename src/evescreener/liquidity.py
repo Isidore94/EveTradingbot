@@ -136,17 +136,26 @@ def measure_liquidity(
 
     window_start = cutoff - pd.Timedelta(days=window_days).to_pytimedelta()
     window = frame[frame["_day"] >= window_start]
-    if window.empty:
-        window = frame.tail(window_days)
+    # **No fallback to the last N rows.** That fallback measured a market which
+    # had not traded for a year and reported 500 units a day with an empty
+    # reason — feeding the maker caps, the scenarios drawer and the reliability
+    # grade's `destination_bars: ok`. Bars outside the window are not evidence
+    # about the window; an empty window falls through to the `min_bars` refusal
+    # below and says so.
 
-    volumes = pd.to_numeric(window["volume"], errors="coerce").dropna()
+    volumes = (
+        pd.to_numeric(window["volume"], errors="coerce").dropna()
+        if not window.empty
+        else pd.Series(dtype="float64")
+    )
     if len(volumes) < int(min_bars):
         return replace(
             profile,
             bars_used=int(len(volumes)),
             reason=(
-                f"{len(volumes)} completed bar(s) in the window against a "
-                f"{int(min_bars)}-bar minimum — the volume distribution is UNKNOWN"
+                f"{len(volumes)} completed bar(s) in the {int(window_days)}-day window "
+                f"against a {int(min_bars)}-bar minimum — the volume distribution is "
+                "UNKNOWN"
             ),
         )
 

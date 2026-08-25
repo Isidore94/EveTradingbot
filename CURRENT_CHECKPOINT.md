@@ -78,6 +78,12 @@ measurements only when your own recorded fills can replace them.
       moves when the order is repriced. The page currently labels the column
       "last placed **or repriced** (unverified)" because nobody knows. One
       observation settles it, and the answer belongs in §23.6.
+- [ ] **Record the measured scan wall-clock on the real five-hub lake**, beside
+      the depth-size measurement below. The remediation measured a synthetic
+      100,000-row generation: the depth index fell from **9.0 s to 0.5 s** per
+      region and a one-pair scan from **18.8 s to 1.4 s**, which extrapolates
+      to roughly ten seconds for five hubs — but a synthetic book has one level
+      shape and the real one does not.
 - [ ] **Record the measured depth size per five-hub generation** — rows and
       bytes — into `plan.md` §17, then set retention from that number rather
       than from a guess. `data/depth/region=*/date=*.parquet` after a

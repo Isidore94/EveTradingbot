@@ -714,3 +714,35 @@ def test_a_pair_with_no_route_at_all_is_neither(config):
     scan = _blocked_scan(config, graph, _profile(security_profile="shortest"))
     rejection = scan.rejected_for(NO_ROUTE)[0]
     assert "avoid list" not in rejection.detail
+
+
+def test_curves_from_depth_rebuilds_exactly_what_the_reduction_wrote(config):
+    """Pins the index the scan is built on, so it can be made fast safely."""
+    from evescreener.hauling import curves_from_depth
+
+    reduction = reduce_depth(
+        _orders([(100.0, 10.0), (110.0, 5.0)], buy=False, station=JITA_44, system=JITA)
+        + _orders([(90.0, 7.0)], buy=True, station=JITA_44, system=JITA),
+        region_id=FORGE,
+        stations={JITA_44: JITA},
+        bound=DepthBound(max_capital_isk=1e12, max_cargo_m3=1e12, safety_margin=1.0),
+        sweep_ts=SWEEP,
+    )
+    curves = curves_from_depth(reduction.frame)
+    assert set(curves) == {(JITA_44, 34, "sell"), (JITA_44, 34, "buy")}
+
+    sell = curves[(JITA_44, 34, "sell")]
+    assert [level.price for level in sell.levels] == [100.0, 110.0]
+    assert [level.qty for level in sell.levels] == [10.0, 5.0]
+    assert [level.cumulative_qty for level in sell.levels] == [10.0, 15.0]
+    assert sell.levels[-1].cumulative_notional == pytest.approx(100 * 10 + 110 * 5)
+    assert sell.levels[0].order_count == 1
+    assert sell.levels[0].structure_share == pytest.approx(0.0)
+    assert sell.levels[0].oldest_issued == "2026-08-20T00:00:00Z"
+    assert sell.complete is True
+    assert sell.generation == (FORGE, SWEEP)
+    assert sell.side == "sell" and sell.type_id == 34 and sell.execution_location_id == JITA_44
+
+    buy = curves[(JITA_44, 34, "buy")]
+    assert [level.price for level in buy.levels] == [90.0]
+    assert buy.breakpoints == (7.0,)

@@ -298,3 +298,39 @@ def test_a_close_with_no_numbers_at_all_records_neither(ledger, vocabulary):
     assert close["cost_source"] is None
     assert close["realized_net_isk"] is None and close["assumed_net_isk"] is None
     assert ledger.tally().unresolved_closes == 1
+
+
+# -- 4. a report is a file someone has to open ----------------------------
+
+
+def test_the_rejected_list_is_capped_per_reason_and_says_what_it_omitted(config):
+    """Uncapped, a real five-hub scan serialised ~10^6 Rejection objects into
+    a JSON file. Counts are cheap and stay whole; the detail is capped — and
+    never silently, because a truncated list that does not say so is a claim
+    that nothing else was rejected."""
+    scan = _empty_scan(config)
+    scan.rejected.clear()
+    for index in range(120):
+        scan.rejected.append(
+            Rejection(
+                reason="OVER_CARGO",
+                type_id=index,
+                source_station=60003760,
+                dest_station=60008494,
+                detail="too big",
+            )
+        )
+    for index in range(3):
+        scan.rejected.append(Rejection(reason="NO_ROUTE", type_id=index))
+
+    report = build_haul_report(scan, config=config, rejected_detail_cap=50)
+    # The histogram is whole — it is the denominator.
+    assert report["rejection_counts"] == {"OVER_CARGO": 120, "NO_ROUTE": 3}
+    assert len(report["rejected"]) == 53
+    assert report["rejected_truncated"] == {"OVER_CARGO": 70}
+    assert "70" in render_haul_report(report)
+
+
+def test_a_report_under_the_cap_says_nothing_was_omitted(config):
+    report = build_haul_report(_empty_scan(config), config=config)
+    assert report["rejected_truncated"] == {}

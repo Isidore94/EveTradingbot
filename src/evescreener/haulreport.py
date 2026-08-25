@@ -35,6 +35,14 @@ __all__ = [
 #: can be told apart by what computed them rather than by their dates.
 CALC_VERSION = "haul-1"
 
+#: How many rejected candidates keep their full detail, **per reason**. The
+#: counts are always whole — they are the denominator — but a five-hub scan can
+#: reject hundreds of thousands of candidates, and serialising every one turned
+#: a report into hundreds of megabytes nobody could open. Truncation is
+#: reported, never silent: a shortened list that does not say so is a claim
+#: that nothing else was rejected.
+REJECTED_DETAIL_CAP = 50
+
 REPORT_PREFIX = "hauling"
 
 
@@ -119,8 +127,14 @@ def _non_overlapping(scan: HaulScan):
     return kept, withheld
 
 
-def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:
+def build_haul_report(
+    scan: HaulScan,
+    *,
+    config: Config | None = None,
+    rejected_detail_cap: int = REJECTED_DETAIL_CAP,
+) -> dict:
     """The immutable payload. Everything a reader needs to argue with it."""
+    rejected, omitted = _capped_rejections(scan, rejected_detail_cap)
     report = {
         "kind": "hauling_scan",
         "calc_version": CALC_VERSION,
@@ -144,7 +158,8 @@ def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:
         "unknown_pairs": scan.unknown_pairs,
         "rows": [_row(plan) for plan in scan.plans],
         "basket": haul_basket(scan, config=config).as_dict(),
-        "rejected": [rejection.as_dict() for rejection in scan.rejected],
+        "rejected": rejected,
+        "rejected_truncated": omitted,
         "notes": scan.notes,
         "caveats": [SNAPSHOT_CAVEAT, ORDER_AGE_CAVEAT],
         "limitations": list(LIMITATIONS),
@@ -183,6 +198,21 @@ LIMITATIONS = (
     "Routes come from the local SDE graph at the build stamped on this report. "
     "A patch that changes the map invalidates them and nothing here can tell.",
 )
+
+
+def _capped_rejections(scan: HaulScan, cap: int) -> tuple[list[dict], dict[str, int]]:
+    """Full detail up to `cap` per reason, plus what that left out."""
+    kept: list[dict] = []
+    omitted: dict[str, int] = {}
+    seen: dict[str, int] = {}
+    for rejection in scan.rejected:
+        count = seen.get(rejection.reason, 0)
+        seen[rejection.reason] = count + 1
+        if cap and count >= cap:
+            omitted[rejection.reason] = omitted.get(rejection.reason, 0) + 1
+            continue
+        kept.append(rejection.as_dict())
+    return kept, omitted
 
 
 def _row(plan) -> dict:
@@ -304,9 +334,18 @@ def render_haul_report(report: dict) -> str:
     if rejection_counts:
         lines.append("| reason | count |")
         lines.append("|---|---:|")
+        omitted = report.get("rejected_truncated") or {}
         for reason, count in rejection_counts.items():
             lines.append(f"| `{reason}` | {count:,} |")
         lines.append("")
+        if omitted:
+            lines.append(
+                "Detail was capped per reason; the counts above are whole. Omitted "
+                "detail: "
+                + ", ".join(f"{reason} {count:,}" for reason, count in sorted(omitted.items()))
+                + "."
+            )
+            lines.append("")
 
     rows = report.get("rows") or []
     lines.append("## Plans")

@@ -298,3 +298,31 @@ def test_no_gui_module_imports_the_freight_comparison():
     assert offenders == [], "the desk must not be able to reach a third-party API: " + "; ".join(
         offenders
     )
+
+
+# -- 5. a control strip is dragged, not clicked once ----------------------
+
+
+def test_rapid_control_changes_launch_one_job_not_five(qtbot, haul_desk):
+    """A spin box emits on every step. Without a debounce, dragging capital
+    from 250 to 254 dispatched five scans: the token guard discarded four
+    results, but four jobs had already burned the four-thread pool."""
+    page = _page(qtbot, haul_desk)
+    launched = []
+    page.ensure_current = lambda **kwargs: launched.append(kwargs)
+
+    for value in (251.0, 252.0, 253.0, 254.0, 255.0):
+        page.capital.setValue(value)
+    assert launched == [], "nothing may start while the operator is still typing"
+
+    qtbot.wait(page.DEBOUNCE_MS + 250)
+    assert len(launched) == 1, f"one scan for one settled edit, got {len(launched)}"
+
+
+def test_the_debounce_still_lets_a_single_change_through(qtbot, haul_desk):
+    page = _page(qtbot, haul_desk)
+    launched = []
+    page.ensure_current = lambda **kwargs: launched.append(kwargs)
+    page.security.setCurrentText("safer")
+    qtbot.wait(page.DEBOUNCE_MS + 250)
+    assert len(launched) == 1

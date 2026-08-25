@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QCompleter,
@@ -82,12 +82,25 @@ class HaulingPage(DeskPage):
     title = "HAULING"
     heavy = True
 
+    #: How long the control strip must sit still before a scan starts. A spin
+    #: box emits on every step, so dragging capital from 250 to 254 dispatched
+    #: five scans: the token guard discarded four *results*, but four jobs had
+    #: already been handed to a four-thread pool.
+    DEBOUNCE_MS = 500
+
     # -- layout ------------------------------------------------------------
     def build(self) -> None:
         self._systems_loaded = False
         self._ships_loaded = False
         self._result = None
         self._loading = False
+
+        # Built before the controls, because laying them out sets their
+        # initial values and that fires their signals.
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(self.DEBOUNCE_MS)
+        self._debounce.timeout.connect(self._debounced_refresh)
 
         self.layout.addWidget(self._controls())
 
@@ -227,10 +240,23 @@ class HaulingPage(DeskPage):
 
     # -- controls ----------------------------------------------------------
     def _controls_changed(self) -> None:
+        """Restart the countdown. The operator is probably still adjusting."""
         if self._loading:
+            return
+        self._debounce.start()
+
+    def _debounced_refresh(self) -> None:
+        if self._shutdown:
             return
         self._save_filters()
         self.ensure_current(force=True)
+
+    def shutdown(self) -> None:
+        """Stop the countdown before the widgets go (§21 R7)."""
+        timer = getattr(self, "_debounce", None)
+        if timer is not None:
+            timer.stop()
+        super().shutdown()
 
     def _save_filters(self) -> None:
         try:

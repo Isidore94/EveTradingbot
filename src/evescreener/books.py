@@ -24,6 +24,7 @@ structure ids are 13-digit, NPC station ids are not.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -945,6 +946,25 @@ def q_walk(levels, quantity: float) -> QuantityWalk:
             else "the book at this station is not that deep"
         )
         return QuantityWalk(quantity=quantity, reason=reason)
+    # **A breakpoint is the common case, and its answer is already stored.**
+    # Candidate quantities ARE cumulative breakpoints (§23.10), so re-deriving
+    # `cumulative_notional` by walking every level again is work the reduction
+    # already did. The levels are sorted, so the lookup is a bisect; the
+    # arithmetic is identical either way, which is what the fixture pins.
+    exact = bisect_left(curve.levels, quantity - 1e-9, key=lambda level: level.cumulative_qty)
+    if exact < len(curve.levels):
+        level = curve.levels[exact]
+        if abs(level.cumulative_qty - quantity) <= 1e-9 and level.qty > 0:
+            following = [other for other in curve.levels[exact + 1 :] if other.qty > 0]
+            return QuantityWalk(
+                quantity=quantity,
+                value=level.cumulative_notional,
+                wap=level.cumulative_notional / level.cumulative_qty,
+                levels_consumed=sum(1 for other in curve.levels[: exact + 1] if other.qty > 0),
+                marginal_next_price=following[0].price if following else None,
+                known=True,
+            )
+
     value = 0.0
     taken = 0.0
     consumed = 0

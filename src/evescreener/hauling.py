@@ -546,42 +546,87 @@ def curves_from_depth(frame: pd.DataFrame) -> dict[tuple[int, int, str], DepthCu
 
     Built once per scan rather than per candidate: a real generation is tens of
     thousands of rows and a scan asks about most of them.
+
+    **One pass over plain lists, not a `groupby`.** Measured 2026-08-25 on a
+    synthetic 100,000-row generation: `groupby(...).itertuples()` with a
+    `.iloc[0]` per group took **9.0 s per region**, and two regions were
+    **18.4 s of a 18.8 s scan** — the ranking loop itself was 0.4 s. The cost
+    is pandas' per-group constant, paid five thousand times, so the fix is to
+    stop paying it per group: sort once, pull each column out as a list once,
+    and walk the rows detecting where the key changes.
     """
     curves: dict[tuple[int, int, str], DepthCurve] = {}
     if frame is None or frame.empty:
         return curves
     frame = frame.sort_values(["execution_location_id", "type_id", "side", "cumulative_qty"])
-    for (station, type_id, side), group in frame.groupby(
-        ["execution_location_id", "type_id", "side"], sort=False
-    ):
-        levels = tuple(
-            DepthLevel(
-                price=float(row.price),
-                qty=float(row.level_qty),
-                cumulative_qty=float(row.cumulative_qty),
-                cumulative_notional=float(row.cumulative_notional),
-                order_count=int(row.level_order_count or 0),
-                min_volume_excluded_qty=float(row.min_volume_excluded_qty or 0.0),
-                structure_share=(
-                    float(row.structure_share)
-                    if row.structure_share is not None
-                    and row.structure_share == row.structure_share
-                    else None
-                ),
-                oldest_issued=row.oldest_issued,
-                newest_issued=row.newest_issued,
+    columns = {
+        name: frame[name].to_list()
+        for name in (
+            "execution_location_id",
+            "type_id",
+            "side",
+            "price",
+            "level_qty",
+            "cumulative_qty",
+            "cumulative_notional",
+            "level_order_count",
+            "min_volume_excluded_qty",
+            "structure_share",
+            "oldest_issued",
+            "newest_issued",
+            "depth_complete",
+            "region_id",
+            "sweep_ts",
+        )
+    }
+    levels: list[DepthLevel] = []
+    key: tuple[int, int, str] | None = None
+    complete = True
+    generation: tuple[int, str] | None = None
+
+    def flush() -> None:
+        if key is not None and levels:
+            curves[key] = DepthCurve(
+                levels=tuple(levels),
+                complete=complete,
+                side=key[2],
+                type_id=key[1],
+                execution_location_id=key[0],
+                generation=generation,
             )
-            for row in group.itertuples()
+
+    for index in range(len(frame)):
+        row_key = (
+            int(columns["execution_location_id"][index]),
+            int(columns["type_id"][index]),
+            str(columns["side"][index]),
         )
-        first = group.iloc[0]
-        curves[(int(station), int(type_id), str(side))] = DepthCurve(
-            levels=levels,
-            complete=bool(group["depth_complete"].fillna(False).astype(bool).all()),
-            side=str(side),
-            type_id=int(type_id),
-            execution_location_id=int(station),
-            generation=(int(first["region_id"]), str(first["sweep_ts"])),
+        if row_key != key:
+            flush()
+            key = row_key
+            levels = []
+            complete = True
+            generation = (
+                int(columns["region_id"][index]),
+                str(columns["sweep_ts"][index]),
+            )
+        share = columns["structure_share"][index]
+        levels.append(
+            DepthLevel(
+                price=float(columns["price"][index]),
+                qty=float(columns["level_qty"][index]),
+                cumulative_qty=float(columns["cumulative_qty"][index]),
+                cumulative_notional=float(columns["cumulative_notional"][index]),
+                order_count=int(columns["level_order_count"][index] or 0),
+                min_volume_excluded_qty=float(columns["min_volume_excluded_qty"][index] or 0.0),
+                # NaN is UNKNOWN, and it is not 0% of the level in a structure.
+                structure_share=(float(share) if share is not None and share == share else None),
+                oldest_issued=columns["oldest_issued"][index],
+                newest_issued=columns["newest_issued"][index],
+            )
         )
+        complete = complete and bool(columns["depth_complete"][index])
+    flush()
     return curves
 
 

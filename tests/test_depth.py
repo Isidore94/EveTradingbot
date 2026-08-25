@@ -375,3 +375,25 @@ def test_the_reduction_searches_from_the_station_not_from_every_order():
     )
     assert len(reduction.frame) == 2, "both bids reach a five-jump range"
     assert list(graph._distance_cache) == [(JITA, 40)], "one search, rooted at the station"
+
+
+def test_a_walk_to_an_exact_breakpoint_reads_the_stored_cumulative():
+    """The common case is a breakpoint, and the answer is already stored.
+
+    Re-walking every level to re-derive a number the reduction already wrote
+    is what makes a five-hub scan take minutes. The arithmetic must be
+    identical either way — that is what this pins.
+    """
+    curve = DepthCurve.from_pairs([(100.0, 10.0), (110.0, 10.0), (130.0, 5.0)])
+    for level in curve.levels:
+        walk = q_walk(curve, level.cumulative_qty)
+        assert walk.known
+        assert walk.value == pytest.approx(level.cumulative_notional)
+        assert walk.wap == pytest.approx(level.cumulative_notional / level.cumulative_qty)
+    # The shortcut must not lose the marginal price or the level count.
+    walk = q_walk(curve, 20.0)
+    assert walk.levels_consumed == 2
+    assert walk.marginal_next_price == pytest.approx(130.0)
+    # A partial level still walks.
+    partial = q_walk(curve, 15.0)
+    assert partial.wap == pytest.approx((100 * 10 + 110 * 5) / 15)

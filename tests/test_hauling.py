@@ -609,3 +609,47 @@ def test_a_known_volume_still_ranks_on_isk_per_cubic_metre(config):
         profile=_profile(objective="isk_per_m3"),
     )
     assert scan.plans and scan.dropped_unrankable == {}
+
+
+def test_a_profile_row_with_null_timings_inherits_the_class_defaults(config, db):
+    """A NULL column defaulted to 0.0 where the class default is 4.0 minutes.
+
+    Zero handling on a zero-jump detour makes active minutes zero, which makes
+    ISK-per-minute None, which used to delete the plan from the default
+    ranking with no record anywhere.
+    """
+    from evescreener.timeutil import iso, utcnow
+
+    db.put_haul_profile(
+        {
+            "name": "legacy",
+            "usable_cargo_m3": 6000.0,
+            "ehp": None,
+            "ship_value_isk": None,
+            "seconds_per_jump": None,
+            "handling_minutes": None,
+            "created_at": iso(utcnow()),
+        }
+    )
+    ship = ShipProfile.from_row(db.haul_profile("legacy"))
+    assert ship.handling_minutes == 4.0
+    assert ship.seconds_per_jump == 55.0
+
+
+def test_a_plan_with_no_measurable_minutes_is_counted_not_deleted(config):
+    """The residual case, once the profile defaults are sane: if the minutes
+    really are zero, the plan is recorded as unrankable rather than vanishing."""
+    ship = ShipProfile(
+        name="instant", usable_cargo_m3=1e9, seconds_per_jump=0.0, handling_minutes=0.0
+    )
+    profile = HaulProfile(
+        current_system=JITA,
+        ship=ship,
+        capital_isk=5e9,
+        max_exposure_isk=5e9,
+        session_minutes=600.0,
+        security_profile="shortest",
+    )
+    scan = _pair_scan(config, [(100.0, 1000.0)], [(300.0, 1000.0)], profile=profile)
+    assert scan.plans == []
+    assert scan.dropped_unrankable == {"ACTIVE_MINUTES_UNKNOWN": 1}

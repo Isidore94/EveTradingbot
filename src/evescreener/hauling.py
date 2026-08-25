@@ -33,7 +33,7 @@ reason rather than a row priced off whichever leg happened to be fresh.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 
 import pandas as pd
 
@@ -156,15 +156,31 @@ class ShipProfile:
 
     @classmethod
     def from_row(cls, row) -> ShipProfile:
+        """Build from a stored row, inheriting this class's defaults on NULL.
+
+        A NULL used to become **0.0 handling minutes** where the declared
+        default is 4.0 — and a zero-jump `along_route` detour with zero
+        handling makes active minutes zero, ISK-per-minute UNKNOWN, and the
+        plan disappeared from the default ranking with no record anywhere. The
+        defaults are read from the dataclass so there is one definition site
+        rather than two that can drift. `0.0` stored deliberately is kept as
+        `0.0`; only NULL inherits.
+        """
+        defaults = {entry.name: entry.default for entry in fields(cls)}
+
+        def value(column: str, fallback=None):
+            stored = row[column]
+            if stored is None:
+                return defaults.get(column, fallback)
+            return float(stored)
+
         return cls(
             name=str(row["name"]),
             usable_cargo_m3=float(row["usable_cargo_m3"] or 0.0),
-            ehp=float(row["ehp"]) if row["ehp"] is not None else None,
-            ship_value_isk=(
-                float(row["ship_value_isk"]) if row["ship_value_isk"] is not None else None
-            ),
-            seconds_per_jump=float(row["seconds_per_jump"] or 55.0),
-            handling_minutes=float(row["handling_minutes"] or 0.0),
+            ehp=value("ehp"),
+            ship_value_isk=value("ship_value_isk"),
+            seconds_per_jump=float(value("seconds_per_jump")),
+            handling_minutes=float(value("handling_minutes")),
         )
 
     def as_dict(self) -> dict:

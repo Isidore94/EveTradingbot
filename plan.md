@@ -2761,8 +2761,21 @@ Every rejected candidate carries exactly one, and the rejected set is
 **queryable rather than discarded**: `STALE_BOOK`, `DEPTH_TRUNCATED`,
 `DEST_DEPTH_SHORT`, `MIN_VOLUME_BLOCKED`, `ROUTE_BLOCKED_SECURITY`, `NO_ROUTE`,
 `OVER_CAPITAL`, `OVER_EXPOSURE`, `OVER_CARGO`, `OVER_JUMPS`, `OVER_TIME`,
-`LIQUIDATION_UNKNOWN`, `MARGINAL_NET_NEGATIVE`. "Nothing cleared" with a
-denominator and a reason histogram is an answer; an empty table is not.
+`LIQUIDATION_UNKNOWN`, `MARGINAL_NET_NEGATIVE`, **`VOLUME_UNKNOWN`**. "Nothing
+cleared" with a denominator and a reason histogram is an answer; an empty table
+is not.
+
+**`VOLUME_UNKNOWN` was added 2026-08-25** after an adversarial audit reproduced
+the alternative: a type absent from the SDE's packaged-volume map got
+`cargo=None`, which **skipped the cargo cap entirely** — a million units ranked
+against a 60,000 m³ hold with no rejection. A hold is a cap even when the m³ is
+unknown; UNKNOWN is never permission (§4).
+
+**Separately counted, and not a rejection:** `dropped_unrankable` records
+priced plans the *chosen objective* cannot score — an ISK/m³ ranking of a type
+with no measured volume. Another objective would rank them, so they are not
+refused; but they were previously filtered out of the ranking in silence, which
+made the scan report a denominator it had not measured.
 
 ### §23.14 What this track never does
 

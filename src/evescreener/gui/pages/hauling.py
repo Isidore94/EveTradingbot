@@ -384,6 +384,7 @@ class HaulingPage(DeskPage):
                 self.table.badge_row(index, badge)
 
         counts = scan.rejection_counts
+        dropped = scan.dropped_unrankable
         self.summary.setText(
             f"{len(scan.plans):,} plan(s) from {scan.candidates_considered:,} priced "
             f"candidate(s) across {scan.pairs_considered} station pair(s); "
@@ -391,6 +392,12 @@ class HaulingPage(DeskPage):
             + (
                 " — " + ", ".join(f"{reason} {count}" for reason, count in counts.items())
                 if counts
+                else ""
+            )
+            + (
+                " · unrankable under this objective: "
+                + ", ".join(f"{reason} {count}" for reason, count in sorted(dropped.items()))
+                if dropped
                 else ""
             )
             + (" · " + " · ".join(scan.notes) if scan.notes else "")

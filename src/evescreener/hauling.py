@@ -72,6 +72,10 @@ OVER_JUMPS = "OVER_JUMPS"
 OVER_TIME = "OVER_TIME"
 LIQUIDATION_UNKNOWN = "LIQUIDATION_UNKNOWN"
 MARGINAL_NET_NEGATIVE = "MARGINAL_NET_NEGATIVE"
+#: The SDE has no packaged volume for this type, so neither the hold nor
+#: ISK/m³ can be evaluated. Added 2026-08-25: `cargo=None` was skipping the
+#: cargo cap entirely, which is UNKNOWN acting as permission (§4).
+VOLUME_UNKNOWN = "VOLUME_UNKNOWN"
 
 REJECTIONS = (
     STALE_BOOK,
@@ -87,6 +91,7 @@ REJECTIONS = (
     OVER_TIME,
     LIQUIDATION_UNKNOWN,
     MARGINAL_NET_NEGATIVE,
+    VOLUME_UNKNOWN,
 )
 
 #: Ranking objectives. The default is deliberately the conservative one: a
@@ -470,6 +475,10 @@ class HaulScan:
     plans: list[HaulPlan] = field(default_factory=list)
     rejected: list[Rejection] = field(default_factory=list)
     unknown_pairs: list[dict] = field(default_factory=list)
+    #: Priced plans the chosen objective could not score, by reason. They are
+    #: not rejections — another objective would rank them — but a scan that
+    #: drops them silently reports a denominator it did not measure.
+    dropped_unrankable: dict = field(default_factory=dict)
     generations: dict = field(default_factory=dict)
     pairs_considered: int = 0
     types_considered: int = 0
@@ -495,6 +504,7 @@ class HaulScan:
             "rejected": [rejection.as_dict() for rejection in self.rejected],
             "rejection_counts": self.rejection_counts,
             "unknown_pairs": self.unknown_pairs,
+            "dropped_unrankable": self.dropped_unrankable,
             "generations": {str(key): value for key, value in self.generations.items()},
             "pairs_considered": self.pairs_considered,
             "types_considered": self.types_considered,
@@ -781,12 +791,36 @@ def scan_hauls(
             )
 
     objective = profile.objective
-    scan.plans = [plan for plan in scan.plans if plan.objective_value(objective) is not None]
+    rankable: list[HaulPlan] = []
+    for plan in scan.plans:
+        if plan.objective_value(objective) is not None:
+            rankable.append(plan)
+            continue
+        # A plan the chosen objective cannot score used to be filtered out
+        # here in silence, so the scan's own denominators reported it as never
+        # having existed. It is counted by the reason it could not be scored.
+        reason = _unrankable_reason(plan, objective)
+        scan.dropped_unrankable[reason] = scan.dropped_unrankable.get(reason, 0) + 1
+    scan.plans = rankable
     scan.plans.sort(key=lambda plan: -float(plan.objective_value(objective)))
     scan.plans = [
         replace(plan, rank_score=plan.objective_value(objective)) for plan in scan.plans[:max_plans]
     ]
     return scan
+
+
+def _unrankable_reason(plan: HaulPlan, objective: str) -> str:
+    """Why the chosen objective could not score this plan.
+
+    Not a rejection — the plan is priced and sound, and another objective would
+    rank it. It is a fact about *this* run's ranking, so it is counted apart
+    from the rejection vocabulary rather than dressed up as one.
+    """
+    if objective == ISK_PER_M3 and plan.packaged_volume_m3 is None:
+        return VOLUME_UNKNOWN
+    if objective == ISK_PER_ACTIVE_MINUTE and not plan.active_minutes:
+        return "ACTIVE_MINUTES_UNKNOWN"
+    return f"{objective.upper()}_UNKNOWN"
 
 
 def _stale_reason(snapshot: DepthSnapshot | None, station: Station) -> str | None:
@@ -979,6 +1013,26 @@ def _best_plan(
     for quantity in quantities:
         scan.candidates_considered += 1
         cargo = quantity * volume if volume else None
+        if volume is None and profile.ship.usable_cargo_m3:
+            # A hold is a cap even when the m³ is unknown. Letting an
+            # unmeasurable volume through would rank a plan that cannot be
+            # loaded — UNKNOWN as permission, which is the one thing it never
+            # is (§4). Larger sizes fail identically, so stop here.
+            scan.rejected.append(
+                Rejection(
+                    reason=VOLUME_UNKNOWN,
+                    type_id=int(type_id),
+                    type_name=name,
+                    source_station=source.station_id,
+                    dest_station=destination.station_id,
+                    quantity=quantity,
+                    detail=(
+                        "the SDE has no packaged volume for this type, so it cannot be "
+                        f"checked against {profile.ship.usable_cargo_m3:,.0f} m³ of hold"
+                    ),
+                )
+            )
+            break
         if (
             cargo is not None
             and profile.ship.usable_cargo_m3

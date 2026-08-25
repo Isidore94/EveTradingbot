@@ -32,6 +32,7 @@ from evescreener.hauling import (
     OVER_TIME,
     ROUTE_BLOCKED_SECURITY,
     STALE_BOOK,
+    VOLUME_UNKNOWN,
     HaulProfile,
     ShipProfile,
     Station,
@@ -466,6 +467,7 @@ def test_a_source_shallower_than_the_destination_refuses_nothing(config):
 
 
 def _pair_scan(config, asks, bids, *, profile=None, packaged=0.01):
+    """`packaged=None` means the type is absent from the SDE volume map."""
     depths = {
         FORGE: _snapshot(
             _orders(asks, buy=False, station=JITA_44, system=JITA),
@@ -487,7 +489,7 @@ def _pair_scan(config, asks, bids, *, profile=None, packaged=0.01):
         depths=depths,
         graph=_graph(),
         names={34: "Tritanium"},
-        packaged_volume={34: packaged},
+        packaged_volume={} if packaged is None else {34: packaged},
         now=NOW,
     )
 
@@ -559,3 +561,51 @@ def test_every_plan_in_a_mixed_scan_makes_money(config):
     assert all(plan.net_profit > 0 for plan in scan.plans)
     assert {plan.type_id for plan in scan.plans} == {34}
     assert scan.rejected_for(MARGINAL_NET_NEGATIVE)
+
+
+# -- 5. an unknown packaged volume is UNKNOWN, not a free pass -------------
+
+
+def test_a_type_with_no_packaged_volume_cannot_slip_past_the_hold(config):
+    """UNKNOWN was acting as permission: `cargo=None` skipped the cargo check
+    entirely, so a million units ranked against a 60,000 m³ hold."""
+    scan = _pair_scan(
+        config,
+        [(100.0, 1_000_000.0)],
+        [(300.0, 1_000_000.0)],
+        packaged=None,
+        profile=_profile(cargo_m3=60_000.0),
+    )
+    assert scan.plans == [], "a hold is a cap even when the m³ is unknown"
+    rejections = scan.rejected_for(VOLUME_UNKNOWN)
+    assert rejections, f"expected VOLUME_UNKNOWN; got {scan.rejection_counts}"
+    assert "packaged volume" in rejections[0].detail
+
+
+def test_a_plan_dropped_for_an_unrankable_objective_is_counted_not_vanished(config):
+    """The second half of the same defect: a plan the objective cannot score
+    was filtered out of the ranking silently, so the scan's own denominators
+    said nothing had been examined."""
+    scan = _pair_scan(
+        config,
+        [(100.0, 1000.0)],
+        [(300.0, 1000.0)],
+        packaged=None,
+        # No hold declared, so nothing is bypassed — but ISK/m³ still cannot be
+        # computed for a type whose m³ is unknown.
+        profile=_profile(cargo_m3=0.0, objective="isk_per_m3"),
+    )
+    assert scan.plans == []
+    assert scan.dropped_unrankable, "a dropped plan is a fact about the scan"
+    assert sum(scan.dropped_unrankable.values()) == 1
+    assert scan.as_dict()["dropped_unrankable"] == scan.dropped_unrankable
+
+
+def test_a_known_volume_still_ranks_on_isk_per_cubic_metre(config):
+    scan = _pair_scan(
+        config,
+        [(100.0, 1000.0)],
+        [(300.0, 1000.0)],
+        profile=_profile(objective="isk_per_m3"),
+    )
+    assert scan.plans and scan.dropped_unrankable == {}

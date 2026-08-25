@@ -86,6 +86,9 @@ def build_haul_report(scan: HaulScan, *, config: Config | None = None) -> dict:
             "rejected": len(scan.rejected),
         },
         "rejection_counts": scan.rejection_counts,
+        # Priced plans this run's objective could not score. Not rejections —
+        # another objective would rank them — but never silent either.
+        "dropped_unrankable": scan.dropped_unrankable,
         "unknown_pairs": scan.unknown_pairs,
         "rows": [_row(plan) for plan in scan.plans],
         "basket": haul_basket(scan, config=config).as_dict(),
@@ -237,6 +240,14 @@ def render_haul_report(report: dict) -> str:
             "",
         ]
     )
+    dropped = report.get("dropped_unrankable") or {}
+    if dropped:
+        lines.append(
+            "Priced but unrankable under this objective: "
+            + ", ".join(f"{reason} {count:,}" for reason, count in sorted(dropped.items()))
+            + " — another objective would rank them."
+        )
+        lines.append("")
     rejection_counts = report.get("rejection_counts") or {}
     if rejection_counts:
         lines.append("| reason | count |")

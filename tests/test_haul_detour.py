@@ -20,7 +20,9 @@ from dataclasses import replace
 
 import pytest
 
-from evescreener.crossregion import FreightQuote
+pytestmark = pytest.mark.gui
+
+from evescreener.crossregion import FreightQuote  # noqa: E402
 from evescreener.haulfreight import attach_freight, freight_comparison
 from evescreener.hauling import ALONG_ROUTE, NO_ROUTE, Station, scan_hauls
 from evescreener.routes import RouteGraph
@@ -293,3 +295,40 @@ def test_freight_disabled_in_config_is_an_unknown_column_not_a_crash(config, wor
     disabled = _replace(config, freight=_replace(config.freight, enabled=False))
     payload = freight_comparison(disabled, db, _plan(config, worked))
     assert payload["state"] == "UNKNOWN" and "disabled" in payload["reason"]
+
+
+# -- 4. along_route without a destination is not a mode --------------------
+
+
+def test_along_route_without_an_intended_destination_is_refused(config):
+    """It used to charge as `dedicated` in silence, which contradicts §23.3:
+    the whole point of the mode is that only the incremental detour is
+    charged, and there is no increment without a trip to be incremental to."""
+    with pytest.raises(ValueError, match="along_route"):
+        replace(_profile(), mode=ALONG_ROUTE, intended_destination=None)
+
+
+def test_dedicated_mode_needs_no_destination(config):
+    profile = replace(_profile(), mode="dedicated", intended_destination=None)
+    assert profile.mode == "dedicated"
+
+
+def test_the_page_falls_back_to_dedicated_with_a_visible_note(qtbot, config, db, monkeypatch):
+    """The worker must never construct an invalid profile and never crash.
+
+    A control strip can always be half-filled — the mode combo says
+    along_route and the destination box is empty — so the page ranks it as
+    dedicated and says on screen that it did.
+    """
+    pytest.importorskip("PySide6.QtWidgets")
+    from test_gui_hauling import _page, _run, haul_desk  # noqa: F401
+
+    desk = haul_desk.__wrapped__(config, db, monkeypatch)
+    page = _page(qtbot, desk)
+    page.mode.setCurrentText("along_route")
+    page.destination.setText("")
+    result = _run(qtbot, page)
+    scan = result["scan"]
+    assert scan.profile.mode == "dedicated"
+    assert any("along_route needs a destination" in note for note in scan.notes)
+    assert "along_route needs a destination" in page.summary.text()

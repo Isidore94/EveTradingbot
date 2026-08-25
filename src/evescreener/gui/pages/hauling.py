@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
 )
 
 from ...hauling import (
+    ALONG_ROUTE,
+    DEDICATED,
     MODES,
     OBJECTIVES,
     ORDER_AGE_CAVEAT,
@@ -325,12 +327,24 @@ class HaulingPage(DeskPage):
             intended = _resolve_system(by_name, controls.get("destination"), unresolved)
             max_jumps = int(controls.get("max_jumps") or 0) or None
 
+            # A control strip can always be half-filled. The engine refuses an
+            # along_route profile with nowhere to go, so the page resolves the
+            # contradiction itself — ranked as dedicated, and it says so on
+            # screen rather than crashing the worker or silently mis-charging.
+            mode = str(controls.get("mode") or DEDICATED)
+            if mode == ALONG_ROUTE and intended is None:
+                unresolved.append(
+                    "along_route needs a destination — ranked as dedicated, so the whole "
+                    "trip is charged rather than the detour"
+                )
+                mode = DEDICATED
+
             profile = HaulProfile.from_config(
                 data.config,
                 ship=ship,
                 current_system=origin,
                 intended_destination=intended,
-                mode=str(controls.get("mode") or "dedicated"),
+                mode=mode,
                 capital_isk=float(controls.get("capital") or 0.0) * 1e6,
                 max_exposure_isk=float(controls.get("exposure") or 0.0) * 1e6,
                 session_minutes=float(controls.get("minutes") or 30),

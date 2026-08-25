@@ -218,6 +218,16 @@ class HaulProfile:
             raise ValueError(f"unknown objective {self.objective!r}; known: {OBJECTIVES}")
         if self.mode not in MODES:
             raise ValueError(f"unknown mode {self.mode!r}; known: {MODES}")
+        if self.mode == ALONG_ROUTE and self.intended_destination is None:
+            # There is no increment without a trip to be incremental to. This
+            # used to fall through to dedicated charging in silence, which
+            # contradicts §23.3 — the whole point of the mode is that only the
+            # detour is charged.
+            raise ValueError(
+                "along_route needs an intended destination: the mode charges only the "
+                "detour from the trip you were making anyway, and without that trip "
+                "there is no detour to charge"
+            )
         if self.exit_model not in EXIT_MODELS:
             raise ValueError(f"unknown exit model {self.exit_model!r}; known: {EXIT_MODELS}")
         if self.security_profile not in PROFILES:

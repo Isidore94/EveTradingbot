@@ -2532,7 +2532,7 @@ A profile, not a preference file:
 | Input | Why it changes the answer |
 |---|---|
 | current system | Pickup jumps are a real cost and they are not the same for everyone |
-| intended destination (optional) | In `along_route` mode only the **incremental** detour is charged |
+| intended destination (**required in `along_route`**) | In `along_route` mode only the **incremental** detour is charged. *(Corrected 2026-08-25: the mode with no destination used to fall through to dedicated charging in silence. There is no increment without a trip to be incremental to, so the profile now refuses to construct; the desk page, whose control strip can always be half-filled, falls back to dedicated and says so on screen.)* |
 | ship: usable cargo m³, EHP, hull value, seconds/jump, handling minutes | Cargo caps the quantity; the rest price the time and state the exposure |
 | capital, max exposure | The breakpoint that maximizes profit is usually not the one he can afford |
 | session minutes, max wait days | A plan that does not fit the evening is not a plan |

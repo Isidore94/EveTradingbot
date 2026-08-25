@@ -5,6 +5,55 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — §23 H1b: what 1,200 units really cost, at one station
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **929 passed, 7
+deselected**, ruff check + format clean. **Not LIVE_VALIDATED**: no ladder this
+produces has been compared to a market window.
+
+- **`reduce_depth` builds a price-level curve per execution station**, from the
+  **same in-memory pages** `reduce_orders` already reads. One fetch, two
+  products: no extra ESI request, no cadence change, no new feed. The depth
+  generation is `(region_id, sweep_ts)` — **identical** to `book_summary`'s —
+  so a depth row and a book row can be proved to come from one sweep.
+- **`book_summary` did not move, and a test proves it.** The frame produced
+  through the modified sweep path is compared column for column, dtype for
+  dtype and value for value against the frame produced without it. The whole
+  track is additive; this is where that stops being a claim.
+- **The reachability doctrine is now decidable.** §21 R1 had to fail closed on
+  `solarsystem` and numeric ranges because the reduction had no topology. It
+  has one now: a bid is executable from a station if it rests there, or its
+  range is `region`, or its range is `solarsystem` and the system matches, or
+  its numeric range covers the **stargate-graph jump distance**. Everything
+  else — unknown system, unrecognised range, a distance the graph cannot
+  answer — is **excluded and counted**. A structure-resting region-ranged bid
+  is **included**, because the seller never docks there and range is what
+  decides (§22 S2a).
+- **`min_volume` is a conservative v1 rule, recorded as one.** A buy order
+  demanding a parcel bigger than one unit is excluded from executable levels
+  and its volume accumulated into `min_volume_excluded_qty`, so depth that
+  exists but cannot be used is **visible rather than missing**. This
+  under-states reachable exit depth on purpose; the packing problem it would
+  otherwise create interacts with every other level in the walk.
+- **`q_walk` prices a quantity, not a notional.** The existing `depth_walk`
+  ("what does 0.25B buy") is untouched and still used by everything that used
+  it. A quantity past the stored curve is **UNKNOWN**, and when the curve was
+  truncated by the storage bound the reason says so — the levels that would
+  have answered were never written, which is a different fact from a shallow
+  book. Nothing is extrapolated from the last known price.
+- **§23.17's worked example is fixtured and passes at the walk level**: 1,200
+  units at a 102,416.67 source WAP and a 117,375 destination WAP, 4,753,687.50
+  of sales tax, **13,196,312.50** net.
+- **`DepthLake` mirrors `BookLake` exactly**: atomic writes, partial sweeps
+  quarantined under a filename `latest()` does not glob, complete-only reads.
+  **`load_validated_depth`** is the single staleness contract, on the same
+  budget as the book because it is the same sweep — reimplementing staleness
+  per call site is how two surfaces end up disagreeing about one generation.
+- **The bound is a storage heuristic, and truncation is safe.** Levels are kept
+  until they cover `max_scan_capital_isk × depth_safety_margin` **and** the
+  largest recorded hold × the same margin. With no ship profile recorded the
+  cargo target is zero rather than a guess at what the operator flies.
+
 ## 2026-08-25 — §23 H1a: the map, and a router that says no
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **894 passed, 7

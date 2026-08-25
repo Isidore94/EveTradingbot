@@ -88,6 +88,43 @@ BOOK_SUMMARY_COLUMNS = [
 EXECUTABLE_COLUMNS = ["exec_location_id", "exec_price", "exec_is_structure"]
 BOOK_KEY = ["type_id", "region_id", "side", "sweep_ts"]
 
+# -- H1b: per-station price-level curves (plan.md §23.6) --------------------
+#
+# `book_summary` answers "what is the executable quote for this type in this
+# region". A hauling plan asks a different question — "what does it cost to buy
+# 1,200 of these AT THIS STATION" — and that needs the curve, not the quote.
+#
+# The generation is `(region_id, sweep_ts)`, **identical** to `book_summary`'s,
+# so a depth row and a book row from one sweep are provably the same
+# generation. A row that cannot name its sweep cannot be trusted to be from it.
+DEPTH_COLUMNS = [
+    "region_id",
+    "sweep_ts",
+    "fetched_at",
+    "expires_ts",
+    "execution_location_id",
+    "type_id",
+    "side",
+    "price",
+    "level_qty",
+    "cumulative_qty",
+    "cumulative_notional",
+    "level_order_count",
+    # Volume at this price that a buy order's own `min_volume` puts out of
+    # reach of a normal parcel. Carried rather than dropped, so depth that
+    # exists but cannot be used is visible instead of silently missing.
+    "min_volume_excluded_qty",
+    # ESI's `issued`. Whether it moves when an order is repriced is UNVERIFIED
+    # in either direction, so this is "last placed or repriced", never age.
+    "oldest_issued",
+    "newest_issued",
+    "structure_share",
+    # False when the curve was cut short by the storage bound. A walk that
+    # reaches this boundary is UNKNOWN, never extrapolated.
+    "depth_complete",
+]
+DEPTH_KEY = ["region_id", "sweep_ts", "execution_location_id", "type_id", "side", "price"]
+
 
 def _write_parquet(path: Path, frame: pd.DataFrame) -> None:
     buffer = BytesIO()
@@ -177,6 +214,101 @@ class BarLake:
         if frame.empty:
             return None
         return frame["datetime"].max()
+
+
+class _PartitionedLake:
+    """Shared mechanics for a lake partitioned by region and sweep date.
+
+    Both the book and the depth lake keep the same three guarantees, so they
+    keep them in one place: writes are atomic, an incomplete sweep is written
+    where `latest()` cannot see it, and `latest()` returns the newest
+    **complete** snapshot rather than merely the newest one (§21 R1).
+    """
+
+    columns: list[str] = []
+    key: list[str] = []
+
+    def __init__(self, paths: DataPaths) -> None:
+        self.paths = paths
+
+    def _partition(self, region_id: int, day: str) -> Path:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def _directory(self, region_id: int) -> Path:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def _write(self, frame: pd.DataFrame, *, partial: bool) -> int:
+        if frame.empty:
+            return 0
+        frame = frame.copy()
+        frame["sweep_ts"] = pd.to_datetime(frame["sweep_ts"], utc=True)
+        written = 0
+        for (region_id, day), chunk in frame.groupby(
+            [frame["region_id"], frame["sweep_ts"].dt.strftime("%Y-%m-%d")]
+        ):
+            if partial:
+                directory = self._directory(int(region_id))
+                directory.mkdir(parents=True, exist_ok=True)
+                path = directory / f"partial-date={day}.parquet"
+            else:
+                path = self._partition(int(region_id), str(day))
+            existing = _read_parquet(path)
+            before = len(existing)
+            merged = _merge(existing, chunk, self.key)
+            _write_parquet(path, merged)
+            written += max(0, len(merged) - before)
+        return written
+
+    def latest(self, region_id: int) -> pd.DataFrame:
+        """The most recent **complete** sweep in the region, or an empty frame."""
+        empty = pd.DataFrame(columns=self.columns)
+        directory = self._directory(int(region_id))
+        if not directory.exists():
+            return empty
+        partitions = sorted(directory.glob("date=*.parquet"))
+        if not partitions:
+            return empty
+        for path in reversed(partitions):
+            frame = _read_parquet(path)
+            if frame.empty:
+                continue
+            frame["sweep_ts"] = pd.to_datetime(frame["sweep_ts"], utc=True)
+            if "partial_sweep" in frame:
+                frame = frame[~frame["partial_sweep"].fillna(False).astype(bool)]
+            if frame.empty:
+                continue
+            newest = frame["sweep_ts"].max()
+            return frame[frame["sweep_ts"] == newest].reset_index(drop=True)
+        return empty
+
+
+class DepthLake(_PartitionedLake):
+    """Per-station price-level curves, partitioned by region and sweep date.
+
+    A mirror of `BookLake` in every respect that matters: atomic writes, a
+    partial sweep quarantined under a filename `latest()` does not glob, and
+    complete-only reads. A depth curve built from a sweep that was missing
+    pages is not a cheap curve — it is an unmeasured one, and a missing page
+    can hold the level the walk would have stopped at.
+    """
+
+    columns = DEPTH_COLUMNS
+    key = DEPTH_KEY
+
+    def _directory(self, region_id: int) -> Path:
+        return self.paths.depth / f"region={int(region_id)}"
+
+    def _partition(self, region_id: int, day: str) -> Path:
+        return self.paths.depth_partition(int(region_id), str(day))
+
+    def write(self, frame: pd.DataFrame) -> int:
+        return self._write(frame, partial=False)
+
+    def write_partial(self, frame: pd.DataFrame) -> int:
+        return self._write(frame, partial=True)
+
+    def read_day(self, region_id: int, day: str) -> pd.DataFrame:
+        return _read_parquet(self._partition(region_id, day))
 
 
 class BookLake:

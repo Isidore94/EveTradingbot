@@ -43,6 +43,11 @@ class DataPaths:
         return self.root / "books"
 
     @property
+    def depth(self) -> Path:
+        """Per-station price-level curves (plan.md §23.6)."""
+        return self.root / "depth"
+
+    @property
     def killmails(self) -> Path:
         return self.root / "killmails"
 
@@ -76,11 +81,25 @@ class DataPaths:
     def books_partition(self, region_id: int, day: str) -> Path:
         return self.books / f"region={region_id}" / f"date={day}.parquet"
 
+    def depth_partition(self, region_id: int, day: str) -> Path:
+        return self.depth / f"region={region_id}" / f"date={day}.parquet"
+
+    @property
+    def paper_hauls(self) -> Path:
+        """The haul decision ledger.
+
+        §23 named it `data/paper_hauls.jsonl`; it lands under `data/streams/`
+        beside `paper.jsonl` because that is where §3.5 puts append-only
+        streams, and one stream directory is worth more than one literal path.
+        """
+        return self.streams / "paper_hauls.jsonl"
+
     def ensure(self) -> DataPaths:
         for directory in (
             self.root,
             self.bars,
             self.books,
+            self.depth,
             self.killmails,
             self.streams,
             self.reports,

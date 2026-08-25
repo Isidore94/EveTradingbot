@@ -385,9 +385,9 @@ def _cmd_ingest_history(config: Config, args) -> int:
 
 
 def _cmd_sweep_books(config: Config, args) -> int:
-    from .books import sweep_region
+    from .books import depth_bound, depth_jump_distance, depth_stations, sweep_region
     from .esi.client import EsiClient
-    from .store.lake import BookLake
+    from .store.lake import BookLake, DepthLake
 
     async def run() -> int:
         regions = [_region(config, args)]
@@ -397,6 +397,12 @@ def _cmd_sweep_books(config: Config, args) -> int:
         with _open_db(config) as db:
             client = EsiClient(config, db)
             lake = BookLake(config.paths.ensure())
+            # The same pages, reduced a second way (plan.md §23.6). No extra
+            # request, no cadence change, and the two products share a
+            # generation id by construction.
+            depth_lake = DepthLake(config.paths)
+            bound = depth_bound(config, db)
+            jumps = depth_jump_distance(db)
             try:
                 for region in regions:
                     result = await sweep_region(
@@ -405,6 +411,10 @@ def _cmd_sweep_books(config: Config, args) -> int:
                         lake,
                         region,
                         persist_raw_to=Path(args.debug_raw) if args.debug_raw else None,
+                        depth_lake=depth_lake,
+                        stations=depth_stations(config, db, region),
+                        bound=bound,
+                        jump_distance=jumps,
                     )
                     outcomes.append(result.as_dict())
             finally:
@@ -1032,12 +1042,12 @@ def _cmd_report(config: Config, args) -> int:
 
 def _cmd_daemon(config: Config, args) -> int:
     from .bars import ingest_history
-    from .books import sweep_region
+    from .books import depth_bound, depth_jump_distance, depth_stations, sweep_region
     from .digest import build_digest, post_digest
     from .esi.client import EsiClient
     from .killmails import poll_r2z2
     from .paper import PaperLedger
-    from .store.lake import BarLake, BookLake
+    from .store.lake import BarLake, BookLake, DepthLake
     from .universe import tracked_type_ids
 
     region = _region(config, args)
@@ -1049,6 +1059,18 @@ def _cmd_daemon(config: Config, args) -> int:
             client = EsiClient(config, db)
             bar_lake = BarLake(config.paths.ensure())
             book_lake = BookLake(config.paths)
+            depth_lake = DepthLake(config.paths)
+            bound = depth_bound(config, db)
+            jumps = depth_jump_distance(db)
+
+            def depth_kwargs(target_region: int) -> dict:
+                """The depth reduction rides along with every governed sweep."""
+                return {
+                    "depth_lake": depth_lake,
+                    "stations": depth_stations(config, db, target_region),
+                    "bound": bound,
+                    "jump_distance": jumps,
+                }
 
             async def history():
                 ids = tracked_type_ids(db, region)
@@ -1066,12 +1088,20 @@ def _cmd_daemon(config: Config, args) -> int:
                 return result.as_dict()
 
             async def books_home():
-                return (await sweep_region(config, client, book_lake, region)).as_dict()
+                return (
+                    await sweep_region(config, client, book_lake, region, **depth_kwargs(region))
+                ).as_dict()
 
             async def books_secondary():
                 out = []
                 for secondary in config.esi.secondary_region_ids:
-                    out.append((await sweep_region(config, client, book_lake, secondary)).as_dict())
+                    out.append(
+                        (
+                            await sweep_region(
+                                config, client, book_lake, secondary, **depth_kwargs(secondary)
+                            )
+                        ).as_dict()
+                    )
                 return out
 
             async def universe():

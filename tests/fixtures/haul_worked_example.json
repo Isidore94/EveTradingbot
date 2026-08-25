@@ -1,0 +1,31 @@
+{
+  "provenance": {
+    "source": "plan.md §23.17, frozen before the code that computes it (§11 D5)",
+    "authored_at": "2026-08-25",
+    "note": "Two stations, one type, quantity 1,200 — a cumulative breakpoint on BOTH sides, which is the only kind of quantity the ranker considers."
+  },
+  "type_id": 34,
+  "quantity": 1200,
+  "source": {
+    "region_id": 10000002,
+    "station_id": 60003760,
+    "system_id": 30000142,
+    "asks": [[100000.0, 800.0], [107250.0, 400.0]]
+  },
+  "destination": {
+    "region_id": 10000043,
+    "station_id": 60008494,
+    "system_id": 30002187,
+    "bids": [[120000.0, 500.0], [115500.0, 700.0]]
+  },
+  "expected": {
+    "source_wap": 102416.66666666667,
+    "source_cost": 122900000.0,
+    "destination_wap": 117375.0,
+    "gross_sale": 140850000.0,
+    "sales_tax_pct": 3.375,
+    "sales_tax_isk": 4753687.5,
+    "net_profit": 13196312.5,
+    "net_roi_pct": 10.737439788445077
+  }
+}

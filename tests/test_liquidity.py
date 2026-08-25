@@ -419,3 +419,98 @@ def test_a_dead_destination_cannot_grade_its_bars_as_measured(config, db):
     components = dict.fromkeys(RELIABILITY_WEIGHTS, "ok")
     components["destination_bars"] = "ok" if stale.known else "unknown"
     assert reliability_grade(components, RELIABILITY_WEIGHTS)["grade"] == "D"
+
+
+# -- 6. the grade is quarantined, and provably so --------------------------
+
+
+GRADED = {"reliability", "grade", "reliability_grade"}
+GRADE_LETTERS = {"A", "B", "C", "D", "E", "F"}
+RANKERS = {"sorted", "sort", "filter", "max", "min"}
+
+
+def _mentions_grade(node) -> bool:
+    import ast
+
+    return any(
+        isinstance(child, ast.Attribute) and child.attr in GRADED for child in ast.walk(node)
+    )
+
+
+def _gates_on_grade(source: str) -> list[str]:
+    """Places where a reliability grade decides BEHAVIOUR rather than a cell.
+
+    Rendering a grade — including guarding it against None — is what it is for.
+    What it must never do is filter, cap, branch or rank, because its weights,
+    its half-credit and its cut-points are all invented.
+    """
+    import ast
+
+    offenders: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        # 1. a grade compared against a letter or a number
+        if isinstance(node, ast.Compare) and _mentions_grade(node):
+            constants = [
+                child
+                for child in ast.walk(node)
+                if isinstance(child, ast.Constant)
+                and (child.value in GRADE_LETTERS or isinstance(child.value, (int, float)))
+            ]
+            if constants:
+                offenders.append(f"{node.lineno}: grade compared against a threshold")
+        # 2. a statement-level branch on a grade (an IfExp that renders is fine)
+        if isinstance(node, ast.If) and _mentions_grade(node.test):
+            offenders.append(f"{node.lineno}: control flow on a grade")
+        # 3. a grade inside a sort key, a filter or an extremum
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name in RANKERS and any(
+                _mentions_grade(argument)
+                for argument in [*node.args, *(kw.value for kw in node.keywords)]
+            ):
+                offenders.append(f"{node.lineno}: grade reached a {name}()")
+        # 4. a comprehension that filters on a grade
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            for generator in node.generators:
+                if any(_mentions_grade(condition) for condition in generator.ifs):
+                    offenders.append(f"{node.lineno}: comprehension filtered on a grade")
+    return offenders
+
+
+def test_the_gate_detector_can_actually_see_a_gate():
+    """Guard against the check below passing because it detects nothing."""
+    assert _gates_on_grade("rows = [r for r in rows if r.reliability['grade'] < 'C']")
+    assert _gates_on_grade("if plan.reliability['grade'] == 'F':\n    plan = None")
+    assert _gates_on_grade("rows.sort(key=lambda r: r.reliability['score'])")
+    # …and that it does not fire on rendering one.
+    assert not _gates_on_grade("cell = plan.reliability.get('grade') if plan.reliability else '—'")
+
+
+def test_no_module_lets_the_reliability_grade_gate_anything():
+    """The grade's weights, half-credit and cut-points are **invented**.
+
+    That is acceptable while it is a label the operator reads and nothing else.
+    It stops being acceptable the moment a letter decides what he is shown: an
+    unmeasured threshold that filters is exactly what §22 S4 removed elsewhere.
+    So this is the same quarantine `relist_cost_unverified` lives under —
+    consumption is a test failure, not a review comment.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "evescreener"
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "liquidity.py":
+            continue  # where the grade is computed and returned, and nothing else
+        for offence in _gates_on_grade(path.read_text(encoding="utf-8")):
+            offenders.append(f"{path.relative_to(root)}:{offence}")
+    assert not offenders, (
+        "the reliability grade must never gate, cap, filter or rank — its weights "
+        f"are invented and it is a label only: {offenders}"
+    )
+
+
+def test_the_grade_says_in_its_own_payload_that_it_is_not_a_forecast():
+    grade = reliability_grade(dict.fromkeys(RELIABILITY_WEIGHTS, "ok"), RELIABILITY_WEIGHTS)
+    assert "not a probability of profit" in grade["note"].lower()
+    assert "data quality" in grade["note"].lower()

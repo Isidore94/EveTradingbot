@@ -1638,6 +1638,12 @@ clearing at 0.25B, best +13.63%. The tab must carry the caveat the CLI
 carries — **those are simultaneous snapshots for a haul that takes days** —
 visibly, not in a footnote.
 
+The operator's 2026-08-25 request expanded this surface into the separate,
+personalized hauling decision tab in §23. Its initial queued research contract
+was superseded by the later D-33 authorization; §23 records the implemented
+state and the live validation still owed. Existing recommendations and frozen
+formulas remain unchanged.
+
 ### §20.5 — ALERTS + ntfy
 
 Rule store, evaluation on refresh and in the daemon, dedupe state so one
@@ -2475,6 +2481,11 @@ mistake with fresher numbers.
 **Owed live gate (§22 S8).** Run the TOP measurement report on the operator's
 lake and commit its output under `data/reports/`, so §20.3's prose can cite a
 dated artefact instead of a floating number.
+
+> **Superseded research provenance.** The queued §23 specification from
+> remote commit `f466c24` remains preserved in Git history. The operator's
+> later D-33 authorization and the implemented contract below supersede it;
+> it is not a second active plan.
 
 ## §23 — The personalized HAULING tab (operator-authorized 2026-08-25)
 

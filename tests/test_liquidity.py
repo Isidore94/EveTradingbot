@@ -11,6 +11,7 @@ on its face, and a zero or unmeasurable quantile is UNKNOWN rather than fast.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -29,6 +30,7 @@ from evescreener.liquidity import (
 
 NOW = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
 DOMAIN = 10000043
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _bars(volumes, *, type_id=34, region=DOMAIN, end="2026-08-24", close=100.0):
@@ -50,6 +52,46 @@ def _bars(volumes, *, type_id=34, region=DOMAIN, end="2026-08-24", close=100.0):
 
 
 # -- 1. measurement --------------------------------------------------------
+
+
+def test_the_liquidity_window_is_config_not_a_literal(config):
+    """`window_days` was the last analytic parameter still hard-coded.
+
+    Every sibling — the quantiles, the minimum bar count, the priors — is a
+    config field the operator can argue with. This one was a default argument
+    nothing reached, so 30 days was the only window the system could measure.
+    """
+    from dataclasses import replace
+
+    from evescreener.config import config_from_mapping, load_example
+
+    assert config.hauling.liquidity_window_days == 30, "absent key keeps the default"
+
+    bars = _bars([500] * 45, end="2026-08-24")
+    thirty = measure_liquidity(bars, type_id=34, region_id=DOMAIN, now=NOW)
+    sixty = measure_liquidity(
+        bars,
+        type_id=34,
+        region_id=DOMAIN,
+        window_days=config.hauling.liquidity_window_days,
+        now=NOW,
+    )
+    assert thirty.bars_used == sixty.bars_used
+
+    raw = load_example(REPO_ROOT)
+    raw["app"]["data_dir"] = str(config.paths.root)
+    raw.setdefault("hauling", {})["liquidity_window_days"] = 60
+    wider = config_from_mapping(raw)
+    assert wider.hauling.liquidity_window_days == 60
+    measured = measure_liquidity(
+        bars,
+        type_id=34,
+        region_id=DOMAIN,
+        window_days=wider.hauling.liquidity_window_days,
+        now=NOW,
+    )
+    assert measured.bars_used > thirty.bars_used, "a wider window must see more bars"
+    assert replace(config.hauling, liquidity_window_days=60).liquidity_window_days == 60
 
 
 def test_the_quantiles_come_off_the_destination_regions_own_bars(config):

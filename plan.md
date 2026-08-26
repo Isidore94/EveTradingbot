@@ -2658,7 +2658,11 @@ market does not become tradeable by dividing by a small number. **Bars outside
 the window are not evidence about the window** — *(corrected 2026-08-25: a
 fallback to the last N rows measured a market that had not traded for a year
 and reported 500 units a day with an empty reason, feeding the maker caps, the
-drawer and the reliability grade)*.
+drawer and the reliability grade)*. The window itself is
+`[hauling] liquidity_window_days` (default **30**) — *(added at closeout
+2026-08-26: it was a default argument nothing reached, so 30 days was the only
+window the system could measure, while every sibling parameter was already
+config. Widening it is a different claim, not more data.)*
 
 **The paper-haul ledger is the path by which these priors become measurements,
 so it never launders a forecast into an actual.** A close is *resolved* only

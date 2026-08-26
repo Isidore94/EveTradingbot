@@ -405,6 +405,7 @@ def liquidity_attachment(
                 region_id=region_id,
                 quantiles=config.hauling.liquidity_quantiles,
                 min_bars=config.hauling.min_liquidity_bars,
+                window_days=config.hauling.liquidity_window_days,
                 now=moment,
             )
         return profiles[key]

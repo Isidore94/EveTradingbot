@@ -309,6 +309,9 @@ destination_share_prior = 0.25
 capture_share = [0.05, 0.15, 0.35]
 # Fewer completed bars than this -> every liquidation scenario is UNKNOWN.
 min_liquidity_bars = 10
+# The window daily units are measured over. Bars older than this are not
+# evidence about it: widening the window is a different claim, not more data.
+liquidity_window_days = 30
 default_session_minutes = 30
 default_max_wait_days = 3
 default_seconds_per_jump = 55.0

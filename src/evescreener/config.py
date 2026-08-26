@@ -247,6 +247,9 @@ class HaulingConfig:
     destination_share_prior: float = 0.25
     capture_share: tuple[float, ...] = (0.05, 0.15, 0.35)
     min_liquidity_bars: int = 10
+    #: The window daily units are measured over. Bars outside it are not
+    #: evidence about it — a wider window is a different claim, not more data.
+    liquidity_window_days: int = 30
     default_session_minutes: int = 30
     default_max_wait_days: int = 3
     default_seconds_per_jump: float = 55.0

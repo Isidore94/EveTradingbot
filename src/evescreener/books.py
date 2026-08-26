@@ -840,6 +840,19 @@ class DepthBound:
         return cumulative_qty * float(volume) >= self.volume_target
 
 
+def issued_stamp(value) -> str | None:
+    """One order's `issued` as a stamp, or None when there is not one.
+
+    Parquet stores the issued columns as a nullable string, and pandas hands
+    the gaps back as float `NaN` — which is **truthy**. A level carrying one
+    therefore survived the `if level.oldest_issued` filter and reached `min()`
+    beside real stamps, where comparing float to str raises. On the operator's
+    lake 556 of the Forge's 314,793 depth rows were enough to end an entire
+    scan with a TypeError. A missing stamp is UNKNOWN; UNKNOWN is None.
+    """
+    return value if isinstance(value, str) and value else None
+
+
 @dataclass(frozen=True, slots=True)
 class DepthLevel:
     """One price on one side of one station's book, after the filters."""
@@ -1283,8 +1296,8 @@ def curve_from_frame(
                 and row["structure_share"] == row["structure_share"]
                 else None
             ),
-            oldest_issued=row["oldest_issued"],
-            newest_issued=row["newest_issued"],
+            oldest_issued=issued_stamp(row["oldest_issued"]),
+            newest_issued=issued_stamp(row["newest_issued"]),
         )
         for _index, row in rows.iterrows()
     )

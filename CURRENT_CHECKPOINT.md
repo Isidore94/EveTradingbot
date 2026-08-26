@@ -73,7 +73,25 @@ Two causes, both data and neither a formula.
    `sweep-books --secondary` is what fills it; the desk shows staleness rather
    than curing it (§19.2), so this is an operator run, not a GUI action.
 
-Neither is live validation of anything. The checklist below is untouched.
+3. **With both fixed, the first scan against a real five-hub lake crashed.**
+   `TypeError` in `_oldest_issued`: parquet's nullable `issued` columns come
+   back from pandas as float NaN, NaN is truthy, and 556 of the Forge's 314,793
+   depth rows carried one. Normalized at the loader (`books.issued_stamp`) with
+   two regression tests. **This is the first defect any of the three review
+   passes missed, and it was found by running the thing on real data** — every
+   fixture had written a stamp or an explicit None.
+
+The scan now runs: `haul scan --from Jita --to Amarr` over 20 station pairs
+prices **29,211 candidates**, rejects **46,966** (MARGINAL_NET_NEGATIVE 23,390,
+DEST_DEPTH_SHORT 12,820, OVER_CAPITAL 5,186, DEPTH_TRUNCATED 5,115), and ranks
+15 plans led by ~697k ISK/active-minute at 250M capital.
+
+Gate stamp after these fixes: `uv run pytest -q` → **1,088 passed, 7
+deselected**, ruff clean, `selftest` **12/12**.
+
+None of this is live validation of anything: the numbers above are arithmetic
+over one swept moment, and not one of them has met the client. The checklist
+below is untouched.
 
 ### Read this before you open the tab
 

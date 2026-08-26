@@ -5,6 +5,25 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-26 — a missing `issued` stamp no longer ends the scan
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,088 passed, 7
+deselected**, ruff clean, `selftest` **12/12**. Found by running the first
+hauling scan against a freshly swept five-hub lake; two regression tests
+reproduce it.
+
+- **`oldest_issued`/`newest_issued` are normalized where the depth frame
+  becomes levels.** Parquet stores them as a nullable string and pandas returns
+  the gaps as float `NaN`, which is **truthy** — so a gap survived the
+  `if level.oldest_issued` filter, reached `min()` beside real ISO stamps, and
+  raised `TypeError: '<' not supported between instances of 'float' and 'str'`.
+  On the operator's lake 556 of the Forge's 314,793 depth rows carried a gap,
+  and that was enough to abort an entire scan. `books.issued_stamp` reads a
+  non-string or empty value as UNKNOWN; both `curves_from_depth` and
+  `books.curve_from_frame` use it, and `_oldest_issued` re-applies it because a
+  curve can be built by any caller and the failure mode is a crash, not a
+  wrong number.
+
 ## 2026-08-26 — the SDE build stamp is not proof the load is complete
 
 **Status: IMPLEMENTED + GREEN.** Two regression tests reproduced the failure

@@ -37,7 +37,7 @@ from dataclasses import dataclass, field, fields, replace
 
 import pandas as pd
 
-from .books import DepthCurve, DepthLevel, DepthSnapshot, q_walk
+from .books import DepthCurve, DepthLevel, DepthSnapshot, issued_stamp, q_walk
 from .config import Config
 from .costs import CostModel
 from .routes import HIGHSEC, PROFILES, SHORTEST, RouteFacts, RouteGraph
@@ -624,8 +624,10 @@ def curves_from_depth(frame: pd.DataFrame) -> dict[tuple[int, int, str], DepthCu
                 min_volume_excluded_qty=float(columns["min_volume_excluded_qty"][index] or 0.0),
                 # NaN is UNKNOWN, and it is not 0% of the level in a structure.
                 structure_share=(float(share) if share is not None and share == share else None),
-                oldest_issued=columns["oldest_issued"][index],
-                newest_issued=columns["newest_issued"][index],
+                # A gap in the issued column arrives from parquet as NaN, and
+                # NaN is truthy — see `issued_stamp`.
+                oldest_issued=issued_stamp(columns["oldest_issued"][index]),
+                newest_issued=issued_stamp(columns["newest_issued"][index]),
             )
         )
         complete = complete and bool(columns["depth_complete"][index])
@@ -1458,7 +1460,14 @@ def _structure_share(curve: DepthCurve, quantity: float) -> float | None:
 
 
 def _oldest_issued(curve: DepthCurve) -> str | None:
-    stamps = [level.oldest_issued for level in curve.levels if level.oldest_issued]
+    """The oldest `issued` on the curve, over the levels that carry one.
+
+    `issued_stamp` runs here as well as at the loader because a curve can be
+    built by any caller, and the failure this guards against is not a wrong
+    number — it is a TypeError that ends the whole scan.
+    """
+    stamps = [issued_stamp(level.oldest_issued) for level in curve.levels]
+    stamps = [stamp for stamp in stamps if stamp]
     return min(stamps) if stamps else None
 
 

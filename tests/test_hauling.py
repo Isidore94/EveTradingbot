@@ -803,3 +803,59 @@ def test_curves_from_depth_rebuilds_exactly_what_the_reduction_wrote(config):
     buy = curves[(JITA_44, 34, "buy")]
     assert [level.price for level in buy.levels] == [90.0]
     assert buy.breakpoints == (7.0,)
+
+
+def test_a_level_with_no_issued_stamp_does_not_end_the_scan():
+    """NaN is truthy, and the real lake has NaN in the issued columns.
+
+    Parquet's nullable string comes back from pandas as float NaN. It passed
+    the `if level.oldest_issued` filter, reached `min()` beside real stamps,
+    and raised `TypeError: '<' not supported between float and str` — 556 rows
+    out of the Forge's 314,793 were enough to kill an entire scan.
+    """
+    import numpy as np
+
+    from evescreener.books import DepthCurve, DepthLevel
+    from evescreener.hauling import _oldest_issued
+
+    def level(qty, issued):
+        return DepthLevel(
+            price=1.0,
+            qty=qty,
+            cumulative_qty=qty,
+            cumulative_notional=qty,
+            oldest_issued=issued,
+        )
+
+    curve = DepthCurve(
+        levels=(
+            level(1.0, np.nan),
+            level(2.0, "2026-08-20T00:00:00Z"),
+            level(3.0, "2026-08-01T00:00:00Z"),
+        ),
+        side="buy",
+        type_id=34,
+        execution_location_id=JITA_44,
+    )
+    assert _oldest_issued(curve) == "2026-08-01T00:00:00Z"
+
+
+def test_curves_from_depth_reads_a_missing_issued_stamp_as_unknown(config):
+    """The gap is normalized where the frame becomes levels, not downstream."""
+    import numpy as np
+
+    from evescreener.hauling import curves_from_depth
+
+    reduction = reduce_depth(
+        _orders([(100.0, 10.0)], buy=False, station=JITA_44, system=JITA),
+        region_id=FORGE,
+        stations={JITA_44: JITA},
+        bound=DepthBound(max_capital_isk=1e12, max_cargo_m3=1e12, safety_margin=1.0),
+        sweep_ts=SWEEP,
+    )
+    frame = reduction.frame.copy()
+    frame["oldest_issued"] = np.nan
+    frame["newest_issued"] = np.nan
+    curve = curves_from_depth(frame)[(JITA_44, 34, "sell")]
+    assert curve.levels[0].oldest_issued is None
+    assert curve.levels[0].newest_issued is None

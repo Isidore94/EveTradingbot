@@ -37,7 +37,7 @@ evidence, and no code session earns any of it. One line was added to section B
 during the remediation, for the scan wall-clock on the real lake.
 
 The remediation added **+1,323 lines and removed 96**; the closeout added
-**+374 and removed 77** across 16 files. The track's total is now roughly
+**+360 and removed 74** across 14 code and test files. The track's total is now roughly
 **10,480 lines** against §23.15's ≤7,000-line target — the overage recorded as
 §17 D-34 grows with each pass and remains stated rather than trimmed.
 

@@ -66,7 +66,7 @@ gate.
   nothing. Latent with ESI's integer `volume_remain`, reachable with fractional
   synthetic data. Candidates within 1e-9 merge, larger kept.
 
-**+374 lines, −77** across 16 files. Behaviour changes are corrected in
+**+360 lines, −74** across 14 code and test files (**+482, −96** with the plan, changelog, checkpoint and example config). Behaviour changes are corrected in
 `plan.md` in place with the old wording visible: §23.7 (the window is config),
 §23.10 (the audit's breakpoint shape), and §17 D-35's overstated quarantine
 sentence.

@@ -23,7 +23,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-__all__ = ["Basket", "BasketItem", "Chunk", "greedy_basket", "marginal_chunks"]
+__all__ = [
+    "Basket",
+    "BasketItem",
+    "Chunk",
+    "greedy_basket",
+    "marginal_chunks",
+    "non_overlapping",
+]
 
 HEURISTIC = "HEURISTIC"
 
@@ -122,6 +129,9 @@ class Basket:
     method: str = HEURISTIC
     skipped: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: Plans dropped because they would have spent a book a sibling already
+    #: spent. Counted rather than silently filtered.
+    withheld_for_overlap: int = 0
 
     @property
     def cargo_utilisation_pct(self) -> float | None:
@@ -138,7 +148,50 @@ class Basket:
             "cargo_utilisation_pct": self.cargo_utilisation_pct,
             "skipped": self.skipped,
             "notes": self.notes,
+            "withheld_for_overlap": self.withheld_for_overlap,
         }
+
+
+def non_overlapping(plans: Sequence, *, objective: str | None = None):
+    """At most one plan per `(type, source)` and per `(type, destination)`.
+
+    The scan ranks `(item, source, destination)` plans **independently**, which
+    is right — they are alternatives, and the operator picks one. A basket that
+    packs all of them spends measured depth twice: one 1,000-unit Jita ask sold
+    to two hubs becomes 2,000 units of cargo out of a 1,000-unit book, and the
+    mirror case double-counts one destination's bid depth.
+
+    The restriction is the smallest one that cannot double-spend: keep the best
+    plan (by the run's own objective) touching each book, and say how many were
+    withheld. **The known refinement, deliberately not built here:** a shared
+    consumption ledger, so a basket could take *part* of a book to one hub and
+    the rest to another. That is worth doing if real baskets ever look starved,
+    and it needs the marginal chunks to be re-priced against what a sibling
+    plan already took — which is a different computation, not a filter.
+
+    This lives here, next to the packing, rather than in the report layer that
+    used to own it: a guard one caller away from the primitive it guards is a
+    guard the next caller does not get.
+    """
+
+    def rank(plan):
+        value = plan.objective_value(objective) if objective else None
+        return -(value if value is not None else plan.net_profit)
+
+    seen_source: set[tuple[int, int | None]] = set()
+    seen_destination: set[tuple[int, int | None]] = set()
+    kept = []
+    withheld = 0
+    for plan in sorted(plans, key=rank):
+        source_key = (plan.type_id, plan.source.station_id)
+        dest_key = (plan.type_id, plan.destination.station_id)
+        if source_key in seen_source or dest_key in seen_destination:
+            withheld += 1
+            continue
+        seen_source.add(source_key)
+        seen_destination.add(dest_key)
+        kept.append(plan)
+    return kept, withheld
 
 
 def greedy_basket(
@@ -149,6 +202,7 @@ def greedy_basket(
     exposure_per_trade_isk: float | None = None,
     exposure_per_destination_isk: float | None = None,
     max_items: int = 20,
+    objective: str | None = None,
 ) -> Basket:
     """Fill the hold greedily by conservative profit per m³.
 
@@ -157,12 +211,23 @@ def greedy_basket(
     there. A chunk whose volume is unknown is skipped and named — packing a
     hold with something whose size nobody knows is how a plan becomes
     unexecutable at the station.
+
+    Overlapping plans are withheld here, by `non_overlapping`, rather than by
+    the caller: one book can only be spent once, and that is a property of
+    packing, not of any one report.
     """
     basket = Basket(cargo_m3=float(cargo_m3), method=HEURISTIC)
     basket.notes.append(
         "HEURISTIC: greedy over marginal chunks by profit per m³, not an optimum. "
         "Shown beside the best single-item plan, never instead of it."
     )
+    plans, basket.withheld_for_overlap = non_overlapping(plans, objective=objective)
+    if basket.withheld_for_overlap:
+        basket.notes.append(
+            f"{basket.withheld_for_overlap} plan(s) withheld for depth overlap: they share a "
+            "source or a destination book with a plan already in the basket, and one book can "
+            "only be spent once. The scan still ranks them as alternatives."
+        )
     available: list[list[Chunk]] = []
     for index, plan in enumerate(plans):
         chunks = marginal_chunks(plan, index)

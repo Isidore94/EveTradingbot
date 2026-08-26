@@ -205,6 +205,22 @@ def _scan_of(config, plans):
     return scan
 
 
+def test_the_bare_primitive_cannot_double_spend_a_book_either(config):
+    """The guard has to live with the packing, not beside it.
+
+    `haul_basket` filtered correctly and `greedy_basket` did not, so the only
+    thing standing between a caller and two thousand units out of a
+    thousand-unit ask was remembering to call the wrapper. Every test below
+    goes through the wrapper, which is why nothing caught it.
+    """
+    to_amarr = _plan(34, "Tritanium", [(1000.0, 10_000.0, 5_000.0)], destination=DEST)
+    to_dodixie = _plan(34, "Tritanium", [(1000.0, 10_000.0, 4_000.0)], destination=DODIXIE)
+    basket = greedy_basket([to_amarr, to_dodixie], capital_isk=1e9, cargo_m3=1e9)
+    assert sum(item.quantity for item in basket.items) <= 1000.0
+    assert basket.withheld_for_overlap == 1
+    assert any("withheld" in note for note in basket.notes)
+
+
 def test_one_source_book_cannot_be_packed_twice_into_the_same_hold(config):
     """The same 1,000-unit Jita ask sold to two hubs is ONE 1,000-unit ask.
 

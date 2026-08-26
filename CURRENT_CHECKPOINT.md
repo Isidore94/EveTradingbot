@@ -55,6 +55,26 @@ Everything below this item — the paper desk, §21, §22 and the consolidated
 checklist — is unchanged and still owed in full. This track **adds** to that
 list; it replaces nothing on it.
 
+### Operator report 2026-08-26 — the HAULING tab returned nothing
+
+Two causes, both data and neither a formula.
+
+1. **The stargate map was never loaded on this machine.** `sde_stargates` and
+   `sde_npc_stations` held 0 rows while `meta.sde_build` read 3475087, because
+   those tables landed after the operator's first `sde` run and the same-build
+   no-op declined to fill them. `RouteGraph` was therefore empty and every scan
+   ended `NO_ROUTE` on "current system 30000142 is not in the stargate graph".
+   Reloaded from the local bundle: **13,978 gates, 5,210 NPC stations, 0
+   unresolved**. The no-op now also demands non-empty tables, with two
+   regression tests (`tests/test_sde_map.py`).
+2. **No depth generation exists on disk.** `data/depth/` is empty and
+   `data/books/` holds only Forge, dated 2026-08-20/21. With routing fixed the
+   scan reaches 20 station pairs and rejects all 20 as `STALE_BOOK`. A
+   `sweep-books --secondary` is what fills it; the desk shows staleness rather
+   than curing it (§19.2), so this is an operator run, not a GUI action.
+
+Neither is live validation of anything. The checklist below is untouched.
+
 ### Read this before you open the tab
 
 **Nothing in this build has been checked against the game.** Not one route has

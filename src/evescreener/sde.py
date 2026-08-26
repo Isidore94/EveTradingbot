@@ -172,6 +172,17 @@ def parse_solar_systems(bundle: Path) -> list[tuple]:
     return rows
 
 
+#: Every table `load_sde` fills. An empty one means the load is incomplete,
+#: whatever the stored build says.
+SDE_TABLES = (
+    "sde_types",
+    "sde_market_groups",
+    "sde_solar_systems",
+    "sde_stargates",
+    "sde_npc_stations",
+)
+
+
 def _destination_system(record: dict) -> int | None:
     """The system on the far side of one stargate.
 
@@ -255,6 +266,22 @@ def parse_npc_stations(bundle: Path) -> list[tuple]:
     return rows
 
 
+def _tables_populated(db) -> bool:
+    """Is every SDE table this build should have actually filled?
+
+    The build stamp alone is not proof the load is current. When a release adds
+    a table — `sde_stargates` and `sde_npc_stations` did — a lake loaded by the
+    older code carries the same build number with the new tables empty, and the
+    build-equality no-op then refuses to fix it forever. The symptom is silent
+    and far away: routing reports every system as "not in the stargate graph"
+    and the hauling scanner returns nothing at all. Emptiness is the check.
+    """
+    for table in SDE_TABLES:
+        if not db.conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]:
+            return False
+    return True
+
+
 def load_sde(
     config: Config,
     db: Database,
@@ -274,7 +301,7 @@ def load_sde(
     else:
         build = latest_build(config, client=client)
         stored = db.get_meta("sde_build")
-        if stored and int(stored) == build and not force:
+        if stored and int(stored) == build and not force and _tables_populated(db):
             return SdeLoadResult(
                 build=build,
                 types=db.conn.execute("SELECT COUNT(*) AS n FROM sde_types").fetchone()["n"],

@@ -206,3 +206,50 @@ def test_the_migration_is_idempotent(tmp_path):
     for _ in range(3):
         with Database(path) as db:
             assert db.get_meta("schema_version") == "3"
+
+
+# -- 4. the build stamp is not proof the load is complete -------------------
+
+
+def test_a_matching_build_with_an_empty_new_table_still_reloads(tmp_path, config, db, monkeypatch):
+    """The failure this prevents was silent, and its symptom was far away.
+
+    `sde_stargates` and `sde_npc_stations` arrived after the first loads ran.
+    A lake filled by the older code carries the current build stamp with those
+    tables empty, so the build-equality no-op declined to fill them — forever.
+    Routing then reported every system as "not in the stargate graph" and the
+    hauling scanner produced nothing at all, with a correct-looking build in
+    the footer.
+    """
+    from evescreener import sde as sde_module
+
+    bundle = _bundle(tmp_path)
+    monkeypatch.setattr(sde_module, "latest_build", lambda *a, **k: 3478781)
+    monkeypatch.setattr(sde_module, "download_bundle", lambda *a, **k: bundle)
+
+    load_sde(config, db, bundle_path=bundle)
+    db.conn.execute("DELETE FROM sde_stargates")
+    db.conn.commit()
+
+    result = load_sde(config, db)
+    assert result.stargates == 2, "an empty table means the load is incomplete, stamp or no stamp"
+    assert db.stargate_edges(), "the router would otherwise stay empty for good"
+
+
+def test_a_complete_load_at_the_same_build_is_still_a_cheap_no_op(
+    tmp_path, config, db, monkeypatch
+):
+    from evescreener import sde as sde_module
+
+    bundle = _bundle(tmp_path)
+    monkeypatch.setattr(sde_module, "latest_build", lambda *a, **k: 3478781)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a complete lake at the current build must not re-download")
+
+    monkeypatch.setattr(sde_module, "download_bundle", refuse)
+
+    load_sde(config, db, bundle_path=bundle)
+    result = load_sde(config, db)
+    assert result.downloaded is False
+    assert result.stargates == 2

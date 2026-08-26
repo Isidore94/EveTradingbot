@@ -5,6 +5,22 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-26 — the SDE build stamp is not proof the load is complete
+
+**Status: IMPLEMENTED + GREEN.** Two regression tests reproduced the failure
+before the fix.
+
+- **`load_sde`'s same-build no-op now also requires every SDE table to be
+  non-empty.** `sde_stargates` and `sde_npc_stations` arrived after the
+  operator's lake was first loaded, so that lake carried the current build
+  stamp with both new tables empty — and build-equality alone made the no-op
+  decline to fill them, permanently. The symptom appeared far from the cause:
+  `RouteGraph.from_db` built an empty map, every hauling scan ended at
+  `NO_ROUTE` with "current system 30000142 is not in the stargate graph", and
+  the footer showed a correct-looking build. Emptiness, not the stamp, now
+  decides. A complete lake at the current build is still a cheap no-op and
+  still never re-downloads.
+
 ## 2026-08-26 — §23 operator audit remediation: pickup, maker caps, freight endpoints
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,084 passed, 7

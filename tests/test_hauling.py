@@ -377,6 +377,27 @@ def test_an_unbounded_hold_says_so_on_every_surface(config, worked):
     assert not any("cargo is unbounded" in note for note in _scan(config, worked).notes)
 
 
+def test_two_candidate_sizes_a_hair_apart_are_one_size():
+    """Latent, not live — and cheap to close.
+
+    ESI quotes integer `volume_remain`, so today no two cumulative breakpoints
+    land 5e-10 apart. Fractional synthetic data reaches it, and there the pair
+    priced a chunk of ~zero units whose marginal is ~zero — which is <= 0, so
+    the search would stop on a chunk containing nothing rather than on a chunk
+    that stopped paying.
+    """
+    from evescreener.books import DepthCurve
+    from evescreener.hauling import _candidate_quantities
+
+    source = DepthCurve.from_pairs([(100.0, 100.0), (101.0, 5e-10), (102.0, 50.0)])
+    destination = DepthCurve.from_pairs([(200.0, 200.0)])
+    candidates = _candidate_quantities(source, destination)
+    assert candidates == (100.0 + 5e-10, 150.0 + 5e-10), "the twin collapses, larger kept"
+    assert all(
+        later - earlier > 1e-9 for earlier, later in zip(candidates, candidates[1:], strict=False)
+    )
+
+
 # -- 3. ranking ------------------------------------------------------------
 
 

@@ -811,12 +811,25 @@ def _candidate_quantities(source: DepthCurve, destination: DepthCurve) -> tuple[
     ceiling = min(source.available_qty, destination.available_qty)
     if ceiling <= 0:
         return ()
-    quantities = {
+    quantities = sorted(
         quantity
-        for quantity in (*source.breakpoints, *destination.breakpoints)
+        for quantity in {*source.breakpoints, *destination.breakpoints}
         if 0 < quantity <= ceiling + 1e-9
-    }
-    return tuple(sorted(quantities))
+    )
+    # **Two candidates a hair apart are one candidate.** The step between them
+    # is a chunk of ~zero units, whose marginal net is ~zero — which is <= 0,
+    # so the search would stop on a chunk containing nothing rather than on one
+    # that stopped paying. Latent today (ESI quotes integer `volume_remain`, so
+    # no two cumulative breakpoints land 1e-9 apart) and reachable from
+    # fractional synthetic data. The larger of a pair is kept: it is the one
+    # both books can actually fill to.
+    merged: list[float] = []
+    for quantity in quantities:
+        if merged and quantity - merged[-1] <= 1e-9:
+            merged[-1] = quantity
+            continue
+        merged.append(quantity)
+    return tuple(merged)
 
 
 def _volume(packaged: Mapping[int, float] | None, type_id: int) -> float | None:

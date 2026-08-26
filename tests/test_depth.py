@@ -484,3 +484,26 @@ def test_a_plain_callable_with_no_map_stays_conservative():
     assert reachable_from_station(
         order, station_id=JITA_44, station_system=JITA, jump_distance=hops
     ) == (False, "range_unresolvable")
+
+
+def test_the_reduction_itself_tells_the_two_exclusions_apart():
+    """The production path, not the primitive.
+
+    `reduce_depth` wraps the caller's jump-distance function in a closure that
+    searches from the station outward, and the wrapper has to carry `.knows`
+    with it — the three tests above call `reachable_from_station` directly and
+    would stay green with the attribute stripped, which is exactly what a real
+    sweep did.
+    """
+    _graph, distance, far = _long_corridor()
+    reduction = reduce_depth(
+        [
+            _order(order_id=1, is_buy_order=True, range="5", location_id=99, system_id=far),
+            _order(order_id=2, is_buy_order=True, range="5", location_id=98, system_id=999_999),
+        ],
+        region_id=10000002,
+        stations={JITA_44: JITA},
+        bound=BOUND,
+        jump_distance=distance,
+    )
+    assert (reduction.excluded_range, reduction.excluded_unresolvable) == (1, 1)

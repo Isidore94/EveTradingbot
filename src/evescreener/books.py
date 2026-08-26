@@ -1157,6 +1157,12 @@ def reduce_depth(
                 return None
             return jump_distance(_station_system, origin)
 
+        # Carry what the map knows across the wrapper. `.knows` takes a single
+        # system id, so it forwards unchanged — and without it every sweep took
+        # the stripped path, where an order past the search bound counted as
+        # `range_unresolvable` and made a complete map look broken.
+        station_first.knows = getattr(jump_distance, "knows", None)
+
         for order in live:
             reachable, reason = reachable_from_station(
                 order,

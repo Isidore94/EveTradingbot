@@ -5,6 +5,37 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-26 — §23 operator audit remediation: pickup, maker caps, freight endpoints
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,084 passed, 7
+deselected**, ruff check + format clean, `selftest` **12/12**. **Nothing is
+`LIVE_VALIDATED`; the owed live checklist remains unchanged.** Seven regression
+tests reproduced the three findings before the implementation changed.
+
+- **A missing pickup no longer becomes a free pickup.** A blank current system,
+  or a system id absent from the SDE graph, now ends the scan with `NO_ROUTE`.
+  Previously the pickup was labelled UNKNOWN while the plan still ranked on the
+  source→destination leg alone, understating jumps, session time and ISK/minute.
+  The CLI requires `--from`/`--from-id`; the desk carries the same refusal and
+  reason through the shared engine.
+- **Maker wait is a reachable, binding constraint.** `haul scan` and the desk
+  now expose `immediate`/`maker` exit selection and max-wait days together. A
+  maker breakpoint refused as `LIQUIDATION_UNKNOWN` or `OVER_TIME` is removed
+  from the feasible breakpoint sequence before mixed-cargo packing, so the
+  basket cannot resurrect a size the single-item scan refused. Because §23.7's
+  liquidation formula is linear in quantity, the maker search stops at that
+  first failed size.
+- **PushX receives the plan's actual endpoints.** The optional comparison now
+  quotes the source and destination station systems carried on the plan, not
+  the canonical hub configured for each region. An extra destination in The
+  Forge therefore remains Perimeter (for example), rather than silently
+  becoming Jita; an unresolved endpoint is UNKNOWN and is never substituted.
+
+**+283 lines, −20 across four product and five test files** before the control
+file reconciliation. The §23 calculation remains pre-live-validation; no
+route, ladder, ranged bid, broker fee, haul, or PushX invoice was validated by
+this code pass.
+
 ## 2026-08-26 — §23 closeout: the seven residues a second audit left (§17 D-35)
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,077 passed, 7

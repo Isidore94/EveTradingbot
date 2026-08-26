@@ -237,6 +237,11 @@ def build_parser() -> argparse.ArgumentParser:
     haul_scan.add_argument("--exposure", type=float, help="most ISK in one trade")
     haul_scan.add_argument("--minutes", type=float, help="how long you have (session minutes)")
     haul_scan.add_argument("--max-wait-days", type=float)
+    haul_scan.add_argument(
+        "--exit-model",
+        choices=("immediate", "maker"),  # authority: hauling.EXIT_MODELS
+        help="immediate: sell into the bid on arrival. maker: post and enforce max wait",
+    )
     haul_scan.add_argument("--max-jumps", type=int)
     haul_scan.add_argument(
         "--security",
@@ -1288,6 +1293,11 @@ def _cmd_haul(config: Config, args) -> int:
             ship = _ship_profile(config, db, args)
             current = _resolve_system(db, args.current_system, args.current_system_id)
             intended = _resolve_system(db, args.intended_destination, args.intended_destination_id)
+            if current is None:
+                raise ConfigError(
+                    "give --from or --from-id: pickup jumps are part of the personalized "
+                    "cost and cannot be guessed as zero"
+                )
         except ConfigError as exc:
             print(str(exc), file=sys.stderr)
             return 2
@@ -1298,6 +1308,7 @@ def _cmd_haul(config: Config, args) -> int:
             ("exposure", "max_exposure_isk"),
             ("minutes", "session_minutes"),
             ("max_wait_days", "max_wait_days"),
+            ("exit_model", "exit_model"),
             ("max_jumps", "max_jumps"),
             ("security", "security_profile"),
             ("objective", "objective"),

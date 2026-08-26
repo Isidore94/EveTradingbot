@@ -270,6 +270,25 @@ def test_haul_requires_a_subcommand():
         build_parser().parse_args(["haul"])
 
 
+def test_haul_scan_exposes_the_maker_wait_model():
+    args = build_parser().parse_args(
+        [
+            "haul",
+            "scan",
+            "--cargo",
+            "60000",
+            "--from-id",
+            "30000142",
+            "--exit-model",
+            "maker",
+            "--max-wait-days",
+            "1.5",
+        ]
+    )
+    assert args.exit_model == "maker"
+    assert args.max_wait_days == 1.5
+
+
 def test_a_haul_scan_with_no_ship_refuses_rather_than_guessing_a_hold(
     tmp_path, monkeypatch, capsys
 ):
@@ -281,21 +300,62 @@ def test_a_haul_scan_with_no_ship_refuses_rather_than_guessing_a_hold(
 
 def test_a_haul_scan_on_an_empty_lake_is_an_honest_zero(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
-    assert main(["--example-config", "haul", "scan", "--cargo", "60000", "--no-write"]) == 0
+    assert (
+        main(
+            [
+                "--example-config",
+                "haul",
+                "scan",
+                "--cargo",
+                "60000",
+                "--from-id",
+                "30000142",
+                "--no-write",
+            ]
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "Nothing clears costs today" in out
-    assert "STALE_BOOK" in out, "the refusals are the denominator, and they are printed"
+    assert "NO_ROUTE" in out, "the missing SDE map fails before pickup can be priced as zero"
 
 
 def test_a_haul_scan_with_a_zero_hold_says_capital_is_the_only_cap(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
-    assert main(["--example-config", "haul", "scan", "--cargo", "0", "--no-write"]) == 0
+    assert (
+        main(
+            [
+                "--example-config",
+                "haul",
+                "scan",
+                "--cargo",
+                "0",
+                "--from-id",
+                "30000142",
+                "--no-write",
+            ]
+        )
+        == 0
+    )
     assert "cargo is unbounded" in capsys.readouterr().out
 
 
 def test_a_haul_scan_writes_an_immutable_report(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
-    assert main(["--example-config", "haul", "scan", "--cargo", "60000"]) == 0
+    assert (
+        main(
+            [
+                "--example-config",
+                "haul",
+                "scan",
+                "--cargo",
+                "60000",
+                "--from-id",
+                "30000142",
+            ]
+        )
+        == 0
+    )
     reports = sorted((tmp_path / "data" / "reports").glob("hauling-*.json"))
     assert len(reports) == 1
     assert "written:" in capsys.readouterr().out

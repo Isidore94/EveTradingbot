@@ -215,6 +215,32 @@ def test_the_freight_column_reuses_quote_freight_verbatim(config, worked, db):
     assert payload["your_time_isk_per_minute"] == pytest.approx(3_000_000.0 / plan.active_minutes)
 
 
+def test_freight_uses_the_plans_actual_system_not_the_regions_configured_hub(config, worked, db):
+    """An extra destination in The Forge is not automatically Jita."""
+    from dataclasses import replace
+
+    perimeter = Station(60000001, 30000144, FORGE, "Perimeter", None)
+    seen = {}
+
+    def fake_quote(cfg, database, **kwargs):
+        seen.update(kwargs)
+        return FreightQuote(
+            route=f"{kwargs['start_system']}->{kwargs['end_system']}",
+            volume_m3=kwargs["volume_m3"],
+            collateral=kwargs["collateral"],
+            price=1_000_000.0,
+            quoted_at="2026-08-25T12:00:00+00:00",
+            cached=False,
+            haircut_pct=0.0,
+        )
+
+    plan = replace(_plan(config, worked), destination=perimeter)
+    payload = freight_comparison(config, db, plan, quote_fn=fake_quote)
+    assert payload["state"] == "OK"
+    assert seen["start_system"] == "Jita"
+    assert seen["end_system"] == "Perimeter"
+
+
 def test_no_quote_means_the_column_is_unknown_and_the_row_is_untouched(config, worked, db):
     def refuse(cfg, database, **kwargs):
         return FreightQuote(

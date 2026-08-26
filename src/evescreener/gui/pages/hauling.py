@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ...hauling import (
     ALONG_ROUTE,
     DEDICATED,
+    EXIT_MODELS,
     MODES,
     OBJECTIVES,
     ORDER_AGE_CAVEAT,
@@ -210,6 +211,24 @@ class HaulingPage(DeskPage):
         second.addWidget(QLabel("rank by"))
         second.addWidget(self.objective)
 
+        self.exit_model = QComboBox()
+        for model in EXIT_MODELS:
+            self.exit_model.addItem(model, model)
+        self.exit_model.currentIndexChanged.connect(self._controls_changed)
+        second.addWidget(QLabel("exit"))
+        second.addWidget(self.exit_model)
+
+        self.max_wait_days = self._spin(
+            second,
+            "max wait days",
+            0.0,
+            365.0,
+            float(self.data.config.hauling.default_max_wait_days),
+            step=0.5,
+            decimals=1,
+            special="no cap",
+        )
+
         self.nearest = QPushButton("Nearest first")
         self.nearest.clicked.connect(lambda: self.table.sort_by(HEADERS.index("pickup")))
         second.addStretch(1)
@@ -218,11 +237,21 @@ class HaulingPage(DeskPage):
         return bar
 
     def _spin(
-        self, row, label, low, high, value, *, step=1.0, suffix="", special=""
+        self,
+        row,
+        label,
+        low,
+        high,
+        value,
+        *,
+        step=1.0,
+        suffix="",
+        special="",
+        decimals=0,
     ) -> QDoubleSpinBox:
         spin = QDoubleSpinBox()
         spin.setRange(low, high)
-        spin.setDecimals(0)
+        spin.setDecimals(decimals)
         spin.setSingleStep(step)
         spin.setValue(value)
         if suffix:
@@ -292,6 +321,8 @@ class HaulingPage(DeskPage):
             "max_jumps": self.max_jumps.value(),
             "security": self.security.currentData(),
             "objective": self.objective.currentData(),
+            "exit_model": self.exit_model.currentData(),
+            "max_wait_days": self.max_wait_days.value(),
         }
 
     def _restore_filters(self) -> None:
@@ -310,6 +341,7 @@ class HaulingPage(DeskPage):
                 (self.mode, "mode"),
                 (self.security, "security"),
                 (self.objective, "objective"),
+                (self.exit_model, "exit_model"),
             ):
                 if saved.get(key):
                     combo.setCurrentText(str(saved[key]))
@@ -317,6 +349,7 @@ class HaulingPage(DeskPage):
                 (self.cargo, "cargo"),
                 (self.capital, "capital"),
                 (self.exposure, "exposure"),
+                (self.max_wait_days, "max_wait_days"),
             ):
                 if saved.get(key) is not None:
                     spin.setValue(float(saved[key]))
@@ -393,6 +426,12 @@ class HaulingPage(DeskPage):
                 max_jumps=max_jumps,
                 security_profile=str(controls.get("security") or "highsec"),
                 objective=str(controls.get("objective") or "isk_per_active_minute"),
+                exit_model=str(controls.get("exit_model") or "immediate"),
+                max_wait_days=float(
+                    controls.get("max_wait_days")
+                    if controls.get("max_wait_days") is not None
+                    else data.config.hauling.default_max_wait_days
+                ),
             )
             scan = scan_hauls(
                 data.config,

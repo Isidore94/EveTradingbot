@@ -375,6 +375,65 @@ def test_a_maker_exit_refuses_a_plan_whose_liquidation_is_unknown(config, db):
     assert scan.rejected_for(LIQUIDATION_UNKNOWN)
 
 
+def test_the_maker_wait_cap_also_caps_the_mixed_cargo_basket(config):
+    """A size refused by the single-item scan must not reappear in the basket."""
+    from dataclasses import replace
+
+    from evescreener.hauling import OVER_TIME, scan_hauls
+    from evescreener.haulreport import haul_basket
+    from test_hauling import DEST, FORGE, SOURCE, _graph, _orders, _profile, _snapshot
+
+    depths = {
+        FORGE: _snapshot(
+            _orders(
+                [(100.0, 100.0), (101.0, 100.0)],
+                buy=False,
+                station=SOURCE.station_id,
+                system=SOURCE.system_id,
+            ),
+            region=FORGE,
+            station=SOURCE.station_id,
+            system=SOURCE.system_id,
+        ),
+        DOMAIN: _snapshot(
+            _orders(
+                [(300.0, 100.0), (299.0, 100.0)],
+                buy=True,
+                station=DEST.station_id,
+                system=DEST.system_id,
+            ),
+            region=DOMAIN,
+            station=DEST.station_id,
+            system=DEST.system_id,
+        ),
+    }
+    profile = replace(_profile(), exit_model="maker", max_wait_days=1.5)
+
+    def attach(plan):
+        return replace(
+            plan,
+            liquidation_days=plan.quantity / 100.0,
+            liquidation_reason="synthetic linear destination flow",
+        )
+
+    scan = scan_hauls(
+        config,
+        profile,
+        stations=[SOURCE],
+        destinations=[DEST],
+        depths=depths,
+        graph=_graph(),
+        names={34: "Tritanium"},
+        packaged_volume={34: 0.01},
+        liquidity=attach,
+        now=NOW,
+    )
+    assert scan.plans[0].quantity == 100.0
+    assert [entry.quantity for entry in scan.rejected_for(OVER_TIME)] == [200.0]
+    basket = haul_basket(scan, config=config)
+    assert basket.items[0].quantity == 100.0, "the rejected 200-unit size must stay rejected"
+
+
 def test_an_immediate_exit_charges_isk_days_over_travel_time_not_sell_out_time(config, db):
     """§23.5: an immediate exit dumps into the bid on arrival, so the capital is
     committed for the trip and nothing longer.

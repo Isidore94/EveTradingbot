@@ -121,6 +121,7 @@ def _page(qtbot, desk, **controls):
     page.exposure.setValue(controls.get("exposure", 250.0))
     page.security.setCurrentText(controls.get("security", "shortest"))
     page.minutes.setValue(controls.get("minutes", 600))
+    page.origin.setText(controls.get("origin", "Jita"))
     return page
 
 
@@ -152,6 +153,15 @@ def test_the_job_input_is_an_immutable_snapshot_of_the_controls(qtbot, haul_desk
     before = page.job_input()
     page.capital.setValue(999.0)
     assert page.job_input() != before, "a control change is a different generation"
+
+
+def test_the_control_strip_exposes_maker_exit_and_its_wait_cap(qtbot, haul_desk):
+    page = _page(qtbot, haul_desk)
+    page.exit_model.setCurrentText("maker")
+    page.max_wait_days.setValue(1.5)
+    controls = dict(page.job_input())
+    assert controls["exit_model"] == "maker"
+    assert controls["max_wait_days"] == 1.5
 
 
 def test_the_control_state_is_remembered_in_state_db_not_config_toml(qtbot, haul_desk):
@@ -245,6 +255,15 @@ def test_an_unresolvable_system_name_is_reported_rather_than_ignored(qtbot, haul
     _run(qtbot, page)
     assert any("no solar system named" in note for note in page._result["scan"].notes)
     assert "no solar system named" in page.summary.text()
+    assert page._result["scan"].plans == []
+
+
+def test_a_blank_current_system_refuses_to_price_pickup_as_zero(qtbot, haul_desk):
+    page = _page(qtbot, haul_desk, origin="")
+    result = _run(qtbot, page)
+    assert result["scan"].plans == []
+    assert result["scan"].rejected_for("NO_ROUTE")
+    assert "current system" in page.summary.text()
 
 
 # -- 3. the desk cannot paint a generation the lake has replaced ------------

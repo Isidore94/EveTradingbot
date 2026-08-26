@@ -887,14 +887,35 @@ def scan_hauls(
 
     # A hold of zero is not a small hold — every cargo test in the engine reads
     # `and profile.ship.usable_cargo_m3`, so at zero OVER_CARGO cannot fire and
-    # an unknown packaged volume takes the no-cap branch. That is the right
-    # arithmetic for "no hold declared", but a fresh install reaches it by
-    # default (no saved ship, cargo spin at 0) and nothing on the page said so.
+    # an unknown packaged volume takes the no-cap branch. State that input fact
+    # even when another missing input ends the scan first.
     if not profile.ship.usable_cargo_m3:
         scan.notes.append(
             "no ship profile and no cargo override — cargo is unbounded; "
             "capital is the only size cap"
         )
+
+    # The pickup is part of the personalized route, never an optional zero-cost
+    # leg. Previously a blank origin (the GUI's initial state) or an arbitrary
+    # `--from-id` produced an UNKNOWN pickup and then charged only the haul from
+    # source to destination. That made missing data improve ISK/minute and evade
+    # the jump/session caps — UNKNOWN acting as permission.
+    if profile.current_system is None:
+        detail = (
+            "no current system given — pickup jumps are part of the personalized cost; "
+            "set the system you are actually in"
+        )
+    elif not graph.knows(profile.current_system):
+        detail = (
+            f"current system {profile.current_system} is not in the stargate graph — "
+            "run `sde` to rebuild the map or correct the system id"
+        )
+    else:
+        detail = ""
+    if detail:
+        scan.notes.append(detail)
+        scan.rejected.append(Rejection(reason=NO_ROUTE, detail=detail))
+        return scan
 
     curves: dict[int, dict[tuple[int, int, str], DepthCurve]] = {
         int(region): curves_from_depth(snapshot.priceable) for region, snapshot in depths.items()
@@ -1343,6 +1364,11 @@ def _best_plan(
             # A maker exit is the one that depends on the assumption, so it is
             # the one the assumption is allowed to refuse.
             if plan.liquidation_days is None:
+                # This breakpoint is priced, but it is not feasible under the
+                # selected exit model. Do not leave it in `breakpoints`: the
+                # mixed-cargo packer consumes those steps and would otherwise
+                # resurrect a size the single-item scan just refused.
+                priced.pop()
                 scan.rejected.append(
                     Rejection(
                         reason=LIQUIDATION_UNKNOWN,
@@ -1354,8 +1380,9 @@ def _best_plan(
                         detail=plan.liquidation_reason or "no measurable volume at the destination",
                     )
                 )
-                continue
+                break
             if profile.max_wait_days and plan.liquidation_days > profile.max_wait_days:
+                priced.pop()
                 scan.rejected.append(
                     Rejection(
                         reason=OVER_TIME,
@@ -1366,11 +1393,13 @@ def _best_plan(
                         quantity=quantity,
                         detail=(
                             f"{plan.liquidation_days:.1f} days to liquidate against a "
-                            f"{profile.max_wait_days:.0f}-day patience"
+                            f"{profile.max_wait_days:g}-day patience"
                         ),
                     )
                 )
-                continue
+                # Liquidation days scale linearly with quantity under §23.7's
+                # scenario formula, so every larger breakpoint also fails.
+                break
         for objective in OBJECTIVES:
             value = plan.objective_value(objective)
             if value is None:

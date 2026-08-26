@@ -12,13 +12,13 @@ deferred to a keep/park decision after the shadow period.
 
 **State: H1–H4 IMPLEMENTED + GREEN, REMEDIATED, and CLOSED OUT. THE TRACK'S
 CODE IS DONE. NOTHING IS `LIVE_VALIDATED`.**
-**Gate stamp:** `uv run pytest -q` → **1,077 passed, 7 deselected**, ruff check
+**Gate stamp:** `uv run pytest -q` → **1,084 passed, 7 deselected**, ruff check
 + format clean, `python -m evescreener selftest` → **12/12**.
 
 **The next step is the checklist below, not more code.** It is unchanged and
 owed in full.
 
-**Two adversarial passes happened.** The first, 2026-08-25 (§17 D-35),
+**Three adversarial review passes happened.** The first, 2026-08-25 (§17 D-35),
 reproduced twelve defects with concrete inputs; all twelve are fixed
 fixture-first. The one worth knowing before you open the tab: a round trip that
 loses money used to rank as a plan, because the marginal-net rule ran only from
@@ -32,14 +32,24 @@ closure did not forward `.knows`, so FIX 11b's behaviour never reached a real
 sweep, and all three of its tests called the primitive directly. Six Low
 residues came with it. All seven are closed, fixture-first.
 
-**The checklist below is unchanged by either pass**: none of it was live
+The third, operator-directed pass on 2026-08-26 (§17 D-35b), reproduced three
+more seams before changing them. A blank or off-graph current system had
+labelled pickup UNKNOWN while ranking it as zero jumps; maker max-wait was not
+selectable on either user surface and its rejected sizes could reappear in the
+mixed basket; PushX replaced an extra destination with its region's configured
+hub. All three are closed across engine, basket, CLI, desk and freight paths,
+with seven regression tests. None changes a formula or detector.
+
+**The checklist below is unchanged by any pass**: none of it was live
 evidence, and no code session earns any of it. One line was added to section B
 during the remediation, for the scan wall-clock on the real lake.
 
 The remediation added **+1,323 lines and removed 96**; the closeout added
-**+360 and removed 74** across 14 code and test files. The track's total is now roughly
-**10,480 lines** against §23.15's ≤7,000-line target — the overage recorded as
-§17 D-34 grows with each pass and remains stated rather than trimmed.
+**+360 and removed 74** across 14 code and test files; the operator audit added
+**+283 and removed 20** across four product and five test files before this
+control-file reconciliation. The track's total is now roughly **10,743 lines**
+against §23.15's ≤7,000-line target — the overage recorded as §17 D-34 grows
+with each pass and remains stated rather than trimmed.
 
 Everything below this item — the paper desk, §21, §22 and the consolidated
 checklist — is unchanged and still owed in full. This track **adds** to that

@@ -204,6 +204,22 @@ def test_pickup_jumps_are_charged_when_the_operator_is_somewhere_else(config, wo
     assert plan.total_jumps == 3, "pickup counts: it is real time in a real ship"
 
 
+def test_a_missing_current_system_refuses_the_scan_instead_of_skipping_pickup(config, worked):
+    """Pickup is part of the personalized cost, so UNKNOWN cannot mean zero jumps."""
+    scan = _scan(config, worked, profile=_profile(current_system=None))
+    assert scan.plans == []
+    assert scan.rejected_for(NO_ROUTE)
+    assert "current system" in scan.rejected_for(NO_ROUTE)[0].detail
+
+
+def test_a_current_system_outside_the_graph_refuses_the_scan(config, worked):
+    """An arbitrary `--from-id` is not a free pickup at the source station."""
+    scan = _scan(config, worked, profile=_profile(current_system=999_999_999))
+    assert scan.plans == []
+    assert scan.rejected_for(NO_ROUTE)
+    assert "not in the stargate graph" in scan.rejected_for(NO_ROUTE)[0].detail
+
+
 def test_cargo_is_measured_and_utilisation_reported(config, worked):
     plan = _scan(config, worked, profile=_profile(cargo_m3=100.0)).plans[0]
     assert plan.cargo_m3 == pytest.approx(12.0)

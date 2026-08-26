@@ -32,12 +32,16 @@ __all__ = ["attach_freight", "freight_comparison"]
 NOT_QUOTED = "not quoted — run `haul scan --freight` to ask PushX"
 
 
-def _hub_system(config: Config, region_id: int | None) -> str | None:
-    if region_id is None:
+def _station_system(db, station) -> str | None:
+    """The plan's actual endpoint, never the region's canonical trade hub."""
+    if station is None:
         return None
-    for entry in config.freight.hub_systems:
-        if int(entry.get("region_id", 0)) == int(region_id):
-            return str(entry.get("system"))
+    if station.system_name:
+        return str(station.system_name)
+    if station.system_id is not None:
+        name = db.system_names().get(int(station.system_id))
+        if name:
+            return str(name)
     return None
 
 
@@ -48,12 +52,12 @@ def freight_comparison(config: Config, db, plan, *, client=None, now=None, quote
     quote_fn = quote_fn or quote_freight
     if not config.freight.enabled:
         return {"state": "UNKNOWN", "reason": "freight is disabled in config"}
-    start = _hub_system(config, plan.source.region_id)
-    end = _hub_system(config, plan.destination.region_id)
+    start = _station_system(db, plan.source)
+    end = _station_system(db, plan.destination)
     if not start or not end:
         return {
             "state": "UNKNOWN",
-            "reason": "no hub system configured for one end of this route — not guessed",
+            "reason": "the actual source or destination system is UNKNOWN — not replaced by a hub",
         }
     if not plan.cargo_m3:
         return {"state": "UNKNOWN", "reason": "packaged volume UNKNOWN, so nothing can be quoted"}

@@ -1237,6 +1237,7 @@ this document's prior text is recorded here with its reason.
 | D-34 | **§23.15's ≤7,000-line track budget is exceeded. Final: 8,953 lines** — 4,024 new core modules and page, 3,021 new tests, 1,908 added to existing files. Executable lines (excluding blanks, comments and docstrings) are 5,387. | Stated rather than trimmed. The track carried five separable concerns — the map and router, the depth reduction, the ranking engine, the liquidity and packing layer, and the freight comparison — plus a desk page and eleven test modules, and the last of those is where a third of the overage is. Two things were deliberately **not** done to make the number: no test was dropped, and no explanation of *why* a rule exists was cut, because this repository's whole defence against re-litigating settled decisions is that the reasoning is written down next to the code. §1's repo-wide budget stands for future work and this remains an authorized exception, not a new ceiling. |
 | D-35 | **§23 remediation, 2026-08-25.** An adversarial first-build audit (Fable) reproduced twelve defects by running the code with concrete inputs; all twelve are fixed, fixture-first, one commit each. The five with ISK at stake: a losing round trip ranked as a plan because the marginal rule ran only from the **second** breakpoint (one ask of 100 @ 100 against one bid of 100 @ 50 ranked at **−51.7%** with zero rejections — and on a 98.8%-median-spread market that is most books, so the page would have filled with the least-bad losses and the honest zero become unreachable); an unknown packaged volume **skipped the cargo cap entirely** (a million units against a 60,000 m³ hold); the basket **double-spent measured depth** (one 1,000-unit ask sold to two hubs packed 2,000 units); liquidity **measured a dead market from year-old bars** via a `tail(window_days)` fallback; and the ledger **laundered `expected_cost_isk` into `actual_cost_isk`**, computing a "realized" net and a "forecast error" from the forecast and counting it as resolved evidence. | Every fix ships with a test that failed on the audited head. Two changed stated behaviour and are corrected **in place with the old wording visible**: §23.10 (the first chunk's marginal is its net) and §23.3 (`along_route` refuses without a destination). Two are diagnostics rather than behaviour: the avoid list is no longer reported as a security block, and an order beyond the search bound is out of reach rather than unplaceable. One is a quarantine with its own self-test: the reliability grade's weights are invented, so a test now fails if a grade reaches a comparison, a branch, a sort key or a filter anywhere under `src/`. *(Corrected at closeout 2026-08-26: the sentence overstated its reach twice over. The detector then read only attribute access — it was blind to `row["reliability"]["grade"]`, which is how every row payload on the page is actually read — and `liquidity.py` was exempt whole-file. Both are fixed: subscript and `getattr` spellings are matched and the exemption is gone. It remains a **tripwire, not a proof**: access built from a computed string is beyond any static check of this kind.)* **And one was a measurement, not a guess:** the scan was profiled rather than assumed — 18.8 s for one pair over 5,000 types, of which `curves_from_depth` was **18.4 s** and the ranking loop **0.4 s**. The index now sorts once and walks rows instead of paying pandas' per-group constant five thousand times: **18.8 s → 1.4 s**. |
 | D-35a | **§23 closeout, 2026-08-26 — the addendum to D-35.** A second adversarial pass verified the remediation itself: **eleven of twelve fixes real**, with property-verified equivalence of the two rewrites (`curves_from_depth` over 60 randomized frames, field-precise, zero differences; the `q_walk` shortcut over ~2,800 walks, zero mismatches). **One fix was cosmetic in production**: `reduce_depth`'s station-first closure did not forward `.knows`, so FIX 11b's behaviour never reached a real sweep and all three of its tests called the primitive directly — one of them blessing the stripped path. Six Low residues came with it. All seven are closed, fixture-first, one commit each: the closure forwards `.knows`; the grade tripwire now sees dict-subscript and `getattr` access and the `liquidity.py` exemption is gone; a zero hold is named on `scan.notes` rather than silently unbounded; the overlap guard moved into `greedy_basket` (the bare primitive packed 2,000 units out of a 1,000-unit ask); `[hauling] liquidity_window_days` wires the last unwired analytic parameter; the refused breakpoint carries a `rejected` flag; and candidate quantities within 1e-9 merge. **+360 lines, −74** across 14 code and test files. Gate after: **1,077 passed, 7 deselected**, ruff clean, selftest 12/12. | Two things this pass is a record of. **A test that calls the primitive is not a test of the path** — three tests, one deliberate, agreed on behaviour production never had. And **an exemption that protects nothing still costs something**: `liquidity.py` tripped zero offenders and its exemption blinded the tripwire in the module the next consumer would live in. With this the §23 code is done; **the owed live-validation checklist is unchanged and is the only thing between the tab and use.** |
+| D-35b | **§23 operator audit remediation, 2026-08-26.** Three findings were reproduced fixture-first and fixed: a blank or off-graph current system ranked with the pickup silently priced as zero; `max_wait_days` was exposed by the CLI but no user surface could select the maker exit which consumes it, and a programmatic maker scan left wait-refused breakpoints available to the mixed-cargo basket; PushX endpoints were resolved from each station's **region**, silently replacing an extra destination with that region's canonical hub. | The current system now fails the whole scan as `NO_ROUTE` until it is known; CLI and desk expose the exit model beside max wait; maker-liquidity failures are removed from the feasible breakpoint sequence and stop the monotonic search; PushX uses the plan's actual source/destination system and returns UNKNOWN if either is unresolved. Seven regression tests cover engine, basket, CLI, GUI and freight seams. Gate after: **1,084 passed, 7 deselected**, ruff clean, selftest 12/12. The live-validation checklist is unchanged: these are executable counterexamples and code corrections, not evidence from the game. |
 
 ### §0 named checks — status after this build
 
@@ -2533,11 +2534,11 @@ A profile, not a preference file:
 
 | Input | Why it changes the answer |
 |---|---|
-| current system | Pickup jumps are a real cost and they are not the same for everyone |
+| current system | Pickup jumps are a real cost and they are not the same for everyone. *(Corrected 2026-08-26: blank or off-graph used to label pickup UNKNOWN and still rank on source→destination alone, making missing data improve time and ISK/minute. The scan now ends `NO_ROUTE` until the pickup origin is known.)* |
 | intended destination (**required in `along_route`**) | In `along_route` mode only the **incremental** detour is charged. *(Corrected 2026-08-25: the mode with no destination used to fall through to dedicated charging in silence. There is no increment without a trip to be incremental to, so the profile now refuses to construct; the desk page, whose control strip can always be half-filled, falls back to dedicated and says so on screen.)* |
 | ship: usable cargo m³, EHP, hull value, seconds/jump, handling minutes | Cargo caps the quantity; the rest price the time and state the exposure |
 | capital, max exposure | The breakpoint that maximizes profit is usually not the one he can afford |
-| session minutes, max wait days | A plan that does not fit the evening is not a plan |
+| session minutes, max wait days | A plan that does not fit the evening is not a plan. Max wait binds the `maker` exit, and CLI and desk expose that exit model beside the cap. *(Corrected 2026-08-26: the CLI accepted `--max-wait-days` but no user surface could select maker, so the flag could not affect a normal scan.)* |
 | security profile, max jumps, avoid list | A route through nullsec is a different trade, not a cheaper one |
 
 ### §23.4 What already exists and is reused unchanged
@@ -2722,6 +2723,10 @@ packed every ranked plan, so one 1,000-unit Jita ask sold to two hubs became
 double-counted one destination's bid depth. The scan is right to rank those
 plans independently — they are alternatives — but a book can only be spent
 once.)* Plans withheld for overlap are **counted and named on the basket**.
+Only breakpoints feasible under the selected exit model reach the basket.
+*(Corrected 2026-08-26: maker sizes refused for UNKNOWN liquidation or for
+exceeding max wait remained in `breakpoints`, so the single-item row chose 100
+units while the basket resurrected the refused 200-unit size.)*
 **The known refinement, deliberately not built:** a shared consumption ledger,
 so part of a book could go to one hub and the rest to another. It needs the
 marginal chunks re-priced against what a sibling plan already took, which is a
@@ -2760,7 +2765,8 @@ still costs the time it takes to load and unload.
 
 Control strip: system autocomplete from `sde_solar_systems`, ship-profile
 picker, capital / exposure / session minutes / max jumps / security controls,
-mode, destination, saved filters in `state.db`'s `meta` table.
+route mode, exit model / max wait, destination, saved filters in `state.db`'s
+`meta` table.
 
 Default columns: **Item** (THIN/UNKNOWN badged) · **Route** · **Qty** ·
 **Capital** · **Net profit** · **Net ROI** · **Cargo** · **Pickup** · **Trip** ·
@@ -2790,6 +2796,11 @@ UNKNOWN's reason.
 The page and the CLI call the same `hauling.py`, so a disagreement between them
 is a bug rather than two opinions. Every new file the page depends on joins
 `desk_input_key`, or the desk would keep painting a stale generation.
+
+The optional PushX comparison quotes the plan's **actual station systems**, not
+the configured canonical hub for each region. *(Corrected 2026-08-26: resolving
+only by region silently turned an extra destination such as Perimeter into
+Jita; an unresolved actual endpoint is now UNKNOWN and never substituted.)*
 
 ### §23.13 Rejection vocabulary
 
@@ -2835,13 +2846,14 @@ valid scanner result.
 | **H0** | The competitor comparison — **moved after the shadow period** (§23.2, §23.20) | owed, after the shadow |
 
 **Nothing in this track is `LIVE_VALIDATED`.** The gate stamp after the
-**2026-08-26 closeout** (§17 D-35a) is `uv run pytest -q` → **1,077 passed,
-7 deselected**, ruff check + format clean, `selftest` **12/12**. *(The build
+**2026-08-26 operator audit remediation** (§17 D-35b) is `uv run pytest -q` →
+**1,084 passed, 7 deselected**, ruff check + format clean, `selftest` **12/12**.
+*(The closeout stamp was 1,077 passed / 7 deselected. The build
 session's own stamp was 1,030 and the 2026-08-25 remediation's was 1,068; the
-twelve remediation fixes and the seven closeout fixes and their fixtures
-account for the difference.)* **With the closeout the track's code is done.**
+twelve remediation fixes, the seven closeout fixes, and this pass's seven
+regressions account for the differences.)* **The corrected track's code is done.**
 The consolidated owed checklist is in `CURRENT_CHECKPOINT.md`, is **unchanged**
-by either pass — none of it was live evidence, and none of it has been earned
+by any code pass — none of it was live evidence, and none of it has been earned
 — and is now the only thing between this tab and use.
 
 **H1–H4 were built in one push under operator authorization 2026-08-25**,
@@ -2857,8 +2869,9 @@ do.
 count is reported in `CHANGELOG.md`. §1's repo-wide budget remains exceeded by
 authorization (§17 D-9, D-20); this is a per-track ceiling, not a new licence.
 
-**Measured: 8,953 lines at the build, 10,180 after the 2026-08-25 remediation
-— 3,180 over, recorded as §17 D-34 and D-35.** 4,024 in seven
+**Measured: 8,953 lines at the build, 10,180 after the 2026-08-25 remediation,
+and roughly 10,743 after the closeout and 2026-08-26 operator audit — 3,743
+over, recorded as §17 D-34 through D-35b.** 4,024 in seven
 new core modules plus the page, 3,021 in eleven new test modules, and 1,908
 added to existing files (658 of them the depth reduction in `books.py`, 462 the
 `haul` command surface). Excluding blank lines, comments and docstrings the

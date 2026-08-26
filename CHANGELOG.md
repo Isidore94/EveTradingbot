@@ -5,6 +5,72 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-26 — §23 closeout: the seven residues a second audit left (§17 D-35)
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,077 passed, 7
+deselected**, ruff check + format clean, `selftest` **12/12**. **Nothing is
+`LIVE_VALIDATED`, and the owed checklist is unchanged in full** — no code
+session earns any of it.
+
+A second adversarial pass verified the remediation: eleven of twelve fixes real
+(including property-verified equivalence of the `curves_from_depth` rewrite over
+60 randomized frames and of the `q_walk` shortcut over ~2,800 walks, zero
+differences in both), one cosmetic in production, six Low residues. All seven
+are closed here, each fixture-first with a test that fails on the previous head.
+**With this the §23 track's code is done**; what remains is the operator's live
+gate.
+
+- **FIX 11b was cosmetic in the real sweep path.** `reduce_depth` wraps the
+  jump-distance function in a closure that searches from the station outward,
+  and the wrapper did not carry `.knows` — so every actual sweep read None off
+  it and an order past the 40-jump search bound counted `range_unresolvable`,
+  blaming the map for a fact about the order. All three of the fix's tests
+  called the primitive directly and one blessed the stripped path. Repro: a
+  45-system corridor through `reduce_depth` counts (0 range, 2 unresolvable);
+  it now counts (1, 1).
+- **The reliability-grade tripwire could not see the access it guarded.** It
+  read attribute access only, so `row["reliability"]["grade"]` — how the report
+  renderer and the drawer actually read row payloads — and
+  `getattr(plan, "reliability")` both passed straight through. Both spellings
+  are matched now. The whole-file `liquidity.py` exemption is deleted: it
+  tripped zero offenders, so it protected nothing while blinding the check
+  where `liquidity_attachment` lives. The docstring says what it is — a
+  tripwire, not a proof.
+- **A fresh install did not know its cargo was unbounded.** The cargo spin
+  defaults to 0 ("use ship profile") and a fresh install has no profile, so the
+  hold resolves to 0 m³ — and every cargo test reads
+  `and profile.ship.usable_cargo_m3`, so `OVER_CARGO` cannot fire for any type
+  and unknown-volume types take the no-cap branch. Correct arithmetic, silent
+  on screen. A scan note now says so, once, on `scan.notes`, reaching the page
+  summary, the report and the CLI identically.
+- **The basket's overlap guard travelled with the wrong module.** `haul_basket`
+  filtered; bare `greedy_basket` packed 2,000 units out of a 1,000-unit ask,
+  and every test went through the wrapper. `non_overlapping` moves into
+  `positioning.py`, `greedy_basket` applies it itself and records
+  `withheld_for_overlap`. §23.10's shared-consumption-ledger refinement stays
+  recorded, not built.
+- **The liquidity window is config.** `window_days=30` was the last analytic
+  parameter still a default argument nothing reached, while the quantiles, the
+  bar minimum and both priors were all config. `[hauling]
+  liquidity_window_days` (default 30, optional-with-default so existing configs
+  keep loading).
+- **The refused size is labelled refused.** `MARGINAL_NET_NEGATIVE` keeps the
+  size that stopped the search in the audit — "why not bigger" is the question
+  the table answers — but it rendered identically to a viable size the ranker
+  passed over. `breakpoints` carries
+  `(quantity, capital_isk, net_profit, rejected)`; the report emits
+  `"rejected": true` and the drawer marks `<- refused (marginal <= 0)`.
+- **Epsilon twins in the candidate sizes.** Set deduplication does not collapse
+  100.0 and 100.0 + 5e-10, and the step between them is a chunk of ~zero units
+  whose marginal is ~zero — so the search would stop on a chunk containing
+  nothing. Latent with ESI's integer `volume_remain`, reachable with fractional
+  synthetic data. Candidates within 1e-9 merge, larger kept.
+
+**+374 lines, −77** across 16 files. Behaviour changes are corrected in
+`plan.md` in place with the old wording visible: §23.7 (the window is config),
+§23.10 (the audit's breakpoint shape), and §17 D-35's overstated quarantine
+sentence.
+
 ## 2026-08-25 — §23 remediation: twelve defects an audit reproduced (§17 D-35)
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,068 passed, 7

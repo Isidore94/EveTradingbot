@@ -10,25 +10,36 @@ authorization 2026-08-25, recorded as §17 D-33: *"build first, evaluate against
 competitors and live gates afterwards"*). H5 and H6 are **out of scope**; H0 is
 deferred to a keep/park decision after the shadow period.
 
-**State: H1–H4 IMPLEMENTED + GREEN, and REMEDIATED. NOTHING IS
-`LIVE_VALIDATED`.**
-**Gate stamp:** `uv run pytest -q` → **1,068 passed, 7 deselected**, ruff check
+**State: H1–H4 IMPLEMENTED + GREEN, REMEDIATED, and CLOSED OUT. THE TRACK'S
+CODE IS DONE. NOTHING IS `LIVE_VALIDATED`.**
+**Gate stamp:** `uv run pytest -q` → **1,077 passed, 7 deselected**, ruff check
 + format clean, `python -m evescreener selftest` → **12/12**.
 
-**A remediation happened on 2026-08-25** (§17 D-35): an adversarial first-build
-audit reproduced twelve defects with concrete inputs, and all twelve are fixed
+**The next step is the checklist below, not more code.** It is unchanged and
+owed in full.
+
+**Two adversarial passes happened.** The first, 2026-08-25 (§17 D-35),
+reproduced twelve defects with concrete inputs; all twelve are fixed
 fixture-first. The one worth knowing before you open the tab: a round trip that
 loses money used to rank as a plan, because the marginal-net rule ran only from
 the second breakpoint — so the page could not have produced an honest zero even
-when an honest zero was the truth. **The checklist below is unchanged**: none
-of it was live evidence, and a remediation earns none of it. One line was added
-to section B, for the scan wall-clock on the real lake.
+when an honest zero was the truth. The second, 2026-08-26 (§17 D-35a),
+verified that work — eleven of twelve fixes real, including property-verified
+equivalence of both rewrites (`curves_from_depth` over 60 randomized frames,
+the `q_walk` shortcut over ~2,800 walks, zero differences in either) — and
+found **one fix cosmetic in production**: `reduce_depth`'s station-first
+closure did not forward `.knows`, so FIX 11b's behaviour never reached a real
+sweep, and all three of its tests called the primitive directly. Six Low
+residues came with it. All seven are closed, fixture-first.
 
-The remediation added **+1,323 lines and removed 96** across code and tests
-(net **+1,227**), most of it fixtures: twelve fixes, each with a test that
-failed on the audited head. The track's total is now **10,180 lines** against
-§23.15's ≤7,000 target — the overage recorded as §17 D-34 grows by the
-remediation and remains stated rather than trimmed.
+**The checklist below is unchanged by either pass**: none of it was live
+evidence, and no code session earns any of it. One line was added to section B
+during the remediation, for the scan wall-clock on the real lake.
+
+The remediation added **+1,323 lines and removed 96**; the closeout added
+**+374 and removed 77** across 16 files. The track's total is now roughly
+**10,480 lines** against §23.15's ≤7,000-line target — the overage recorded as
+§17 D-34 grows with each pass and remains stated rather than trimmed.
 
 Everything below this item — the paper desk, §21, §22 and the consolidated
 checklist — is unchanged and still owed in full. This track **adds** to that
@@ -59,6 +70,15 @@ swept. Getting out is assumed: `destination_share_prior` (0.25) and
 regional history carries no station split and no computation turns that into a
 measurement. They are labelled ASSUMED on every surface, and they become
 measurements only when your own recorded fills can replace them.
+
+**This checklist — A through E — is now the ONLY thing between this tab and
+use.** Every item on it is an **operator action**; none of it can be
+self-certified, which is the entire point of the ladder. Nothing below has been
+altered by the remediation or the closeout, and nothing below has been earned.
+Work it in order: the route spot checks, the ladder spot checks, the ranged-bid
+sale, the `issued`-tracking observation, the depth-size and scan wall-clock
+measurements, the broker overrides, the two-week shadow, and then — and only
+then — the H0 keep/park comparison.
 
 ### A. The map, and the route it draws (H1a)
 

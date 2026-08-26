@@ -5,6 +5,74 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-25 — §23 remediation: twelve defects an audit reproduced (§17 D-35)
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,068 passed, 7
+deselected**, ruff check + format clean, `selftest` **12/12**. **Nothing is
+`LIVE_VALIDATED`, and the owed checklist is unchanged** — none of it was live
+evidence and none of it has been earned.
+
+An adversarial first-build audit (Fable) ran the code with concrete inputs and
+came back with twelve confirmed defects. Each is fixed fixture-first, in its own
+commit, with a test that fails on the audited head. In the order they cost ISK:
+
+- **A losing trade ranked as a plan.** The marginal-net rule ran only from the
+  *second* breakpoint, so a book whose smallest fillable size loses money had
+  nothing to refuse it: one ask of 100 @ 100 against one bid of 100 @ 50 ranked
+  at **−51.7% with zero rejections**. On a market with a 98.8% median spread
+  that is most books — the page would have filled with the hundred least-bad
+  losses and "Nothing clears costs today" could never have fired. The first
+  chunk's marginal is its net. The search also stops there rather than
+  continuing: per-unit marginal is monotonically non-increasing, so nothing
+  larger can pay.
+- **An unknown packaged volume skipped the cargo cap.** `cargo=None` meant the
+  check never ran — a million units ranked against a 60,000 m³ hold.
+  `VOLUME_UNKNOWN` refuses it, and plans the chosen objective cannot score are
+  counted in `dropped_unrankable` instead of being filtered out in silence.
+- **The basket double-spent measured depth.** One 1,000-unit Jita ask sold to
+  two hubs packed 2,000 units. At most one plan per `(type, source)` and per
+  `(type, destination)` now, with the withheld count named on the basket.
+- **Liquidity measured a dead market from year-old bars.** A
+  `tail(window_days)` fallback reported 500 units/day, `known=True`, reason
+  empty, for a type that had not traded in a year — feeding the maker caps and
+  the reliability grade. The fallback is gone.
+- **The ledger laundered a forecast into an actual.** A close with proceeds but
+  no cost borrowed `expected_cost_isk`, stored it as `actual_cost_isk`, and
+  computed a "realized" net and a "forecast error" from it — the forecast
+  grading its own homework, in the one ledger meant to turn §23.7's priors into
+  measurements. Resolved now means both sides actual; proceeds alone yields a
+  labelled `assumed_net_isk`.
+- **A NULL profile column deleted rows.** `handling_minutes` defaulted to 0.0
+  where the class default is 4.0; zero handling on a zero-jump detour made
+  ISK-per-minute UNKNOWN and the plan vanished from the ranking.
+- **`along_route` with no destination charged the whole trip** — the opposite
+  of what the mode is. The profile refuses to construct; the page, whose
+  control strip can always be half-filled, falls back to dedicated and says so.
+- **The avoid list was reported as a security block.** The probe re-ran the
+  route with the default profile and no avoid list. It asks the two questions
+  separately now, so the operator is told which of his own constraints severed
+  the pair.
+- **The reliability grade is quarantined and the quarantine is proved.** Its
+  weights are invented, so a test fails if a grade reaches a comparison, a
+  branch, a sort key, a filter or a comprehension anywhere under `src/` — and
+  the detector is self-tested against three synthetic gates.
+- **The scan was profiled rather than assumed.** One pair over 5,000 types took
+  **18.8 s**, of which `curves_from_depth` was **18.4 s** and the ranking loop
+  **0.4 s** — pandas' per-group constant paid five thousand times. The index
+  sorts once and walks rows: **18.8 s → 1.4 s**, and 9.0 s → 0.5 s per region.
+  Report detail is capped at 50 rejections per reason with `rejected_truncated`
+  naming what was omitted (counts stay whole), the control strip gets a 500 ms
+  debounce, and `q_walk` answers an exact breakpoint from the stored cumulative.
+- **Three residues.** `sweep_region(stations=...)` without a `bound` used
+  `DepthBound(0, 0)` and truncated every curve to one level — now a
+  `ValueError`, because it looked like a thin market and was a caller mistake.
+  An order beyond the graph's search bound is `range_out_of_reach` rather than
+  `range_unresolvable`, which blamed the map for a fact about the order. The
+  page's cargo box defaulted to 60,000 m³ and silently overrode the selected
+  ship's hold; it defaults to "use ship profile" now.
+- **Doc drift.** Gate stamps refreshed; §23.10, §23.3, §23.13 and §23.7
+  corrected in place with the superseded wording left visible.
+
 ## 2026-08-25 — §23 H1–H4 handed off: the hauling tab, and what it owes
 
 **Status: IMPLEMENTED + GREEN across H1a, H1b, H2, H3 and H4. NOTHING IS

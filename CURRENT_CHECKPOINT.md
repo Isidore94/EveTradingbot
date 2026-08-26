@@ -10,9 +10,25 @@ authorization 2026-08-25, recorded as §17 D-33: *"build first, evaluate against
 competitors and live gates afterwards"*). H5 and H6 are **out of scope**; H0 is
 deferred to a keep/park decision after the shadow period.
 
-**State: H1–H4 IMPLEMENTED + GREEN. NOTHING IS `LIVE_VALIDATED`.**
-**Gate stamp:** `uv run pytest -q` → **1,028 passed, 7 deselected**, ruff check
+**State: H1–H4 IMPLEMENTED + GREEN, and REMEDIATED. NOTHING IS
+`LIVE_VALIDATED`.**
+**Gate stamp:** `uv run pytest -q` → **1,068 passed, 7 deselected**, ruff check
 + format clean, `python -m evescreener selftest` → **12/12**.
+
+**A remediation happened on 2026-08-25** (§17 D-35): an adversarial first-build
+audit reproduced twelve defects with concrete inputs, and all twelve are fixed
+fixture-first. The one worth knowing before you open the tab: a round trip that
+loses money used to rank as a plan, because the marginal-net rule ran only from
+the second breakpoint — so the page could not have produced an honest zero even
+when an honest zero was the truth. **The checklist below is unchanged**: none
+of it was live evidence, and a remediation earns none of it. One line was added
+to section B, for the scan wall-clock on the real lake.
+
+The remediation added **+1,323 lines and removed 96** across code and tests
+(net **+1,227**), most of it fixtures: twelve fixes, each with a test that
+failed on the audited head. The track's total is now **10,180 lines** against
+§23.15's ≤7,000 target — the overage recorded as §17 D-34 grows by the
+remediation and remains stated rather than trimmed.
 
 Everything below this item — the paper desk, §21, §22 and the consolidated
 checklist — is unchanged and still owed in full. This track **adds** to that

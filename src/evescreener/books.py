@@ -46,6 +46,7 @@ __all__ = [
     "QuantityWalk",
     "SweepResult",
     "curve_from_frame",
+    "bounded_jump_distance",
     "depth_bound",
     "depth_jump_distance",
     "depth_stations",
@@ -657,6 +658,14 @@ async def sweep_region(
     )
     result.pages_expected = paged.pages_expected
     result.pages_fetched = paged.pages_fetched
+    if depth_lake is not None and stations and bound is None:
+        # `DepthBound(0, 0)` is satisfied by the first level of every book, so
+        # defaulting one here truncated every curve to a single level — which
+        # then reads as a shallow market rather than as a caller mistake.
+        raise ValueError(
+            "sweep_region(stations=...) needs an explicit `bound`: without one every "
+            "depth curve is truncated to its first level and reads as a thin book"
+        )
     if depth_lake is not None and stations:
         # The SAME in-memory pages, reduced a second way (§23.6). One fetch,
         # two products: no extra request, no cadence change, and the depth
@@ -666,7 +675,7 @@ async def sweep_region(
             paged.rows,
             region_id=region_id,
             stations=stations,
-            bound=bound or DepthBound(max_capital_isk=0.0, max_cargo_m3=0.0),
+            bound=bound,
             jump_distance=jump_distance,
             sweep_ts=result.sweep_ts,
             fetched_at=result.sweep_ts,
@@ -1050,6 +1059,15 @@ def reachable_from_station(
         return False, EXCLUDED_UNRESOLVABLE
     distance = jump_distance(int(order_system), int(station_system))
     if distance is None:
+        # Diagnostics only — the order is excluded either way. But a graph that
+        # searched and found nothing within its bound has *answered*: no legal
+        # numeric range exceeds `MAX_ORDER_RANGE_JUMPS`, so a system it knows
+        # and cannot reach in that many jumps is out of reach, not unplaceable.
+        # Blaming the map for a fact about the order made a full map look
+        # incomplete.
+        knows = getattr(jump_distance, "knows", None)
+        if knows is not None and knows(int(order_system)) and knows(int(station_system)):
+            return False, EXCLUDED_RANGE
         return False, EXCLUDED_UNRESOLVABLE
     return (True, None) if distance <= jumps_allowed else (False, EXCLUDED_RANGE)
 
@@ -1324,6 +1342,23 @@ def depth_bound(config: Config, db) -> DepthBound:
     )
 
 
+def bounded_jump_distance(graph):
+    """`graph.jump_distance`, carrying what the map knows.
+
+    The bare method returns None both for "further than the search bound" and
+    for "never heard of this system", and those are different facts: the first
+    is about the order, the second about the map. The closure answers distance
+    and exposes `.knows` so the reduction can tell them apart in its
+    diagnostics — the exclusion itself is identical either way.
+    """
+
+    def distance(origin, destination):
+        return graph.jump_distance(origin, destination)
+
+    distance.knows = graph.knows
+    return distance
+
+
 def depth_jump_distance(db):
     """The jump-distance function order ranges are resolved with, or None.
 
@@ -1335,4 +1370,4 @@ def depth_jump_distance(db):
     graph = RouteGraph.from_db(db)
     if not graph:
         return None
-    return graph.jump_distance
+    return bounded_jump_distance(graph)

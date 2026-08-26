@@ -162,7 +162,18 @@ class HaulingPage(DeskPage):
         outer.addLayout(first)
 
         second = QHBoxLayout()
-        self.cargo = self._spin(second, "cargo m³", 0.0, 2_000_000.0, 60_000.0, step=1000.0)
+        # Zero means "whatever the selected ship carries". A non-zero default
+        # here silently overrode the ship picker, which made the picker look
+        # live while the hold never changed.
+        self.cargo = self._spin(
+            second,
+            "cargo m³",
+            0.0,
+            2_000_000.0,
+            0.0,
+            step=1000.0,
+            special="use ship profile",
+        )
         self.capital = self._spin(
             second, "capital (M)", 0.0, 1_000_000.0, 250.0, step=50.0, suffix=""
         )
@@ -206,7 +217,9 @@ class HaulingPage(DeskPage):
         outer.addLayout(second)
         return bar
 
-    def _spin(self, row, label, low, high, value, *, step=1.0, suffix="") -> QDoubleSpinBox:
+    def _spin(
+        self, row, label, low, high, value, *, step=1.0, suffix="", special=""
+    ) -> QDoubleSpinBox:
         spin = QDoubleSpinBox()
         spin.setRange(low, high)
         spin.setDecimals(0)
@@ -214,6 +227,8 @@ class HaulingPage(DeskPage):
         spin.setValue(value)
         if suffix:
             spin.setSuffix(suffix)
+        if special:
+            spin.setSpecialValueText(special)
         spin.valueChanged.connect(self._controls_changed)
         row.addWidget(QLabel(label))
         row.addWidget(spin)
@@ -344,6 +359,7 @@ class HaulingPage(DeskPage):
                 else ShipProfile.from_config(data.config, name="ad hoc", cargo_m3=cargo)
             )
             if cargo > 0:
+                # An explicit override; zero defers to the ship profile.
                 from dataclasses import replace
 
                 ship = replace(ship, usable_cargo_m3=cargo)

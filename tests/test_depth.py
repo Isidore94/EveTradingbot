@@ -397,3 +397,90 @@ def test_a_walk_to_an_exact_breakpoint_reads_the_stored_cumulative():
     # A partial level still walks.
     partial = q_walk(curve, 15.0)
     assert partial.wap == pytest.approx((100 * 10 + 110 * 5) / 15)
+
+
+def test_asking_for_depth_without_a_bound_is_an_error_not_a_one_level_curve(config, db):
+    """`DepthBound(0, 0)` is satisfied by the first level of every book, so a
+    missing bound silently truncated every curve to one level — which then
+    reads as a shallow market rather than as a caller mistake."""
+    import asyncio
+
+    import httpx
+
+    from evescreener.books import sweep_region
+    from evescreener.esi.client import EsiClient
+    from evescreener.store.lake import BookLake, DepthLake
+
+    def handler(_request):
+        return httpx.Response(
+            200,
+            json=[_order(order_id=1, price=100.0, volume_remain=10.0)],
+            headers={"expires": "Thu, 27 Aug 2026 03:00:00 GMT", "x-pages": "1"},
+        )
+
+    client = EsiClient(
+        config,
+        db,
+        client=httpx.AsyncClient(
+            base_url=config.esi.base_url, transport=httpx.MockTransport(handler)
+        ),
+    )
+    try:
+        with pytest.raises(ValueError, match="bound"):
+            asyncio.run(
+                sweep_region(
+                    config,
+                    client,
+                    BookLake(config.paths.ensure()),
+                    10000002,
+                    depth_lake=DepthLake(config.paths),
+                    stations={JITA_44: JITA},
+                )
+            )
+    finally:
+        asyncio.run(client.aclose())
+
+
+def _long_corridor(length: int = 45):
+    """A line of `length` systems, so the far end is past the search bound."""
+    from evescreener.books import bounded_jump_distance
+    from evescreener.routes import RouteGraph
+
+    systems = [JITA] + [90_000 + index for index in range(length - 1)]
+    graph = RouteGraph(
+        list(zip(systems, systems[1:], strict=False)),
+        dict.fromkeys(systems, 0.9),
+        sde_build=1,
+    )
+    return graph, bounded_jump_distance(graph), systems[-1]
+
+
+def test_an_order_beyond_the_search_bound_is_out_of_reach_not_unresolvable():
+    """Diagnostics, not behaviour: both are excluded either way.
+
+    The graph searched and found nothing within its bound, and no legal
+    numeric range exceeds it — so the order is too far, and saying
+    `range_unresolvable` blamed the map for a fact about the order.
+    """
+    _graph, distance, far = _long_corridor()
+    order = _order(is_buy_order=True, range="5", location_id=99, system_id=far)
+    assert reachable_from_station(
+        order, station_id=JITA_44, station_system=JITA, jump_distance=distance
+    ) == (False, "range_out_of_reach")
+
+
+def test_an_order_the_graph_has_never_heard_of_is_still_unresolvable():
+    _graph, distance, _far = _long_corridor()
+    order = _order(is_buy_order=True, range="5", location_id=99, system_id=999_999)
+    assert reachable_from_station(
+        order, station_id=JITA_44, station_system=JITA, jump_distance=distance
+    ) == (False, "range_unresolvable")
+
+
+def test_a_plain_callable_with_no_map_stays_conservative():
+    """A caller that cannot say what the map knows gets the old answer."""
+    hops = _hops({})
+    order = _order(is_buy_order=True, range="5", location_id=99, system_id=PERIMETER)
+    assert reachable_from_station(
+        order, station_id=JITA_44, station_system=JITA, jump_distance=hops
+    ) == (False, "range_unresolvable")

@@ -326,3 +326,37 @@ def test_the_debounce_still_lets_a_single_change_through(qtbot, haul_desk):
     page.security.setCurrentText("safer")
     qtbot.wait(page.DEBOUNCE_MS + 250)
     assert len(launched) == 1
+
+
+def test_the_cargo_box_overrides_the_ship_profile_only_when_it_is_set(qtbot, haul_desk):
+    """The spin box defaulted to 60,000 m³, which silently overrode whatever
+    hold the selected ship actually has — the picker looked live and was not."""
+    from evescreener.timeutil import iso, utcnow
+
+    haul_desk.db.put_haul_profile(
+        {
+            "name": "Bestower",
+            "usable_cargo_m3": 6_000.0,
+            "ehp": None,
+            "ship_value_isk": None,
+            "seconds_per_jump": 55.0,
+            "handling_minutes": 4.0,
+            "created_at": iso(utcnow()),
+        }
+    )
+    page = HaulingPage(haul_desk)
+    qtbot.addWidget(page)
+    assert page.cargo.value() == 0.0, "the default must defer to the ship"
+    assert "ship profile" in page.cargo.specialValueText()
+
+    page.capital.setValue(250.0)
+    page.exposure.setValue(250.0)
+    page.security.setCurrentText("shortest")
+    page.minutes.setValue(600)
+    result = _run(qtbot, page)
+    assert result["scan"].profile.ship.usable_cargo_m3 == 6_000.0
+    assert result["ship"] == "Bestower"
+
+    page.cargo.setValue(60_000.0)
+    overridden = _run(qtbot, page)
+    assert overridden["scan"].profile.ship.usable_cargo_m3 == 60_000.0

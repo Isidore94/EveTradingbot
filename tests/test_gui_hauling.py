@@ -401,3 +401,46 @@ def test_the_cargo_box_overrides_the_ship_profile_only_when_it_is_set(qtbot, hau
     page.cargo.setValue(60_000.0)
     overridden = _run(qtbot, page)
     assert overridden["scan"].profile.ship.usable_cargo_m3 == 60_000.0
+
+
+def test_an_empty_ship_picker_says_why_it_is_empty(qtbot, haul_desk):
+    """A blank control reads as broken; this one reads as a fact and a command.
+
+    `state.db` starts with no ship profiles, because a fit is operator data the
+    desk must not invent (§19.2). The picker used to be left empty in that
+    case, which looks identical to a control that failed to populate.
+    """
+    from evescreener.gui.pages.hauling import NO_SHIPS
+
+    page = _page(qtbot, haul_desk)
+    assert [page.ship.itemText(i) for i in range(page.ship.count())] == [NO_SHIPS]
+
+    # The placeholder is not a ship: it never reaches the scan or the saved
+    # filters as a name, so the ad-hoc profile is what gets used.
+    assert dict(page.job_input())["ship"] == ""
+    assert page._filters()["ship"] == ""
+
+    result = _run(qtbot, page)
+    assert result["ships"] == []
+    assert result["ship"] == "ad hoc"
+
+
+def test_a_stored_profile_replaces_the_placeholder(qtbot, haul_desk):
+    from evescreener.gui.pages.hauling import NO_SHIPS
+
+    haul_desk.db.put_haul_profile(
+        {
+            "name": "Bestower",
+            "usable_cargo_m3": 27_500.0,
+            "ehp": None,
+            "ship_value_isk": None,
+            "seconds_per_jump": 55.0,
+            "handling_minutes": 4.0,
+            "created_at": "2026-08-26T00:00:00+00:00",
+        }
+    )
+    page = _page(qtbot, haul_desk)
+    _run(qtbot, page)
+    names = [page.ship.itemText(i) for i in range(page.ship.count())]
+    assert names == ["Bestower"] and NO_SHIPS not in names
+    assert dict(page.job_input())["ship"] == "Bestower"

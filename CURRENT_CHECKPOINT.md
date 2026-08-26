@@ -86,7 +86,20 @@ prices **29,211 candidates**, rejects **46,966** (MARGINAL_NET_NEGATIVE 23,390,
 DEST_DEPTH_SHORT 12,820, OVER_CAPITAL 5,186, DEPTH_TRUNCATED 5,115), and ranks
 15 plans led by ~697k ISK/active-minute at 250M capital.
 
-Gate stamp after these fixes: `uv run pytest -q` → **1,088 passed, 7
+4. **The ship picker was empty because `haul_profiles` is empty** — zero rows,
+   as a fresh lake has. That is correct (a fit is operator data), but the
+   picker said nothing, which is indistinguishable from a control that failed
+   to load. It now carries `no ship profiles — run: haul profile add` until a
+   profile exists, and the placeholder never reaches the scan as a name.
+
+There are no application logs to check: nothing under `src/` writes to
+`logs/`, and those four files are hand-captured stdout from 2026-08-20 (the
+`tracked types 0` line in `desk_time.log` predates the census; the universe now
+holds 1,633 OK + 1,314 THIN tracked). The run record that matters is
+`sweep_ledger`: the five-hub sweep is **912 requests, all HTTP 200**, no 4xx,
+no breaker, 10,251 of the orders token budget still unspent.
+
+Gate stamp after these fixes: `uv run pytest -q` → **1,090 passed, 7
 deselected**, ruff clean, `selftest` **12/12**.
 
 None of this is live validation of anything: the numbers above are arithmetic

@@ -5,6 +5,20 @@ Authoritative for what exists and the sequence of revisions. Remaining work:
 `GREEN` = deterministic tests pass, `LIVE_VALIDATED` = real-market evidence
 recorded, `PROMOTED` = explicit operator decision.
 
+## 2026-08-26 — the ship picker says why it is empty
+
+**Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,090 passed, 7
+deselected**, ruff clean. Two GUI tests.
+
+- **An empty ship picker now reads as a fact instead of a broken control.**
+  `haul_profiles` is operator data — the desk must not invent a fit (§19.2) —
+  so on a fresh lake the combo populated with nothing at all, which looks
+  identical to a control that failed to load. It now shows
+  `no ship profiles — run: haul profile add`, and that placeholder is never
+  treated as a ship: `_ship_name()` maps it to `""`, so it cannot be stored as
+  a saved filter or matched against a profile, and the scan falls back to the
+  ad-hoc profile and says so in its notes. The first real profile replaces it.
+
 ## 2026-08-26 — a missing `issued` stamp no longer ends the scan
 
 **Status: IMPLEMENTED + GREEN.** `uv run pytest -q` → **1,088 passed, 7

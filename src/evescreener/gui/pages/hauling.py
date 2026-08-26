@@ -78,6 +78,13 @@ FILTER_KEY = "hauling.filters"
 
 CAVEAT = f"{SNAPSHOT_CAVEAT} {ORDER_AGE_CAVEAT}"
 
+#: What the ship picker says when `state.db` holds no ship profiles. A ship
+#: profile is operator data — nobody but the operator knows the fit, so the
+#: desk never invents one (§19.2: it shows what is missing, it does not cure
+#: it). An empty picker on its own reads as a broken control; this reads as a
+#: fact plus the command that changes it.
+NO_SHIPS = "no ship profiles — run: haul profile add"
+
 
 class HaulingPage(DeskPage):
     title = "HAULING"
@@ -157,6 +164,7 @@ class HaulingPage(DeskPage):
         first.addWidget(self.mode)
 
         self.ship = QComboBox()
+        self.ship.addItem(NO_SHIPS)
         self.ship.currentIndexChanged.connect(self._controls_changed)
         first.addWidget(QLabel("ship"))
         first.addWidget(self.ship)
@@ -308,12 +316,22 @@ class HaulingPage(DeskPage):
         except Exception:  # noqa: BLE001 - a saved filter is a convenience, never a gate
             pass
 
+    def _ship_name(self) -> str:
+        """The selected profile's name, or "" when the placeholder is showing.
+
+        The placeholder is not a ship, so it must never be stored as a saved
+        filter or matched against `haul_profiles` — an empty name is what makes
+        the scan fall back to the ad-hoc profile and say so in its notes.
+        """
+        name = self.ship.currentText()
+        return "" if name == NO_SHIPS else name
+
     def _filters(self) -> dict:
         return {
             "origin": self.origin.text().strip(),
             "destination": self.destination.text().strip(),
             "mode": self.mode.currentData(),
-            "ship": self.ship.currentText(),
+            "ship": self._ship_name(),
             "cargo": self.cargo.value(),
             "capital": self.capital.value(),
             "exposure": self.exposure.value(),
@@ -517,14 +535,14 @@ class HaulingPage(DeskPage):
                 self.origin.setCompleter(completer)
                 self.destination.setCompleter(QCompleter(result["systems"]))
                 self._systems_loaded = True
-            names = result.get("ships") or []
-            if names and [self.ship.itemText(i) for i in range(self.ship.count())] != names:
+            names = result.get("ships") or [NO_SHIPS]
+            if [self.ship.itemText(i) for i in range(self.ship.count())] != names:
                 current = self.ship.currentText()
                 self.ship.clear()
                 self.ship.addItems(names)
                 if current in names:
                     self.ship.setCurrentText(current)
-                self._ships_loaded = True
+                self._ships_loaded = names != [NO_SHIPS]
         finally:
             self._loading = False
 

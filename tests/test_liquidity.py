@@ -429,12 +429,33 @@ GRADE_LETTERS = {"A", "B", "C", "D", "E", "F"}
 RANKERS = {"sorted", "sort", "filter", "max", "min"}
 
 
+def _named_grade(child) -> bool:
+    """One AST node that reaches a reliability grade by a name we can see.
+
+    Three spellings: the attribute (`plan.reliability`), the dict subscript
+    (`row["reliability"]["grade"]` — which is how the report renderer and the
+    drawer read row payloads, and what this was blind to), and an explicit
+    `getattr(plan, "reliability")`.
+    """
+    import ast
+
+    if isinstance(child, ast.Attribute):
+        return child.attr in GRADED
+    if isinstance(child, ast.Subscript):
+        return isinstance(child.slice, ast.Constant) and child.slice.value in GRADED
+    if isinstance(child, ast.Call) and getattr(child.func, "id", None) == "getattr":
+        return (
+            len(child.args) >= 2
+            and isinstance(child.args[1], ast.Constant)
+            and child.args[1].value in GRADED
+        )
+    return False
+
+
 def _mentions_grade(node) -> bool:
     import ast
 
-    return any(
-        isinstance(child, ast.Attribute) and child.attr in GRADED for child in ast.walk(node)
-    )
+    return any(_named_grade(child) for child in ast.walk(node))
 
 
 def _gates_on_grade(source: str) -> list[str]:
@@ -478,12 +499,24 @@ def _gates_on_grade(source: str) -> list[str]:
 
 
 def test_the_gate_detector_can_actually_see_a_gate():
-    """Guard against the check below passing because it detects nothing."""
+    """Guard against the check below passing because it detects nothing.
+
+    This is a **tripwire, not a proof**. It reads names it can see in the
+    source; access built out of a computed string — `getattr(plan, field)`,
+    `row[key]` — is beyond any static check of this kind, and the quarantine
+    for that case rests on review.
+    """
     assert _gates_on_grade("rows = [r for r in rows if r.reliability['grade'] < 'C']")
     assert _gates_on_grade("if plan.reliability['grade'] == 'F':\n    plan = None")
     assert _gates_on_grade("rows.sort(key=lambda r: r.reliability['score'])")
-    # …and that it does not fire on rendering one.
+    # …by dict subscript, which is how every row payload on the page is read…
+    assert _gates_on_grade("rows = [r for r in rows if r['reliability']['grade'] < 'C']")
+    assert _gates_on_grade("if row['reliability_grade'] == 'F':\n    row = None")
+    # …and behind an explicit getattr.
+    assert _gates_on_grade("if getattr(plan, 'reliability_grade') == 'F':\n    plan = None")
+    # …and that none of it fires on rendering one.
     assert not _gates_on_grade("cell = plan.reliability.get('grade') if plan.reliability else '—'")
+    assert not _gates_on_grade("cell = row['reliability']['grade']")
 
 
 def test_no_module_lets_the_reliability_grade_gate_anything():
@@ -500,8 +533,10 @@ def test_no_module_lets_the_reliability_grade_gate_anything():
     root = Path(__file__).resolve().parents[1] / "src" / "evescreener"
     offenders = []
     for path in sorted(root.rglob("*.py")):
-        if path.name == "liquidity.py":
-            continue  # where the grade is computed and returned, and nothing else
+        # No exemption, `liquidity.py` included. It trips nothing today, and
+        # exempting the module that computes the grade blinded the tripwire in
+        # the one place the likeliest future consumer already lives:
+        # `liquidity_attachment`, which builds the payload every surface reads.
         for offence in _gates_on_grade(path.read_text(encoding="utf-8")):
             offenders.append(f"{path.relative_to(root)}:{offence}")
     assert not offenders, (

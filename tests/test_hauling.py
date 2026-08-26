@@ -357,6 +357,20 @@ def test_a_truncated_curve_caps_the_size_and_names_the_reason(config, worked):
     assert scan.plans[0].source_depth_complete is False
 
 
+def test_an_unbounded_hold_says_so_on_every_surface(config, worked):
+    """A fresh install has no ship profile and a cargo spin defaulting to 0.
+
+    That resolves to `usable_cargo_m3 == 0`, and every cargo test in the engine
+    is written `and profile.ship.usable_cargo_m3` — so OVER_CARGO cannot fire,
+    an unknown packaged volume takes FIX 2's no-cap branch, and capital becomes
+    the only thing bounding the size. All of which is defensible; none of which
+    was visible anywhere on the page.
+    """
+    scan = _scan(config, worked, profile=_profile(cargo_m3=0.0))
+    assert any("cargo is unbounded" in note for note in scan.notes)
+    assert not any("cargo is unbounded" in note for note in _scan(config, worked).notes)
+
+
 # -- 3. ranking ------------------------------------------------------------
 
 

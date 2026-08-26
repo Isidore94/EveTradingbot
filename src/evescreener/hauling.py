@@ -869,6 +869,17 @@ def scan_hauls(
         scan.notes.append("hauling is disabled in config; no plans are produced")
         return scan
 
+    # A hold of zero is not a small hold — every cargo test in the engine reads
+    # `and profile.ship.usable_cargo_m3`, so at zero OVER_CARGO cannot fire and
+    # an unknown packaged volume takes the no-cap branch. That is the right
+    # arithmetic for "no hold declared", but a fresh install reaches it by
+    # default (no saved ship, cargo spin at 0) and nothing on the page said so.
+    if not profile.ship.usable_cargo_m3:
+        scan.notes.append(
+            "no ship profile and no cargo override — cargo is unbounded; "
+            "capital is the only size cap"
+        )
+
     curves: dict[int, dict[tuple[int, int, str], DepthCurve]] = {
         int(region): curves_from_depth(snapshot.priceable) for region, snapshot in depths.items()
     }

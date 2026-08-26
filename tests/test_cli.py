@@ -287,6 +287,12 @@ def test_a_haul_scan_on_an_empty_lake_is_an_honest_zero(tmp_path, monkeypatch, c
     assert "STALE_BOOK" in out, "the refusals are the denominator, and they are printed"
 
 
+def test_a_haul_scan_with_a_zero_hold_says_capital_is_the_only_cap(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
+    assert main(["--example-config", "haul", "scan", "--cargo", "0", "--no-write"]) == 0
+    assert "cargo is unbounded" in capsys.readouterr().out
+
+
 def test_a_haul_scan_writes_an_immutable_report(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("EVESCREENER_DATA_DIR", str(tmp_path / "data"))
     assert main(["--example-config", "haul", "scan", "--cargo", "60000"]) == 0

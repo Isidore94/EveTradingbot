@@ -328,6 +328,15 @@ def test_the_debounce_still_lets_a_single_change_through(qtbot, haul_desk):
     assert len(launched) == 1
 
 
+def test_a_fresh_install_is_told_its_cargo_is_unbounded(qtbot, haul_desk):
+    """No saved profile, spin at its 0 default: the scan has no hold at all."""
+    page = _page(qtbot, haul_desk, cargo=0.0)
+    result = _run(qtbot, page)
+    assert result["scan"].profile.ship.usable_cargo_m3 == 0.0
+    assert any("cargo is unbounded" in note for note in result["scan"].notes)
+    assert "cargo is unbounded" in page.summary.text()
+
+
 def test_the_cargo_box_overrides_the_ship_profile_only_when_it_is_set(qtbot, haul_desk):
     """The spin box defaulted to 60,000 m³, which silently overrode whatever
     hold the selected ship actually has — the picker looked live and was not."""

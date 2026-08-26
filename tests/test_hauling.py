@@ -313,6 +313,12 @@ def test_a_chunk_that_does_not_pay_for_itself_is_refused_by_name(config):
     assert scan.plans[0].quantity == pytest.approx(100.0), "the second 100 units lose money"
     assert scan.rejected_for(MARGINAL_NET_NEGATIVE)
 
+    # The refused size is kept in the audit on purpose — "why not bigger" is
+    # information — but it rendered indistinguishable from a viable one, so the
+    # table read as though 200 units were an option the ranker passed over.
+    audit = {quantity: rejected for quantity, _cost, _net, rejected in scan.plans[0].breakpoints}
+    assert audit == {100.0: False, 200.0: True}
+
 
 def test_a_truncated_curve_caps_the_size_and_names_the_reason(config, worked):
     truncated = reduce_depth(

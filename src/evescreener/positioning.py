@@ -70,7 +70,7 @@ def marginal_chunks(plan, plan_index: int = 0) -> list[Chunk]:
     chunks: list[Chunk] = []
     previous = (0.0, 0.0, 0.0)
     unit_volume = plan.packaged_volume_m3
-    for quantity, cost, net in plan.breakpoints:
+    for quantity, cost, net, _rejected in plan.breakpoints:
         step_quantity = quantity - previous[0]
         step_cost = cost - previous[1]
         step_net = net - previous[2]

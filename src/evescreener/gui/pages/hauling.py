@@ -667,8 +667,13 @@ def _why_text(plan) -> str:
         "",
         "quantity         capital      net profit",
     ]
-    for quantity, cost, net in plan.breakpoints:
-        marker = "  <- chosen" if abs(quantity - plan.quantity) < 1e-9 else ""
+    for quantity, cost, net, rejected in plan.breakpoints:
+        if rejected:
+            marker = "  <- refused (marginal <= 0)"
+        elif abs(quantity - plan.quantity) < 1e-9:
+            marker = "  <- chosen"
+        else:
+            marker = ""
         lines.append(f"{quantity:>12,.0f}  {cost:>14,.0f}  {net:>14,.0f}{marker}")
     if plan.marginal_net_isk is not None:
         lines.append("")

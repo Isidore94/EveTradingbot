@@ -174,8 +174,13 @@ def _row(plan) -> dict:
         "why_this_size": {
             "objective": plan.rank_score,
             "breakpoints": [
-                {"quantity": quantity, "capital_isk": cost, "net_profit": net}
-                for quantity, cost, net in plan.breakpoints
+                {
+                    "quantity": quantity,
+                    "capital_isk": cost,
+                    "net_profit": net,
+                    "rejected": rejected,
+                }
+                for quantity, cost, net, rejected in plan.breakpoints
             ],
             "marginal_net_isk": plan.marginal_net_isk,
             "alternatives": plan.alternatives,

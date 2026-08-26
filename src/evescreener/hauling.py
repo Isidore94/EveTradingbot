@@ -422,6 +422,9 @@ class HaulPlan:
     oldest_issued: str | None = None
     #: The quantities the other objectives would have chosen, when they differ.
     alternatives: dict = field(default_factory=dict)
+    #: `(quantity, capital_isk, net_profit, rejected)` per priced size. The
+    #: last entry is `rejected=True` when the search stopped there because the
+    #: chunk's marginal net was <= 0 (§23.10).
     breakpoints: tuple = ()
     rank_score: float | None = None
 
@@ -1250,9 +1253,12 @@ def _best_plan(
                     ),
                 )
             )
-            priced.append((quantity, cost, net))
+            # Kept in the audit, and **labelled**: "why not bigger" is the
+            # question this table exists to answer, and an unlabelled refused
+            # size read exactly like a viable one the ranker passed over.
+            priced.append((quantity, cost, net, True))
             break
-        priced.append((quantity, cost, net))
+        priced.append((quantity, cost, net, False))
 
         minutes = trip.active_minutes
         per_minute = (net / minutes) if minutes else None

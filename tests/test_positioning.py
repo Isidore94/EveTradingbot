@@ -24,6 +24,22 @@ DEST = Station(60008494, 30002187, 10000043, "Amarr")
 UNKNOWN_ROUTE = RouteFacts.unknown(None, None, "shortest", "")
 
 
+def _labelled(breakpoints):
+    """`(q, cost, net)` in, `(q, cost, net, rejected)` out — the engine's rule.
+
+    The ranker stops at the first chunk whose marginal net is <= 0 and keeps
+    that size in the audit, flagged. The helper reproduces the flag rather than
+    hard-coding False, so a test written with a losing tail gets the same shape
+    a real scan would have produced.
+    """
+    laid = []
+    previous_net = 0.0
+    for quantity, cost, net in breakpoints:
+        laid.append((quantity, cost, net, net - previous_net <= 0))
+        previous_net = net
+    return laid
+
+
 def _plan(type_id, name, breakpoints, *, volume_m3=1.0, destination=DEST) -> HaulPlan:
     quantity, cost, net = breakpoints[-1]
     return HaulPlan(
@@ -55,7 +71,7 @@ def _plan(type_id, name, breakpoints, *, volume_m3=1.0, destination=DEST) -> Hau
         detour_jumps=None,
         active_minutes=10.0,
         isk_per_active_minute=net / 10.0,
-        breakpoints=tuple(breakpoints),
+        breakpoints=tuple(_labelled(breakpoints)),
     )
 
 

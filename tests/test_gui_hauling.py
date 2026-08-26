@@ -328,6 +328,19 @@ def test_the_debounce_still_lets_a_single_change_through(qtbot, haul_desk):
     assert len(launched) == 1
 
 
+def test_the_drawer_marks_the_refused_size_as_refused(qtbot, haul_desk):
+    """The audit keeps the size the ranker stopped at; the drawer must say so."""
+    from dataclasses import replace
+
+    from evescreener.gui.pages.hauling import _why_text
+    from test_positioning import _plan
+
+    plan = _plan(34, "Tritanium", [(100.0, 1000.0, 500.0), (200.0, 3000.0, 400.0)])
+    text = _why_text(replace(plan, quantity=100.0, rank_score=50.0))
+    assert "<- chosen" in text
+    assert "<- refused (marginal <= 0)" in text
+
+
 def test_a_fresh_install_is_told_its_cargo_is_unbounded(qtbot, haul_desk):
     """No saved profile, spin at its 0 default: the scan has no hold at all."""
     page = _page(qtbot, haul_desk, cargo=0.0)

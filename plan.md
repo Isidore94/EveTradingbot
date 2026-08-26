@@ -2740,7 +2740,11 @@ costs today" became unreachable.)*
 is monotonically non-increasing in quantity — the ask WAP only rises and the
 bid WAP only falls — so a chunk whose aggregate is ≤ 0 guarantees every later
 one is too. Continuing cannot accept a larger size; it only floods the rejected
-set and burns walks.
+set and burns walks. The refused size **stays in the audit trail, flagged**:
+`breakpoints` carries `(quantity, capital_isk, net_profit, rejected)` and the
+drawer marks it `<- refused (marginal <= 0)`. *(Added at closeout 2026-08-26:
+it was kept from the start — "why not bigger" is what the table is for — but it
+rendered identically to a viable size the ranker had merely passed over.)*
 
 The default objective is **conservative net ISK per active minute**; the
 max-profit, max-ROI and max-ISK/m³ quantities are recorded beside it whenever

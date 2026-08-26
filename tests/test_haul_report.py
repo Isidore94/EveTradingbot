@@ -61,6 +61,24 @@ def _empty_scan(config) -> HaulScan:
 # -- 1. the report ---------------------------------------------------------
 
 
+def test_the_audit_marks_the_size_the_ranker_refused(config):
+    """The refused breakpoint is kept on purpose; it must not read as an option.
+
+    `MARGINAL_NET_NEGATIVE` stops the search and the size that triggered it
+    stays in `breakpoints`, because "why not bigger" is the question the audit
+    exists to answer. Unlabelled, it rendered exactly like the sizes that were
+    viable and the ranker merely passed over.
+    """
+    from test_positioning import _plan
+
+    scan = HaulScan(generated_at="2026-08-25T12:00:00+00:00", profile=_profile_for(config))
+    plan = _plan(34, "Tritanium", [(100.0, 1000.0, 500.0), (200.0, 3000.0, 400.0)])
+    scan.plans = [plan]
+    table = build_haul_report(scan, config=config)["rows"][0]["audit"]["why_this_size"]
+    assert [entry["rejected"] for entry in table["breakpoints"]] == [False, True]
+    assert [entry["quantity"] for entry in table["breakpoints"]] == [100.0, 200.0]
+
+
 def test_the_report_carries_everything_needed_to_re_derive_it(config):
     report = build_haul_report(_empty_scan(config), config=config)
     assert report["calc_version"] == CALC_VERSION

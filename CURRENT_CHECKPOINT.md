@@ -2,6 +2,77 @@
 
 This file names the one active item, its working state, and the last
 verification stamp. `plan.md` owns the roadmap; `CHANGELOG.md` owns history.
+When this file passes ~1,500 lines, move the entries older than the oldest open
+gate into `docs/CHECKPOINT_ARCHIVE_<period>.md` and leave a pointer here.
+
+## Active state at a glance
+
+**Read this block first. It is the answer to "where are we?" — the dated
+entries below are the working record behind it. Refresh this block on every
+handoff; if it disagrees with the newest dated entry, the dated entry wins and
+this block is stale.**
+
+| | |
+|---|---|
+| Working branch | **`docs/hauling-scanner-plan`** — the whole §23 HAULING track plus the 2026-09-04 JumpStarter retrofit; fast-forwarded to `main` on 2026-09-04 |
+| Also in flight | nothing — `origin/claude/hauling-h1-h4-build-4pwsso` is fully merged into this line |
+| Active item | plan.md §23 HAULING, phases H1–H4: **code done, nothing `LIVE_VALIDATED`**. The next step is the consolidated checklist below, worked by the operator — not more code |
+| Last verified baseline | `uv run pytest -q` → **1,090 passed, 7 deselected in 49.12 s, process exit 0** (2026-09-04, on `dd6f4d6` + the retrofit's docs-only changes) · `uv run ruff check . && uv run ruff format --check .` **clean** · `python -m evescreener selftest` **12/12** |
+| Artifact state | Runs from source in the main checkout (`python -m evescreener …`, `launch_gui.py`); no build step. No desk or daemon process was found running on 2026-09-04 |
+| Restart owed | **No** — the retrofit changed control files only. The lake needs `sweep-books --secondary` before the HAULING tab has depth to price (2026-08-26 report), which is an operator run |
+| Control-set check | `python ../JumpStarter/tools/jumpstart.py check .` → red on **one** line: `plan.md` 2,961 lines vs 1,200 bound. Splitting it is the operator's decision (`docs/README.md`) |
+
+Rules for this block: numbers, not adjectives; the **process** exit code, not
+a piped tail's; if a number was not measured this handoff, say so and say when
+it was.
+
+### Open gates
+
+Every gate is owed before the work it belongs to can be called validated, and
+every one is an **operator action**. They are the consolidated live-validation
+checklist at the bottom of this file (sections A–I) plus the §23 items named in
+the active-item text below. Newest additions, 2026-09-04:
+
+| # | Gate | Owed by |
+|---|---|---|
+| 1 | The operator answers the twelve questions in `docs/decisions/0001-owner-goals-and-priorities.md`, one at a time, verbatim; the record moves from `OPEN` to `ACCEPTED` and reorders the checklist if it says to | the 2026-09-04 entry below |
+| 2 | The operator confirms or corrects the ask-first file list in `docs/AGENT_TEAM.md` (derived from `plan.md` §11, not asked) | the 2026-09-04 entry below |
+| 3 | The operator decides whether `plan.md` is split (completed tracks archived under `docs/` keeping their § numbers) or left whole with the bounded read as the mitigation | the 2026-09-04 entry below |
+| 4 | The first packet run through `tester → builder → reviewer` records in this file whether the handoff formats crossed between Claude Code and Codex | `docs/AGENT_TEAM.md` |
+
+A gate is closed by striking its row through and writing what was observed —
+never by deleting the row.
+
+---
+
+### 2026-09-04 — JumpStarter control set retrofitted; no product code changed
+
+**Branch `docs/hauling-scanner-plan`, pushed to `main`.** Applied from
+`C:\Users\Aaron\JumpStarter` per its `playbooks/retrofit.md`: audit first (15
+gaps of 25 checks), then only what was missing, archiving rather than deleting.
+Landed: the agent team (`.claude/agents/`, `.codex/agents/`, packets,
+`docs/AGENT_TEAM.md`, `docs/CODEX_NOTES.md`), `CLAUDE.md` rewritten around a
+bounded read with every hard invariant's wording kept and `AGENTS.md`
+regenerated, `docs/INTERNALS.md` with the incident behind each rule,
+`CHANGELOG.md` split into inventory / recent / archive, this block, seven root
+review prompts moved to `docs/reviews/`, `docs/README.md`, `WISHLIST.md`,
+`docs/decisions/0000–0001`, `plan.md` §11 D8 amended and §17 D-36 recorded.
+Detail: `CHANGELOG.md` 2026-09-04 and `plan.md` §17 D-36.
+
+**What was NOT done, and why.** `plan.md` was not split (cited by § number
+everywhere; operator decision). The owner questionnaire was not asked (needs
+the operator, one question at a time). The ask-first list is derived, not
+confirmed. The Claude↔Codex handoff crossing is unproven here.
+
+**Proof.** `uv run pytest -q` → 1,090 passed, 7 deselected, 49.12 s, exit 0.
+Ruff check + format clean. `selftest` 12/12. Fail-before-fix: not applicable —
+no behaviour changed and no test was added. `jumpstart.py check .`: red on the
+plan-size line only; `CLAUDE.md == AGENTS.md` by sha256; no unfilled
+placeholders; every `INTERNALS:` citation in `CLAUDE.md` has its entry.
+
+**Gates recorded.** Rows 1–4 in the open-gates table above.
+
+---
 
 ## Active item
 

@@ -19,6 +19,7 @@ import json
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QCompleter,
     QDoubleSpinBox,
@@ -47,7 +48,8 @@ from ...hauling import (
     scan_hauls,
     scan_inputs,
 )
-from ...haulreport import haul_basket
+from ...haulreport import haul_basket, haul_loops, persistence_text, route_risk_text
+from ...loops import render_loops
 from ...positioning import render_basket
 from ...routes import PROFILES
 from ..widgets import BLANK, SortableTable, format_isk
@@ -68,6 +70,10 @@ HEADERS = [
     "liquidation",
     "route risk",
     "reliability",
+    # §23.21: survival across stored prior generations, and losses along the
+    # route from ingested killmails. Both blank-as-UNKNOWN, never zero.
+    "persist",
+    "losses",
     "rank",
 ]
 
@@ -237,6 +243,17 @@ class HaulingPage(DeskPage):
             special="no cap",
         )
 
+        # §23.21 filters, default off. Measured 2026-09-04: quantity <= 5 plans
+        # survived to the next generation at 33% against 51% for bulk, and ten
+        # of the top 25 were one-to-six-unit hulls whose exit was one bid.
+        self.min_quantity = self._spin(second, "min qty", 0.0, 1e9, 0.0, step=1.0, special="any")
+        self.hide_below = QCheckBox("hide BELOW")
+        self.hide_below.setToolTip(
+            "Withhold items under 100 units/day. Counted on the summary, never rejected."
+        )
+        self.hide_below.toggled.connect(self._controls_changed)
+        second.addWidget(self.hide_below)
+
         self.nearest = QPushButton("Nearest first")
         self.nearest.clicked.connect(lambda: self.table.sort_by(HEADERS.index("pickup")))
         second.addStretch(1)
@@ -281,6 +298,7 @@ class HaulingPage(DeskPage):
             "costs",
             "liquidity",
             "mixed cargo",
+            "loops",
             "rejected",
         ):
             pane = QPlainTextEdit()
@@ -341,6 +359,8 @@ class HaulingPage(DeskPage):
             "objective": self.objective.currentData(),
             "exit_model": self.exit_model.currentData(),
             "max_wait_days": self.max_wait_days.value(),
+            "min_quantity": self.min_quantity.value(),
+            "hide_below": bool(self.hide_below.isChecked()),
         }
 
     def _restore_filters(self) -> None:
@@ -368,9 +388,12 @@ class HaulingPage(DeskPage):
                 (self.capital, "capital"),
                 (self.exposure, "exposure"),
                 (self.max_wait_days, "max_wait_days"),
+                (self.min_quantity, "min_quantity"),
             ):
                 if saved.get(key) is not None:
                     spin.setValue(float(saved[key]))
+            if saved.get("hide_below") is not None:
+                self.hide_below.setChecked(bool(saved["hide_below"]))
             if saved.get("minutes"):
                 self.minutes.setValue(int(saved["minutes"]))
             if saved.get("max_jumps") is not None:
@@ -450,6 +473,8 @@ class HaulingPage(DeskPage):
                     if controls.get("max_wait_days") is not None
                     else data.config.hauling.default_max_wait_days
                 ),
+                min_quantity=float(controls.get("min_quantity") or 0.0),
+                hide_badges=("BELOW",) if controls.get("hide_below") else (),
             )
             scan = scan_hauls(
                 data.config,
@@ -463,6 +488,8 @@ class HaulingPage(DeskPage):
                 badges=badges,
                 packaged_volume=packaged,
                 liquidity=_liquidity_for(data.config, db, depths, profile),
+                persistence=_persistence_for(data.config, depths, [*sources, *destinations]),
+                route_risk=_route_risk_for(data.config, db),
             )
         for note in unresolved:
             scan.notes.append(note)
@@ -471,6 +498,7 @@ class HaulingPage(DeskPage):
             # Built here, on the worker, by the same function the CLI calls, so
             # the desk and the report cannot drift into two baskets.
             "basket": render_basket(haul_basket(scan, config=data.config)),
+            "loops": render_loops(haul_loops(scan)),
             "systems": sorted(system_names.values()),
             "ships": [ship["name"] for ship in ships],
             "ship": ship.name,
@@ -498,6 +526,7 @@ class HaulingPage(DeskPage):
 
         counts = scan.rejection_counts
         dropped = scan.dropped_unrankable
+        withheld = scan.withheld_by_filter
         self.summary.setText(
             f"{len(scan.plans):,} plan(s) from {scan.candidates_considered:,} priced "
             f"candidate(s) across {scan.pairs_considered} station pair(s); "
@@ -513,11 +542,18 @@ class HaulingPage(DeskPage):
                 if dropped
                 else ""
             )
+            + (
+                " · withheld by your filters: "
+                + ", ".join(f"{reason} {count}" for reason, count in sorted(withheld.items()))
+                if withheld
+                else ""
+            )
             + (" · " + " · ".join(scan.notes) if scan.notes else "")
         )
         self.stamp.setText(_generation_stamp(scan))
         self.panes["rejected"].setPlainText(_rejected_text(scan))
         self.panes["mixed cargo"].setPlainText(result.get("basket") or "")
+        self.panes["loops"].setPlainText(result.get("loops") or "")
         if not scan.plans:
             for name in ("ladders", "why this size", "route", "costs", "liquidity"):
                 self.panes[name].setPlainText(
@@ -594,6 +630,21 @@ def _liquidity_for(config, db, depths, profile):
     return liquidity_attachment(config, db, depths, profile)
 
 
+def _persistence_for(config, depths, stations):
+    """§23.21's survival read over the stored prior generations. Local files only."""
+    from ...persistence import persistence_attachment
+    from ...store.lake import DepthLake
+
+    return persistence_attachment(config, depths, lake=DepthLake(config.paths), stations=stations)
+
+
+def _route_risk_for(config, db):
+    """§23.21's route-loss column, from `state.db`. A column, never a rank."""
+    from ...routerisk import route_risk_attachment
+
+    return route_risk_attachment(config, db)
+
+
 # -- rendering helpers ------------------------------------------------------
 
 
@@ -610,10 +661,14 @@ def _plan_row(plan) -> list:
     if plan.badge:
         name = f"{name} · {plan.badge}"
     route = f"{plan.source.label} → {plan.destination.label}"
+    persistence = plan.persistence or {}
+    losses = plan.route_risk or {}
     return [
         _cell(name, name),
         _cell(route, route),
-        _cell(f"{plan.quantity:,.0f}", plan.quantity),
+        _cell(
+            f"{plan.quantity:,.0f}" + (" · 1 bid" if plan.single_bid_exit else ""), plan.quantity
+        ),
         _cell(format_isk(plan.source_cost), plan.source_cost),
         _cell(format_isk(plan.net_profit), plan.net_profit),
         _cell(f"{plan.net_roi_pct:.2f}%", plan.net_roi_pct),
@@ -637,6 +692,14 @@ def _plan_row(plan) -> list:
             (plan.reliability or {}).get("grade", BLANK) if plan.reliability else BLANK,
             (plan.reliability or {}).get("score") if plan.reliability else None,
         ),
+        _cell(
+            persistence_text(plan.persistence) if plan.persistence else BLANK,
+            persistence.get("survival_rate"),
+        ),
+        _cell(
+            route_risk_text(plan.route_risk),
+            losses.get("hauler_losses") if losses.get("known") else None,
+        ),
         _cell(format_isk(plan.rank_score), plan.rank_score),
     ]
 
@@ -646,7 +709,7 @@ def _unknown_row(pair: dict) -> list:
     return [
         _cell("UNKNOWN", None),
         _cell(route, route),
-        *[_blank() for _ in range(9)],
+        *[_blank() for _ in range(len(HEADERS) - 4)],
         _cell(pair.get("state", "UNKNOWN"), None),
         _cell(pair.get("reason", ""), None),
     ]
@@ -677,7 +740,15 @@ def _generation_stamp(scan) -> str:
             text += " — STALE, prices nothing"
         parts.append(text)
     parts.append(f"SDE build {scan.sde_build}")
-    return "generations · " + " · ".join(parts)
+    pairs = scan.pair_rejection_counts
+    pair_text = (
+        f"pairs: {scan.pairs_considered} considered, "
+        + ", ".join(f"{reason} {count}" for reason, count in pairs.items())
+        + " priced nothing"
+        if pairs
+        else f"pairs: {scan.pairs_considered} considered, every pair reached pricing"
+    )
+    return "generations · " + " · ".join(parts) + " · " + pair_text
 
 
 def _ladders_text(plan) -> str:

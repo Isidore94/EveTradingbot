@@ -281,6 +281,42 @@ class _PartitionedLake:
             return frame[frame["sweep_ts"] == newest].reset_index(drop=True)
         return empty
 
+    def generations(self, region_id: int, *, limit: int, before=None) -> list[pd.DataFrame]:
+        """Up to `limit` complete sweeps, **newest first**, older than `before`.
+
+        Every sweep of a day lives in that day's partition, so the history a
+        persistence read needs is already on disk; this is the read that
+        exposes it. `before` is the generation being priced (its `sweep_ts`),
+        which is excluded — a snapshot compared with itself survives trivially.
+        Partial sweeps never appear here for the same reason they never appear
+        in `latest()` (§21 R1).
+        """
+        out: list[pd.DataFrame] = []
+        if limit <= 0:
+            return out
+        directory = self._directory(int(region_id))
+        if not directory.exists():
+            return out
+        cutoff = pd.Timestamp(before) if before is not None else None
+        if cutoff is not None and cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize("UTC")
+        for path in reversed(sorted(directory.glob("date=*.parquet"))):
+            frame = _read_parquet(path)
+            if frame.empty:
+                continue
+            frame["sweep_ts"] = pd.to_datetime(frame["sweep_ts"], utc=True)
+            if "partial_sweep" in frame:
+                frame = frame[~frame["partial_sweep"].fillna(False).astype(bool)]
+            if cutoff is not None:
+                frame = frame[frame["sweep_ts"] < cutoff]
+            if frame.empty:
+                continue
+            for stamp in sorted(frame["sweep_ts"].unique(), reverse=True):
+                out.append(frame[frame["sweep_ts"] == stamp].reset_index(drop=True))
+                if len(out) >= limit:
+                    return out
+        return out
+
 
 class DepthLake(_PartitionedLake):
     """Per-station price-level curves, partitioned by region and sweep date.

@@ -256,6 +256,26 @@ class HaulingConfig:
     default_handling_minutes: float = 4.0
     max_exposure_pct_per_trade: float = 25.0
     max_exposure_pct_per_destination: float = 50.0
+    # -- §23.21 (H7) ---------------------------------------------------------
+    #: Operator-added NPC stations to BUY from, beyond the hubs. A source is
+    #: not thereby a destination and vice versa.
+    extra_source_station_ids: tuple[int, ...] = ()
+    #: How many stored prior generations a plan's persistence is measured
+    #: over, and how few make it UNKNOWN rather than a comfortable 100%.
+    persistence_generations: int = 12
+    persistence_min_generations: int = 3
+    #: The window the route-loss column counts over, in days of ingested
+    #: killmails. A window nothing was ingested for is UNKNOWN, never zero.
+    route_risk_days: int = 90
+    #: Market-group names whose hull members count as haulers, resolved by
+    #: ancestry under the "Ships" root so blueprints and SKINs never qualify.
+    hauler_group_names: tuple[str, ...] = (
+        "Haulers",
+        "Transport Ships",
+        "Freighters",
+        "Jump Freighters",
+        "Industrial Command Ships",
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -36,7 +36,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import pandas as pd
 
-from .books import DepthCurve, curve_from_frame, q_walk
+from .books import DepthCurve, curve_from_frame, load_validated_book, q_walk
 from .config import Config
 from .costs import CostModel
 from .hauling import IMMEDIATE
@@ -211,12 +211,63 @@ def liquidation_days(
     return float(quantity) / daily
 
 
+#: Where the destination share on a row came from (§23.21).
+SHARE_PRIOR = "prior"
+SHARE_BOOK_PROXY = "book_share_proxy"
+
+
+def destination_share_for(
+    config: Config,
+    region_id: int,
+    type_id: int,
+    *,
+    reachable_qty: float | None,
+    now=None,
+    lake=None,
+    books: dict | None = None,
+) -> tuple[float, str]:
+    """The destination's share of the region's flow: a per-hub proxy, or the prior.
+
+    The flat `destination_share_prior` was the same 0.25 for Jita and for Hek.
+    The lake measures, on every sweep, two things that bracket it per hub and
+    per type: the bid depth **reachable at the destination station** (the
+    depth curve) and the region's **whole** resting bid volume (`total_volume`
+    on the book summary). Their ratio is a *book-share* proxy for the flow
+    share — where the resting demand sits, not where the trades happen — so it
+    is still ASSUMED, labelled `book_share_proxy` on the row, and still replaced
+    by the operator's recorded fills (§23.7). A stale book, a missing row or a
+    zero on either side falls back to the prior and says so.
+    """
+    from .store.lake import BookLake
+
+    prior = float(config.hauling.destination_share_prior)
+    if not reachable_qty or reachable_qty <= 0:
+        return prior, SHARE_PRIOR
+    cache = books if books is not None else {}
+    if int(region_id) not in cache:
+        snapshot = load_validated_book(
+            config, int(region_id), lake=lake or BookLake(config.paths), now=now
+        )
+        cache[int(region_id)] = snapshot.frame if snapshot.known else None
+    frame = cache[int(region_id)]
+    if frame is None or frame.empty or "total_volume" not in frame:
+        return prior, SHARE_PRIOR
+    rows = frame[(frame["side"] == "buy") & (frame["type_id"] == int(type_id))]
+    if rows.empty:
+        return prior, SHARE_PRIOR
+    total = pd.to_numeric(rows["total_volume"], errors="coerce").max()
+    if total is None or total != total or float(total) <= 0:
+        return prior, SHARE_PRIOR
+    return min(1.0, float(reachable_qty) / float(total)), SHARE_BOOK_PROXY
+
+
 def scenarios(
     profile: LiquidityProfile,
     quantity: float,
     *,
     destination_share: float,
     capture_shares: Sequence[float],
+    destination_share_source: str = SHARE_PRIOR,
 ) -> dict:
     """The three liquidation reads, with their assumptions attached."""
     shares = dict(zip(SCENARIOS, sorted(float(value) for value in capture_shares), strict=False))
@@ -244,11 +295,15 @@ def scenarios(
         },
         "assumptions": {
             "destination_share_prior": destination_share,
+            "destination_share_source": destination_share_source,
             "capture_share_low_base_high": [shares.get(name) for name in SCENARIOS],
             "note": (
                 "ASSUMED, not measured. Regional history carries no station split, so "
                 "neither factor is derivable from this lake; both become measurements "
-                "only when the operator's own fills can replace them (§23.7)."
+                "only when the operator's own fills can replace them (§23.7). A "
+                "`book_share_proxy` share is the reachable bid depth at the destination "
+                "over the region's resting bid volume — where demand sits, not where "
+                "trades happen."
             ),
         },
     }
@@ -424,19 +479,44 @@ def liquidity_attachment(
             )
         return sell_curves[key]
 
+    books_cache: dict[int, pd.DataFrame | None] = {}
+    bid_curves: dict[tuple[int, int], DepthCurve | None] = {}
+
+    def bid_curve(type_id: int, station_id: int, region_id: int) -> DepthCurve | None:
+        key = (int(type_id), int(station_id))
+        if key not in bid_curves:
+            snapshot = depths.get(int(region_id))
+            frame = getattr(snapshot, "priceable", None)
+            bid_curves[key] = (
+                curve_from_frame(
+                    frame, type_id=type_id, side="buy", execution_location_id=station_id
+                )
+                if frame is not None and not frame.empty
+                else None
+            )
+        return bid_curves[key]
+
     def attach(plan):
         region = plan.destination.region_id
         measured = liquidity_for(plan.type_id, region) if region is not None else None
-        scenario = (
-            scenarios(
+        scenario = None
+        if measured is not None:
+            reachable = bid_curve(plan.type_id, plan.destination.station_id, region)
+            share, source = destination_share_for(
+                config,
+                region,
+                plan.type_id,
+                reachable_qty=reachable.available_qty if reachable is not None else None,
+                now=moment,
+                books=books_cache,
+            )
+            scenario = scenarios(
                 measured,
                 plan.quantity,
-                destination_share=config.hauling.destination_share_prior,
+                destination_share=share,
                 capture_shares=config.hauling.capture_share,
+                destination_share_source=source,
             )
-            if measured is not None
-            else None
-        )
         base_days = (scenario or {}).get("scenarios", {}).get(BASE)
         curve = sell_curve(plan.type_id, plan.destination.station_id, region) if region else None
         immediate = plan.gross_sale

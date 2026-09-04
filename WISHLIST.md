@@ -39,14 +39,15 @@ The candidates below were recorded on 2026-09-04 from
 
 | Idea | Status | Note |
 |---|---|---|
-| **Persistence-weighted hauling rank** — keep every hourly depth generation for N days; per (type, source, destination) compute survival and re-priced net over the last K generations; rank on persistence-weighted net per active minute, unweighted shown beside it | `CANDIDATE` | F2. Measured 2026-08-26 → 08-28: 44.5% of plans survive, top-25 net realised at 36%. Needs F1 (fresh hourly generations) first. Additive; no walk or fee change |
-| **Basket objective by binding constraint, one destination per basket** — or a numpy-only two-constraint fractional knapsack over the existing marginal chunks | `CANDIDATE` | F3. Greedy-by-ISK/m³ filled 250 M ISK with 1.8 m³ of formulas across four hubs and earned 42–66% of the best single plan |
-| **Loop and circuit composition** — pair the best plan each way (and 3–5-stop circuits over the hubs) from plans already priced | `CANDIDATE` | F4. Jita ↔ Dodixie loop 23.9 M / 57 min on the 08-28 books; no new pricing |
-| **Single-bid-exit flag, minimum-quantity and hide-BELOW controls** on the HAULING page and CLI | `CANDIDATE` | F5. Quantity ≤ 5 plans survive at 33% vs 51%; ten of the top 25 were 1–6-unit hulls |
-| **Show the `OVER_TIME`/`OVER_JUMPS` pair count in the control strip** | `CANDIDATE` | F6. The 30-minute default silently drops Jita ↔ Amarr (39 min) before pricing |
-| **Per-hub destination-share proxy from `station_volume_share`**, labelled as a book-share proxy, still replaced by recorded fills | `CANDIDATE` | F7. Replaces a flat 0.25 with a per-hub, per-type number that is still an assumption |
-| **`extra_source_station_ids`**, and a WARM sweep of the high-sec regions adjacent to the hubs | `CANDIDATE` | F8. Plan-level (§11 D3 cadence). Token cost ≈ +1,800/hour per five regions against a 6,000/15-min self-cap |
-| **Route risk from hauler killmails per route system** (90-day count as a column, never a multiplier) | `CANDIDATE` | F9. The only use found for the killmail lake after §14 failed |
+| **Persistence-weighted hauling rank** — keep every hourly depth generation for N days; per (type, source, destination) compute survival and re-priced net over the last K generations; rank on persistence-weighted net per active minute, unweighted shown beside it | `ROADMAP` | F2 → `plan.md` §23.21 (2026-09-04, D-37). Built as `persistence.py`; needs hourly generations (F1, operator) before the column is measurable |
+| **Basket objective by binding constraint, one destination per basket** — or a numpy-only two-constraint fractional knapsack over the existing marginal chunks | `ROADMAP` | F3 → §23.21. Built as `score="auto"`, one trip, and the floor; the knapsack solver was **not** built (reopen trigger in `docs/INTERNALS.md`) |
+| **Loop and circuit composition** — pair the best plan each way (and 3–5-stop circuits over the hubs) from plans already priced | `ROADMAP` | F4 → §23.21. Built as `loops.py`, 2..3 stops by default |
+| **Single-bid-exit flag, minimum-quantity and hide-BELOW controls** on the HAULING page and CLI | `ROADMAP` | F5 → §23.21 |
+| **Show the `OVER_TIME`/`OVER_JUMPS` pair count in the control strip** | `ROADMAP` | F6 → §23.21 (`pair_rejection_counts` on the stamp and the report) |
+| **Per-hub destination-share proxy**, labelled as a book-share proxy, still replaced by recorded fills | `ROADMAP` | F7 → §23.21. Built from reachable bid depth over the region's resting bid volume — `station_volume_share` turned out to measure NPC-station share, not hub share |
+| **`extra_source_station_ids`** | `ROADMAP` | F8 (first half) → §23.21 |
+| **A WARM sweep of the high-sec regions adjacent to the hubs** | `CANDIDATE` | F8 (second half). Plan-level (§11 D3 cadence). Token cost ≈ +1,800/hour per five regions against a 6,000/15-min self-cap. Not authorized by D-37 |
+| **Route risk from hauler killmails per route system** (90-day count as a column, never a multiplier) | `ROADMAP` | F9 → §23.21. Built as `routerisk.py`; UNKNOWN until `killmails` is backfilled |
 | **Park `cross-region` after the shadow period** | `TRIGGERED_LATER` | F10. Only if the §23 tab is kept at H0 |
 | **Charge capital cost and hull risk on hauling rows** | `TRIGGERED_LATER` | F11. Only after checklist C proves the fee arithmetic against a real round trip |
 

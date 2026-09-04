@@ -26,14 +26,17 @@ __all__ = [
     "CALC_VERSION",
     "build_haul_report",
     "haul_basket",
+    "haul_loops",
     "latest_haul_report",
+    "persistence_text",
     "render_haul_report",
+    "route_risk_text",
     "write_haul_report",
 ]
 
 #: Bumped whenever the arithmetic behind a stored row changes, so two reports
 #: can be told apart by what computed them rather than by their dates.
-CALC_VERSION = "haul-1"
+CALC_VERSION = "haul-2"  # haul-2: §23.21 — basket floor and score, loops, persistence
 
 #: How many rejected candidates keep their full detail, **per reason**. The
 #: counts are always whole — they are the denominator — but a five-hub scan can
@@ -69,6 +72,8 @@ def haul_basket(scan: HaulScan, *, config: Config | None = None):
     # The overlap guard now travels with `greedy_basket` itself — it used to
     # live here, one caller away from the packing it guards, and the bare
     # primitive happily packed 2,000 units out of a 1,000-unit ask.
+    # One trip, scored by whichever constraint binds, floored at the best
+    # single plan (§23.21) — the three rules a measured basket taught.
     return greedy_basket(
         scan.plans,
         capital_isk=profile.capital_isk,
@@ -76,7 +81,16 @@ def haul_basket(scan: HaulScan, *, config: Config | None = None):
         exposure_per_trade_isk=profile.max_exposure_isk,
         exposure_per_destination_isk=per_destination,
         objective=profile.objective,
+        score="auto",
+        single_destination=True,
     )
+
+
+def haul_loops(scan: HaulScan, *, max_stops: int = 3):
+    """The loops read for a scan, built one way for every surface (§23.21)."""
+    from .loops import compose_loops
+
+    return compose_loops(scan.plans, profile=scan.profile, max_stops=max_stops)
 
 
 def build_haul_report(
@@ -104,12 +118,17 @@ def build_haul_report(
             "rejected": len(scan.rejected),
         },
         "rejection_counts": scan.rejection_counts,
+        # Whole station pairs that never priced a type, by reason (§23.21).
+        "pair_rejection_counts": scan.pair_rejection_counts,
         # Priced plans this run's objective could not score. Not rejections —
         # another objective would rank them — but never silent either.
         "dropped_unrankable": scan.dropped_unrankable,
+        # Ranked plans the operator's own filters withheld (§23.21).
+        "withheld_by_filter": scan.withheld_by_filter,
         "unknown_pairs": scan.unknown_pairs,
         "rows": [_row(plan) for plan in scan.plans],
         "basket": haul_basket(scan, config=config).as_dict(),
+        "loops": haul_loops(scan).as_dict(),
         "rejected": rejected,
         "rejected_truncated": omitted,
         "notes": scan.notes,
@@ -223,6 +242,26 @@ def _row(plan) -> dict:
     return payload
 
 
+def persistence_text(persistence: dict | None) -> str:
+    """`survived/checked` or a question mark with the count. Never a blank 100%."""
+    if not persistence:
+        return "UNKNOWN"
+    checked = persistence.get("generations_checked") or 0
+    if not persistence.get("known"):
+        return f"{checked} gen?"
+    return f"{persistence.get('survived', 0)}/{checked}"
+
+
+def route_risk_text(risk: dict | None) -> str:
+    """`haulers/hulls over N d` or UNKNOWN. A count, never a probability."""
+    if not risk or not risk.get("known"):
+        return "UNKNOWN"
+    return (
+        f"{risk.get('hauler_losses', 0)} haulers / {risk.get('hull_losses', 0)} hulls "
+        f"({risk.get('days_covered', 0)} of {risk.get('window_days', 0)} d)"
+    )
+
+
 def _isk(value) -> str:
     if value is None:
         return "UNKNOWN"
@@ -287,6 +326,22 @@ def render_haul_report(report: dict) -> str:
             + " — another objective would rank them."
         )
         lines.append("")
+    pair_counts = report.get("pair_rejection_counts") or {}
+    if pair_counts:
+        lines.append(
+            "Station pairs that priced nothing: "
+            + ", ".join(f"{reason} {count:,} pair(s)" for reason, count in pair_counts.items())
+            + "."
+        )
+        lines.append("")
+    withheld = report.get("withheld_by_filter") or {}
+    if withheld:
+        lines.append(
+            "Ranked but withheld by filter: "
+            + ", ".join(f"{reason} {count:,}" for reason, count in sorted(withheld.items()))
+            + " — the operator's own controls, not the market."
+        )
+        lines.append("")
     rejection_counts = report.get("rejection_counts") or {}
     if rejection_counts:
         lines.append("| reason | count |")
@@ -314,19 +369,54 @@ def render_haul_report(report: dict) -> str:
             "at 0.25B out of 151,113 considered."
         )
     else:
-        lines.append("| item | route | qty | capital | net | ROI | m³ | jumps | min | ISK/min |")
-        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append(
+            "| item | route | qty | capital | net | ROI | m³ | jumps | min | ISK/min "
+            "| persist | losses |"
+        )
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for row in rows:
             source = row["source"]["label"]
             destination = row["destination"]["label"]
+            flag = " · 1 bid" if row.get("single_bid_exit") else ""
             lines.append(
                 f"| {row.get('type_name') or row['type_id']} | {source} → {destination} "
-                f"| {row['quantity']:,.0f} | {_isk(row['source_cost'])} "
+                f"| {row['quantity']:,.0f}{flag} | {_isk(row['source_cost'])} "
                 f"| {_isk(row['net_profit'])} | {row['net_roi_pct']:.2f}% "
                 f"| {(row['cargo_m3'] or 0):,.0f} | {row.get('total_jumps')} "
                 f"| {(row.get('active_minutes') or 0):.0f} "
-                f"| {_isk(row.get('isk_per_active_minute'))} |"
+                f"| {_isk(row.get('isk_per_active_minute'))} "
+                f"| {persistence_text(row.get('persistence'))} "
+                f"| {route_risk_text(row.get('route_risk'))} |"
             )
+    loops = report.get("loops") or {}
+    lines.extend(["", "## Loops", ""])
+    if loops.get("loops"):
+        lines.append(
+            "Out and back, composed from the plans above; the return leg is charged and the "
+            "capital is the peak outlay after each leg's proceeds."
+        )
+        lines.append("")
+        lines.append("| circuit | net | peak capital | min | ISK/min | legs |")
+        lines.append("|---|---:|---:|---:|---:|---|")
+        for loop in loops["loops"]:
+            legs = "; ".join(
+                f"{leg.get('type_name') or leg['type_id']} ×{leg['quantity']:,.0f}"
+                for leg in loop["legs"]
+            )
+            lines.append(
+                f"| {loop['route']} | {_isk(loop['net_isk'])} "
+                f"| {_isk(loop['capital_committed_isk'])} | {loop['active_minutes']:.0f} "
+                f"| {_isk(loop.get('isk_per_active_minute'))} | {legs} |"
+            )
+    else:
+        lines.append(
+            "No loop composed"
+            + (
+                f" — {loops.get('over_session')} circuit(s) exceeded the session."
+                if loops.get("over_session")
+                else " — no ordered station pair has a plan both ways."
+            )
+        )
     basket = report.get("basket") or {}
     if basket.get("items"):
         lines.extend(

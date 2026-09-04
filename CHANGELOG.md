@@ -289,6 +289,29 @@ where the code and this list disagree, the code is the fact — fix the list.
 - **The §23.17 worked example** survives all six steps end to end: 1,200 units,
   102,416.67 / 117,375 WAPs, 4,753,687.50 tax, **13,196,312.50 ISK** net,
   10.74% ROI (`tests/test_haul_end_to_end.py`).
+- **§23.21 H7 (2026-09-04).** `persistence.py` — each plan's own quantity
+  re-walked on the last `persistence_generations` complete prior generations
+  (`DepthLake.generations()`), `survival_rate`, `net_ratios`, `window`, and a
+  `persistent_isk_per_active_minute` objective that is `PERSISTENCE_UNKNOWN`
+  (unrankable, not rejected) under `persistence_min_generations`.
+  `loops.py` — 2..3-stop circuits from the best plan per ordered pair, minutes
+  added, capital as the peak outlay after proceeds, over-session circuits
+  counted. `positioning.greedy_basket(score="auto", single_destination=True)`
+  — packs by ISK/m³ and ISK/capital and keeps the higher net, one trip per
+  basket, cross-destination overlap counted, and **never under-earns the best
+  single plan the caps admit** (floored, with a note); `calc_version haul-2`.
+  `HaulPlan.dest_orders_consumed` / `single_bid_exit`; `HaulProfile.min_quantity`
+  / `hide_badges` with `HaulScan.withheld_by_filter`; `HaulScan.pair_rejection_counts`;
+  `liquidity.destination_share_for` (reachable bid depth over the region's
+  resting bid volume, labelled `book_share_proxy`, else `prior`);
+  `[hauling] extra_source_station_ids`; `routerisk.py` with the `system_losses`
+  table reduced on the killmail ingest and `route_risk_attachment` (a column,
+  never a rank). CLI `--min-qty`, `--hide-below`, the persistent objective;
+  page controls "min qty" / "hide BELOW", `persist` and `losses` columns, the
+  `loops` pane, pair counts on the stamp. Tests: `test_persistence.py`,
+  `test_loops.py`, `test_routerisk.py`, `test_hauling_filters.py`,
+  `test_positioning_floor.py`, `test_liquidity_proxy.py`,
+  `test_haul_report_h7.py`, `test_gui_hauling_h7.py`.
 
 ### Config
 
@@ -319,6 +342,47 @@ where the code and this list disagree, the code is the fact — fix the list.
 The last build days only. **When this section passes ~800 lines, move the older
 entries into `docs/CHANGELOG_ARCHIVE_<period>.md` and leave a pointer here.**
 Everything before 2026-08-25 is in `docs/CHANGELOG_ARCHIVE_2026-08.md`.
+
+### 2026-09-04 — §23.21 H7: persistence, loops, the basket floor, filters, route losses (§17 D-37)
+
+**Operator directive:** *"go ahead and implement fixes for all of these"*, on
+the candidates of `docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md`.
+Built in one push on `claude/hauling-h7-persistence-loops`, fixture-first,
+with the pre-change `positioning.py`, `hauling.py` and `liquidity.py` restored
+and the new tests watched to fail (`test_positioning_floor`,
+`test_hauling_filters`, `test_liquidity_proxy`, `test_persistence`) before the
+change went back.
+
+- **A snapshot measured against the snapshots before it.** The lake already
+  kept every sweep of a day in that day's partition; `DepthLake.generations()`
+  reads them back newest-first, and `persistence_attachment` re-walks each
+  plan's chosen quantity on each of them. The measurement that motivated it:
+  44.5% of plans survived 46.5 h, the top-25's net re-priced to 36%.
+- **The basket never under-earns its own best part.** Measured on two real
+  generations the greedy-by-m³ filled 250 M ISK with 1.8 m³ of formulas across
+  four hubs and earned 42–66% of the best single plan. It now scores by the
+  binding constraint, packs one trip, and is floored at the best single plan
+  the caps admit — and the floor honours the per-destination cap too (found by
+  the new test, not by the first draft).
+- **Loops.** Every one-way ISK/minute assumed the return leg was free.
+  Composed, not re-priced: the pickup once, later legs from where the last one
+  ended, capital the peak after proceeds.
+- **The exit that is one other player.** `single_bid_exit` when the walk
+  consumed one order; "min qty" and "hide BELOW" as filters whose withheld
+  count rides on the summary. Quantity ≤ 5 plans survived at 33% vs 51%.
+- **Pairs that never priced.** `pair_rejection_counts` on the stamp: a
+  30-minute session drops every Jita ↔ Amarr pair (39 min) before pricing.
+- **A per-hub share, still assumed.** `book_share_proxy` = reachable bid depth
+  at the destination over the region's resting bid volume, in place of the
+  flat 0.25; named on the row, replaced by fills.
+- **Route losses from the one dataset nothing consumed.** `system_losses`
+  per (system, day) on the killmail ingest, hauler hulls by market-group
+  ancestry under `Ships`; UNKNOWN until a window has ingested days.
+- **Not done:** F10/F11 (`TRIGGERED_LATER`), the adjacent-region sweep (§11 D3).
+
+Gate: `uv run pytest -q` → **1,142 passed, 7 deselected, exit 0**; ruff check
+and format clean; `selftest` 12/12. The consolidated live checklist gains the
+H7 items in `CURRENT_CHECKPOINT.md`; nothing here is `LIVE_VALIDATED`.
 
 ### 2026-09-04 — The JumpStarter control set: agent team, bounded read, evidence behind the rules
 

@@ -174,6 +174,14 @@ before changing the behaviour a rule governs.** A rule with no entry is a draft.
   `network` tests) and the environment carries the `gui` extra so the
   offscreen desk tests ran. Probe before quoting a number.
   *(INTERNALS: "A suite run under a known condition is not a baseline")*
+- **A heuristic never under-earns its own best part.** A basket, packing or
+  composition shown beside a single plan is floored at that plan under the
+  same caps, and says so when the floor bound.
+  *(INTERNALS: "A heuristic never under-earns its own best part")*
+- **A snapshot is not a tape, and the size of that caveat is measured, not
+  asserted.** A ranked hauling row carries its survival across the stored
+  prior generations, UNKNOWN until enough exist.
+  *(INTERNALS: "A snapshot is measured against the snapshots before it")*
 
 ## Tech stack (locked, plan.md §11 D1–D2)
 

@@ -129,6 +129,18 @@ def _persist(db: Database, counts: dict[tuple[int, int, str], list[int]]) -> tup
     return sum(1 for row in rows if row[3]), sum(1 for row in rows if row[4])
 
 
+def _persist_route_losses(config: Config, db: Database, killmails) -> int:
+    """The per-system reduction behind the route-loss column (§23.21).
+
+    Same ingest, same killmails, a second reduction: nothing is fetched twice.
+    The hauler set is resolved from the SDE once per call.
+    """
+    from .routerisk import hauler_type_ids, persist_system_losses, reduce_system_losses
+
+    haulers = hauler_type_ids(db, config.hauling.hauler_group_names)
+    return persist_system_losses(db, reduce_system_losses(killmails, haulers))
+
+
 def read_archive(payload: bytes) -> list[dict]:
     """Parse one EVE Ref daily archive (`.tar.bz2` of one JSON per killmail)."""
     killmails: list[dict] = []
@@ -200,6 +212,7 @@ def backfill_archives(
                 continue
             counts, unmapped = reduce_killmails(killmails, system_regions)
             hulls, modules = _persist(db, counts)
+            _persist_route_losses(config, db, killmails)
             db.conn.execute(
                 "INSERT INTO killmail_ingest(source, ingested_at, killmail_count)"
                 " VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET"
@@ -264,6 +277,7 @@ def poll_r2z2(
             collected.extend(body if isinstance(body, list) else [body])
         counts, unmapped = reduce_killmails(collected, system_regions)
         hulls, modules = _persist(db, counts)
+        _persist_route_losses(config, db, collected)
         db.set_meta("r2z2_sequence", str(newest))
         result.killmails = len(collected)
         result.hull_rows = hulls

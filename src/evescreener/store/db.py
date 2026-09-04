@@ -224,6 +224,19 @@ CREATE TABLE IF NOT EXISTS killmail_ingest (
     ingested_at TEXT NOT NULL,
     killmail_count INTEGER NOT NULL DEFAULT 0
 );
+
+-- Hull losses per solar system per day, reduced on the same ingest as
+-- `destruction` (plan.md §23.21). `hauler_losses` counts hulls whose market
+-- group sits under a configured hauler group; `hull_losses` counts every hull.
+-- Read by the route-loss column, which is a column and never a multiplier.
+CREATE TABLE IF NOT EXISTS system_losses (
+    solar_system_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    hull_losses INTEGER NOT NULL DEFAULT 0,
+    hauler_losses INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (solar_system_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_system_losses_day ON system_losses(day);
 """
 
 # (table, column, declaration) pairs applied to databases that predate them.
@@ -536,6 +549,37 @@ class Database:
     def delete_haul_profile(self, name: str) -> bool:
         cursor = self.conn.execute("DELETE FROM haul_profiles WHERE name=?", (name,))
         return cursor.rowcount > 0
+
+    # -- route losses (§23.21) ---------------------------------------------
+    def system_losses_between(self, systems: Iterable[int], start_day: str, end_day: str) -> dict:
+        """`system_id -> (hull_losses, hauler_losses)` summed over `[start, end]`."""
+        ids = [int(value) for value in systems]
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            "SELECT solar_system_id, SUM(hull_losses) AS hulls, SUM(hauler_losses) AS haulers"
+            f" FROM system_losses WHERE solar_system_id IN ({marks}) AND day BETWEEN ? AND ?"
+            " GROUP BY solar_system_id",
+            [*ids, str(start_day), str(end_day)],
+        )
+        return {
+            int(row["solar_system_id"]): (int(row["hulls"] or 0), int(row["haulers"] or 0))
+            for row in rows
+        }
+
+    def killmail_days_between(self, start_day: str, end_day: str) -> int:
+        """How many archive days inside `[start, end]` were actually ingested.
+
+        The `killmail_ingest` ledger keys archive days by ISO date; the live
+        R2Z2 poll is keyed otherwise and is not a day of coverage.
+        """
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM killmail_ingest WHERE source BETWEEN ? AND ?"
+            " AND LENGTH(source) = 10",
+            (str(start_day), str(end_day)),
+        ).fetchone()
+        return int(row["n"] or 0)
 
     def system_region_map(self) -> dict[int, int]:
         return {

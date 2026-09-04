@@ -318,3 +318,22 @@ default_seconds_per_jump = 55.0
 default_handling_minutes = 4.0
 max_exposure_pct_per_trade = 25.0
 max_exposure_pct_per_destination = 50.0
+# -- §23.21 (H7): persistence, loops, filters, route losses ----------------
+# Extra NPC stations to BUY from, beyond the hubs (a source is not thereby a
+# destination). Resolved from the SDE like the hub list.
+extra_source_station_ids = []
+# A plan's persistence is measured over this many stored prior generations
+# (one per sweep; hourly when the daemon runs). Fewer than the minimum is
+# UNKNOWN, never a comfortable 100%. Measured 2026-09-04 across two
+# generations 46.5 h apart: 44.5% of plans survived.
+persistence_generations = 12
+persistence_min_generations = 3
+# The route-loss column counts hauler and total hull losses per route system
+# over this many days of INGESTED killmails. A column, never a multiplier.
+route_risk_days = 90
+# Market-group names whose hulls count as haulers, resolved by ancestry under
+# the "Ships" root so blueprints never qualify.
+hauler_group_names = [
+  "Haulers", "Transport Ships", "Freighters", "Jump Freighters",
+  "Industrial Command Ships",
+]

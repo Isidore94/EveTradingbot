@@ -416,3 +416,63 @@ deselected in 49.12 s, process exit 0** on `dd6f4d6`; ruff check and format clea
 
 **Reopen trigger.** The network tests move to their own suite, or the GUI extra becomes
 mandatory.
+
+---
+
+## A heuristic never under-earns its own best part (2026-09-04, §23.21 and §17 D-37 — the basket packed formulas)
+
+**The rule, as it appears in `CLAUDE.md`:** *A heuristic never under-earns its own best
+part. A basket, a packing or a composition shown beside a single plan is floored at that
+plan under the same caps, and says so when the floor bound.*
+
+**What happened.** The mixed-cargo basket filled a hold greedily by ISK per m³. On the
+2026-08-28 five-hub generation with a 60,000 m³ / 250 M ISK profile it packed twenty
+near-zero-volume blueprints, formulas and insignia (1.8 m³ in total), spread them over
+four destinations without charging four trips, and netted **15.6 M** where the best single
+plan on the same capital netted **23.6 M**; on 2026-08-26 it was 13.0 M against 30.7 M.
+The heuristic was labelled HEURISTIC and shown beside the single plan, exactly as the plan
+said — and it still put a worse number in front of the operator with nothing on the page
+to say it was worse.
+
+**What was measured.** `docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md` §3.4: basket
+net / best single net = 42% (08-26) and 66% (08-28); basket volume 8.5 m³ and 1.8 m³ of a
+60,000 m³ hold; 292 and 363 plans withheld for overlap.
+
+**Operator's words.** "go ahead and implement fixes for all of these."
+
+**What is deliberately NOT done.** The greedy is not replaced by a solver: the floor
+guarantees the operator never sees a basket worse than a plan he could take instead, which
+is the property that matters; optimality is not claimed and the label still says so.
+Persistence weighting is an **objective the operator chooses**, not a change to the
+default rank, because two generations are not a tape either.
+
+**Reopen trigger.** A real basket that beats its floor by more than the floor beats the
+old greedy, over a shadow week — that is the signal a solver would be worth its lines.
+
+---
+
+## A snapshot is measured against the snapshots before it (2026-09-04, §23.21 — 44.5% survived)
+
+**The rule, as it appears in `CLAUDE.md`:** *A snapshot is not a tape, and the size of
+that caveat is measured, not asserted: a ranked row carries its survival across the stored
+prior generations, UNKNOWN until enough exist.*
+
+**What happened.** Every hauling surface carried the caveat "a snapshot is not a tape" as
+text. Nothing measured it, although the lake kept every sweep of a day in that day's
+partition. Two complete five-hub generations existed on disk, 46.5 h apart.
+
+**What was measured.** Same synthetic profile on both: 831 and 961 ranked plans; **370 of
+831 (44.5%)** still plans in the next generation; top 10 → 4 still plans, 3 still top 10;
+the 08-26 top-25's net re-priced on the 08-28 books to **94.7 M of 260.6 M (36%)**;
+quantity ≤ 5 plans survived at **33%**, bulk at **51%**; survivors' net ratio p10 0.16 /
+median 1.06 / p90 11.38.
+
+**Operator's words.** "go ahead and implement fixes for all of these."
+
+**What is deliberately NOT done.** The one-hour decay — the horizon a haul actually
+spans — is not measured, because hourly generations do not exist on this machine yet; the
+daemon produces them and the checklist owes them. `persistence_min_generations` keeps the
+column UNKNOWN until they do.
+
+**Reopen trigger.** Hourly generations on disk, and the shadow-week diary disagreeing
+with the computed column.

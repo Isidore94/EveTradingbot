@@ -14,12 +14,12 @@ this block is stale.**
 
 | | |
 |---|---|
-| Working branch | **`docs/hauling-scanner-plan`** — the whole §23 HAULING track plus the 2026-09-04 JumpStarter retrofit; fast-forwarded to `main` on 2026-09-04 |
-| Also in flight | nothing — `origin/claude/hauling-h1-h4-build-4pwsso` is fully merged into this line |
-| Active item | plan.md §23 HAULING, phases H1–H4: **code done, nothing `LIVE_VALIDATED`**. The next step is the consolidated checklist below, worked by the operator — not more code |
-| Last verified baseline | `uv run pytest -q` → **1,090 passed, 7 deselected in 49.12 s, process exit 0** (2026-09-04, on `dd6f4d6` + the retrofit's docs-only changes) · `uv run ruff check . && uv run ruff format --check .` **clean** · `python -m evescreener selftest` **12/12** |
+| Working branch | **`claude/hauling-h7-persistence-loops`**, branched 2026-09-04 from `docs/hauling-scanner-plan` at `6fd8117` (the analysis commit). Not merged to `main`; review by reproduction is owed before the merge |
+| Also in flight | `docs/hauling-scanner-plan` carries `6fd8117` (the analysis) ahead of `main`; nothing else |
+| Active item | plan.md **§23.21 H7** (persistence, loops, basket floor, filters, pair counts, share proxy, extra sources, route losses): **code done, nothing `LIVE_VALIDATED`** (§17 D-37). Next: the reviewer runs the branch against a lake copy, then the operator works the checklist below — not more code |
+| Last verified baseline | `uv run pytest -q` → **1,142 passed, 7 deselected in 45.57 s, process exit 0** (2026-09-04, on `claude/hauling-h7-persistence-loops` at its head; re-measured before the handoff commit, docs-only changes after) · `uv run ruff check . && uv run ruff format --check .` **clean** · `python -m evescreener selftest` **12/12** |
 | Artifact state | Runs from source in the main checkout (`python -m evescreener …`, `launch_gui.py`); no build step. No desk or daemon process was found running on 2026-09-04 |
-| Restart owed | **No** — the retrofit changed control files only. The lake needs `sweep-books --secondary` before the HAULING tab has depth to price (2026-08-26 report), which is an operator run |
+| Restart owed | **No** — no desk or daemon is running. The lake still needs `sweep-books --secondary` (hourly, from a running `daemon`) before the HAULING tab has depth to price and before `persistence_min_generations` is reachable; both are operator runs |
 | Control-set check | `python ../JumpStarter/tools/jumpstart.py check .` → red on **one** line: `plan.md` 2,961 lines vs 1,200 bound. Splitting it is the operator's decision (`docs/README.md`) |
 | Latest analysis | `docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md` — docs only, no product code changed, baseline **not re-measured** (last measured earlier on 2026-09-04, above). Lake on disk: depth/books newest **2026-08-28 21:18 UTC**, bars Forge-only to **2026-08-19**, `haul_profiles` 0 rows, no daemon running |
 
@@ -40,9 +40,61 @@ the active-item text below. Newest additions, 2026-09-04:
 | 2 | The operator confirms or corrects the ask-first file list in `docs/AGENT_TEAM.md` (derived from `plan.md` §11, not asked) | the 2026-09-04 entry below |
 | 3 | The operator decides whether `plan.md` is split (completed tracks archived under `docs/` keeping their § numbers) or left whole with the bounded read as the mitigation | the 2026-09-04 entry below |
 | 4 | The first packet run through `tester → builder → reviewer` records in this file whether the handoff formats crossed between Claude Code and Codex | `docs/AGENT_TEAM.md` |
+| 5 | **H7 review by reproduction** on a lake copy before `claude/hauling-h7-persistence-loops` merges: re-derive the basket floor and the loop arithmetic on the 2026-08-28 generation, revert `positioning.py` to prove `test_positioning_floor` fails | the 2026-09-04 H7 entry below |
+| 6 | **Hourly generations exist** (a running `daemon`), then one shadow week comparing the `persist` column with the operator's own stale-miss diary; the two must agree or the diary wins | plan.md §23.21 |
+| 7 | **One loop flown end to end** as the tab composed it, with the minutes and the peak capital recorded against the row | plan.md §23.21 |
+| 8 | `killmails` backfilled so the route-loss window has ingested days; one route's count compared with zKillboard for the same systems and days | plan.md §23.21 |
 
 A gate is closed by striking its row through and writing what was observed —
 never by deleting the row.
+
+---
+
+### 2026-09-04 (latest) — §23.21 H7 built: persistence, loops, the basket floor, filters, route losses
+
+**Branch `claude/hauling-h7-persistence-loops`.** Operator directive, verbatim: *"go
+ahead and implemented fixxes for all of these"* — the candidates of the analysis
+entry below. Recorded as `plan.md` §17 D-37 and promoted to §23.21 in the same
+commit; `WISHLIST.md` rows F2–F9 are `ROADMAP`, F10/F11 stay `TRIGGERED_LATER`,
+the adjacent-region sweep stays `CANDIDATE` (a §11 D3 cadence amendment).
+
+**What landed.** `persistence.py` + `DepthLake.generations()`; `loops.py`;
+`positioning.greedy_basket(score="auto", single_destination=True)` with the floor;
+`routerisk.py` + the `system_losses` table on the killmail ingest;
+`HaulPlan.single_bid_exit`, `HaulProfile.min_quantity` / `hide_badges`,
+`HaulScan.withheld_by_filter` / `pair_rejection_counts`;
+`liquidity.destination_share_for`; `[hauling] extra_source_station_ids`,
+`persistence_generations`, `persistence_min_generations`, `route_risk_days`,
+`hauler_group_names` (all defaulted; `config.toml` needs no edit). CLI flags
+`--min-qty`, `--hide-below`, objective `persistent_isk_per_active_minute`; page
+controls, `persist` / `losses` columns, `loops` pane, pair counts on the stamp.
+`calc_version` → `haul-2`. Detail: `CHANGELOG.md` 2026-09-04 H7.
+
+**Proof.** 52 new tests in nine files, written before the code. Fail-before-fix:
+`positioning.py`, `hauling.py` and `liquidity.py` restored to `6fd8117`, the four
+new test files run → **3 errors during collection, 0 passed** (the names they
+import did not exist); files restored byte-identical (sha256 compared) and
+unstaged. Full gate: `uv run pytest -q` → **1,142 passed, 7 deselected in 45.57 s,
+exit 0**; ruff check + format clean; `selftest` 12/12. One defect was found by
+the new tests rather than by the draft: the basket floor ignored the
+per-destination exposure cap.
+
+**Measured on the 2026-08-28 lake copy after the change** (synthetic 60,000 m³ /
+250 M / 120 min Jita profile, `min_generations=1` so the single prior generation
+counts): the one-trip auto-scored basket packed 7.9 M and was floored to the
+best single plan (Corax Navy Issue → Amarr, 18.8 M); the other four destination
+baskets netted 17.6 M / 10.4 M / 6.4 M / 4.9 M. **Persistence at the plan's own
+quantity against the one prior generation (46.5 h older): 293 of 961 plans
+survived (30.5%)** — stricter than the analysis's "still a plan" 44.5%, because
+the size is held fixed. **Single-bid exits: 739 of 961 plans (77%).** Route
+losses: UNKNOWN on every row (no killmail day ingested). Loops: Jita → Dodixie →
+Jita 23.9 M in 44 min (550 k ISK/min, peak capital 196.7 M); Jita → Amarr → Hek →
+Jita 49.4 M in 92 min (538 k ISK/min, peak 249.1 M). Scan wall-clock with
+persistence and route risk attached: about 15 s for five hubs. Re-derivable with
+the appendix procedure in the analysis document plus the H7 attachments.
+
+**Not done.** F10, F11, the adjacent-region sweep. No merge to `main`: gate 5
+above (review by reproduction) is owed first. Restart owed: **no**.
 
 ---
 

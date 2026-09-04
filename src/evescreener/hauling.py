@@ -101,7 +101,24 @@ ISK_PER_ACTIVE_MINUTE = "isk_per_active_minute"
 NET_PROFIT = "net_profit"
 NET_ROI = "net_roi"
 ISK_PER_M3 = "isk_per_m3"
-OBJECTIVES = (ISK_PER_ACTIVE_MINUTE, NET_PROFIT, NET_ROI, ISK_PER_M3)
+#: ISK per active minute weighted by the plan's measured survival across the
+#: stored prior generations (§23.21, `persistence.py`). UNKNOWN — and so
+#: unrankable — until enough generations exist; the unweighted figure is
+#: always kept beside it.
+PERSISTENT_ISK_PER_ACTIVE_MINUTE = "persistent_isk_per_active_minute"
+OBJECTIVES = (
+    ISK_PER_ACTIVE_MINUTE,
+    NET_PROFIT,
+    NET_ROI,
+    ISK_PER_M3,
+    PERSISTENT_ISK_PER_ACTIVE_MINUTE,
+)
+
+#: Why a priced plan was withheld by an operator filter (§23.21). A filter is
+#: not a rejection: the plan is sound, the operator asked not to see it, and
+#: the count is shown so a short list is never mistaken for a short market.
+MIN_QUANTITY_FILTER = "MIN_QUANTITY"
+BADGE_FILTER_PREFIX = "BADGE_"
 
 DEDICATED = "dedicated"
 ALONG_ROUTE = "along_route"
@@ -212,10 +229,16 @@ class HaulProfile:
     objective: str = ISK_PER_ACTIVE_MINUTE
     avoid_systems: tuple[int, ...] = ()
     safer_penalty: float = 50.0
+    #: Operator filters (§23.21), default off. Withheld plans are counted on
+    #: `HaulScan.withheld_by_filter`, never silently dropped.
+    min_quantity: float = 0.0
+    hide_badges: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.objective not in OBJECTIVES:
             raise ValueError(f"unknown objective {self.objective!r}; known: {OBJECTIVES}")
+        if self.min_quantity < 0:
+            raise ValueError("min_quantity cannot be negative")
         if self.mode not in MODES:
             raise ValueError(f"unknown mode {self.mode!r}; known: {MODES}")
         if self.mode == ALONG_ROUTE and self.intended_destination is None:
@@ -275,6 +298,8 @@ class HaulProfile:
             "exit_model": self.exit_model,
             "objective": self.objective,
             "avoid_systems": list(self.avoid_systems),
+            "min_quantity": self.min_quantity,
+            "hide_badges": list(self.hide_badges),
         }
 
 
@@ -306,7 +331,9 @@ class Station:
         }
 
 
-def stations_from_db(config: Config, db, *, include_extra: bool = True) -> list[Station]:
+def stations_from_db(
+    config: Config, db, *, include_extra: bool = True, include_extra_sources: bool = False
+) -> list[Station]:
     """The configured execution stations, resolved against the SDE.
 
     A station the SDE has never heard of is returned with `system_id=None`
@@ -319,6 +346,10 @@ def stations_from_db(config: Config, db, *, include_extra: bool = True) -> list[
     ids = list(config.hauling.hub_station_ids)
     if include_extra:
         ids.extend(config.hauling.extra_destination_station_ids)
+    if include_extra_sources:
+        # Somewhere he wants to BUY from (§23.21). A source is not thereby a
+        # destination: the two lists are separate on purpose.
+        ids.extend(config.hauling.extra_source_station_ids)
     stations: list[Station] = []
     seen: set[int] = set()
     for station_id in ids:
@@ -420,6 +451,17 @@ class HaulPlan:
     min_volume_excluded_qty: float = 0.0
     dest_structure_share: float | None = None
     oldest_issued: str | None = None
+    #: How many resting orders the exit walk consumed. One order is one other
+    #: player: the exit is gone the moment anyone else sells into it (§23.21;
+    #: measured 2026-09-04, quantity <= 5 plans survived at 33% vs 51%).
+    dest_orders_consumed: int | None = None
+    #: Survival across stored prior generations (§23.21, `persistence.py`).
+    #: None when no attachment ran; `known=False` inside when too few exist.
+    persistence: dict | None = None
+    persistent_isk_per_active_minute: float | None = None
+    #: Losses along the route from ingested killmails — a column, never a
+    #: rank input (§23.21, `routerisk.py`).
+    route_risk: dict | None = None
     #: The quantities the other objectives would have chosen, when they differ.
     alternatives: dict = field(default_factory=dict)
     #: `(quantity, capital_isk, net_profit, rejected)` per priced size. The
@@ -434,12 +476,18 @@ class HaulPlan:
         ages = [age for age in (self.source_age_minutes, self.dest_age_minutes) if age is not None]
         return max(ages) if ages else None
 
+    @property
+    def single_bid_exit(self) -> bool:
+        """True when the whole exit rests on one other player's order."""
+        return self.dest_orders_consumed is not None and self.dest_orders_consumed <= 1
+
     def objective_value(self, objective: str) -> float | None:
         return {
             ISK_PER_ACTIVE_MINUTE: self.isk_per_active_minute,
             NET_PROFIT: self.net_profit,
             NET_ROI: self.net_roi_pct,
             ISK_PER_M3: self.profit_per_m3,
+            PERSISTENT_ISK_PER_ACTIVE_MINUTE: self.persistent_isk_per_active_minute,
         }[objective]
 
     def as_dict(self) -> dict:
@@ -489,6 +537,11 @@ class HaulPlan:
             "min_volume_excluded_qty": self.min_volume_excluded_qty,
             "dest_structure_share": self.dest_structure_share,
             "oldest_issued": self.oldest_issued,
+            "dest_orders_consumed": self.dest_orders_consumed,
+            "single_bid_exit": self.single_bid_exit,
+            "persistence": self.persistence,
+            "persistent_isk_per_active_minute": self.persistent_isk_per_active_minute,
+            "route_risk": self.route_risk,
             "alternatives": self.alternatives,
             "breakpoints": list(self.breakpoints),
             "rank_score": self.rank_score,
@@ -508,6 +561,10 @@ class HaulScan:
     #: not rejections — another objective would rank them — but a scan that
     #: drops them silently reports a denominator it did not measure.
     dropped_unrankable: dict = field(default_factory=dict)
+    #: Priced, ranked plans the operator's own filters withheld (§23.21).
+    #: Not rejections either: the market had them, the operator chose not to
+    #: look, and the count keeps a short list from reading as a short market.
+    withheld_by_filter: dict = field(default_factory=dict)
     generations: dict = field(default_factory=dict)
     pairs_considered: int = 0
     types_considered: int = 0
@@ -522,6 +579,21 @@ class HaulScan:
             counts[rejection.reason] = counts.get(rejection.reason, 0) + 1
         return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
+    @property
+    def pair_rejection_counts(self) -> dict[str, int]:
+        """Refusals that ended a whole station pair before any type was priced.
+
+        `STALE_BOOK`, `NO_ROUTE`, `OVER_TIME`, `OVER_JUMPS` and the security
+        block carry no type. A 30-minute session that drops every Jita ↔ Amarr
+        pair (39 min) shows here as pairs, not as a rejected candidate buried
+        among a hundred thousand.
+        """
+        counts: dict[str, int] = {}
+        for rejection in self.rejected:
+            if rejection.type_id is None:
+                counts[rejection.reason] = counts.get(rejection.reason, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
     def rejected_for(self, reason: str) -> list[Rejection]:
         return [rejection for rejection in self.rejected if rejection.reason == reason]
 
@@ -532,8 +604,10 @@ class HaulScan:
             "plans": [plan.as_dict() for plan in self.plans],
             "rejected": [rejection.as_dict() for rejection in self.rejected],
             "rejection_counts": self.rejection_counts,
+            "pair_rejection_counts": self.pair_rejection_counts,
             "unknown_pairs": self.unknown_pairs,
             "dropped_unrankable": self.dropped_unrankable,
+            "withheld_by_filter": self.withheld_by_filter,
             "generations": {str(key): value for key, value in self.generations.items()},
             "pairs_considered": self.pairs_considered,
             "types_considered": self.types_considered,
@@ -854,6 +928,8 @@ def scan_hauls(
     packaged_volume: Mapping[int, float] | None = None,
     destinations: Sequence[Station] | None = None,
     liquidity=None,
+    persistence=None,
+    route_risk=None,
     costs: CostModel | None = None,
     now=None,
     max_plans: int = 100,
@@ -864,6 +940,11 @@ def scan_hauls(
     regions' generations are pinned on every row, and the older one decides
     staleness: a row that joins a fresh book to a three-hour-old one is not a
     fresh row.
+
+    `persistence` is a bulk attachment `plans -> plans` run **before** ranking,
+    because it feeds an objective; `route_risk` is a per-plan attachment run
+    on the ranked plans only, because it is a column and never a rank input
+    (§23.21).
     """
     now = ensure_utc(now or utcnow())
     costs = costs or CostModel.from_config(config)
@@ -946,6 +1027,9 @@ def scan_hauls(
                 costs=costs,
             )
 
+    if persistence is not None and scan.plans:
+        scan.plans = list(persistence(scan.plans))
+
     objective = profile.objective
     rankable: list[HaulPlan] = []
     for plan in scan.plans:
@@ -959,10 +1043,31 @@ def scan_hauls(
         scan.dropped_unrankable[reason] = scan.dropped_unrankable.get(reason, 0) + 1
     scan.plans = rankable
     scan.plans.sort(key=lambda plan: -float(plan.objective_value(objective)))
+
+    # The operator's own filters, after ranking and before the cut, so that a
+    # withheld plan is counted against the same list it was ranked in.
+    kept: list[HaulPlan] = []
+    for plan in scan.plans:
+        withheld = _filter_reason(plan, profile)
+        if withheld is None:
+            kept.append(plan)
+            continue
+        scan.withheld_by_filter[withheld] = scan.withheld_by_filter.get(withheld, 0) + 1
     scan.plans = [
-        replace(plan, rank_score=plan.objective_value(objective)) for plan in scan.plans[:max_plans]
+        replace(plan, rank_score=plan.objective_value(objective)) for plan in kept[:max_plans]
     ]
+    if route_risk is not None:
+        scan.plans = [route_risk(plan) for plan in scan.plans]
     return scan
+
+
+def _filter_reason(plan: HaulPlan, profile: HaulProfile) -> str | None:
+    """Which operator filter withholds this plan, or None to show it."""
+    if profile.min_quantity and plan.quantity < float(profile.min_quantity):
+        return MIN_QUANTITY_FILTER
+    if plan.badge and plan.badge in profile.hide_badges:
+        return f"{BADGE_FILTER_PREFIX}{plan.badge}"
+    return None
 
 
 def _unrankable_reason(plan: HaulPlan, objective: str) -> str:
@@ -976,6 +1081,12 @@ def _unrankable_reason(plan: HaulPlan, objective: str) -> str:
         return VOLUME_UNKNOWN
     if objective == ISK_PER_ACTIVE_MINUTE and not plan.active_minutes:
         return "ACTIVE_MINUTES_UNKNOWN"
+    if objective == PERSISTENT_ISK_PER_ACTIVE_MINUTE:
+        if not plan.active_minutes:
+            return "ACTIVE_MINUTES_UNKNOWN"
+        # Too few stored generations, or no attachment ran at all. Either way
+        # the survival rate is UNKNOWN, and UNKNOWN never ranks (§4).
+        return "PERSISTENCE_UNKNOWN"
     return f"{objective.upper()}_UNKNOWN"
 
 
@@ -1358,6 +1469,7 @@ def _best_plan(
             min_volume_excluded_qty=bid.min_volume_excluded_qty,
             dest_structure_share=_structure_share(bid, quantity),
             oldest_issued=_oldest_issued(bid),
+            dest_orders_consumed=_orders_consumed(bid, sell.levels_consumed),
             breakpoints=tuple(priced),
         )
         if liquidity is not None:
@@ -1459,6 +1571,18 @@ def _structure_share(curve: DepthCurve, quantity: float) -> float | None:
     return (weighted / measured) if measured > 0 else None
 
 
+def _orders_consumed(curve: DepthCurve, levels_consumed: int) -> int | None:
+    """How many resting orders the walk touched: one per level at least.
+
+    A level aggregates identical prices, so its `order_count` is the number
+    of players behind it. One order is one player, and the exit is gone the
+    moment anyone else sells into it before the operator docks (§23.21).
+    """
+    if levels_consumed <= 0:
+        return None
+    return int(sum(max(1, level.order_count) for level in curve.levels[:levels_consumed]))
+
+
 def _oldest_issued(curve: DepthCurve) -> str | None:
     """The oldest `issued` on the curve, over the levels that carry one.
 
@@ -1490,10 +1614,14 @@ def scan_inputs(config: Config, db, *, region_ids: Iterable[int] | None = None):
     """
     from .books import load_validated_depth
 
-    sources = stations_from_db(config, db, include_extra=False)
+    sources = stations_from_db(config, db, include_extra=False, include_extra_sources=True)
     destinations = stations_from_db(config, db, include_extra=True)
     regions = sorted(
-        {int(station.region_id) for station in destinations if station.region_id is not None}
+        {
+            int(station.region_id)
+            for station in (*sources, *destinations)
+            if station.region_id is not None
+        }
         if region_ids is None
         else {int(region) for region in region_ids}
     )

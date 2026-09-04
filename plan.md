@@ -1239,6 +1239,7 @@ this document's prior text is recorded here with its reason.
 | D-35a | **§23 closeout, 2026-08-26 — the addendum to D-35.** A second adversarial pass verified the remediation itself: **eleven of twelve fixes real**, with property-verified equivalence of the two rewrites (`curves_from_depth` over 60 randomized frames, field-precise, zero differences; the `q_walk` shortcut over ~2,800 walks, zero mismatches). **One fix was cosmetic in production**: `reduce_depth`'s station-first closure did not forward `.knows`, so FIX 11b's behaviour never reached a real sweep and all three of its tests called the primitive directly — one of them blessing the stripped path. Six Low residues came with it. All seven are closed, fixture-first, one commit each: the closure forwards `.knows`; the grade tripwire now sees dict-subscript and `getattr` access and the `liquidity.py` exemption is gone; a zero hold is named on `scan.notes` rather than silently unbounded; the overlap guard moved into `greedy_basket` (the bare primitive packed 2,000 units out of a 1,000-unit ask); `[hauling] liquidity_window_days` wires the last unwired analytic parameter; the refused breakpoint carries a `rejected` flag; and candidate quantities within 1e-9 merge. **+360 lines, −74** across 14 code and test files. Gate after: **1,077 passed, 7 deselected**, ruff clean, selftest 12/12. | Two things this pass is a record of. **A test that calls the primitive is not a test of the path** — three tests, one deliberate, agreed on behaviour production never had. And **an exemption that protects nothing still costs something**: `liquidity.py` tripped zero offenders and its exemption blinded the tripwire in the module the next consumer would live in. With this the §23 code is done; **the owed live-validation checklist is unchanged and is the only thing between the tab and use.** |
 | D-35b | **§23 operator audit remediation, 2026-08-26.** Three findings were reproduced fixture-first and fixed: a blank or off-graph current system ranked with the pickup silently priced as zero; `max_wait_days` was exposed by the CLI but no user surface could select the maker exit which consumes it, and a programmatic maker scan left wait-refused breakpoints available to the mixed-cargo basket; PushX endpoints were resolved from each station's **region**, silently replacing an extra destination with that region's canonical hub. | The current system now fails the whole scan as `NO_ROUTE` until it is known; CLI and desk expose the exit model beside max wait; maker-liquidity failures are removed from the feasible breakpoint sequence and stop the monotonic search; PushX uses the plan's actual source/destination system and returns UNKNOWN if either is unresolved. Seven regression tests cover engine, basket, CLI, GUI and freight seams. Gate after: **1,084 passed, 7 deselected**, ruff clean, selftest 12/12. The live-validation checklist is unchanged: these are executable counterexamples and code corrections, not evidence from the game. |
 | D-36 | **JumpStarter control-set retrofit, 2026-09-04 (operator-directed: "apply the principles for subagents and agentic coding with claude and codex from the jumpstarter repo").** The audit (`jumpstart.py retrofit`) found 15 gaps of 25 checks: no agent roles, no allow-list, no bounded read, no implemented inventory, no evidence file behind the rules, no docs classification, no owner-goals record, no wishlist, seven root-level review prompts (1,505 lines) that `CLAUDE.md`'s own rule forbade, `CHANGELOG.md` at 2,047 lines with no bounded section, `plan.md` at 2,960 lines against a 1,200-line bound. | Added without rewriting what was there: `.claude/agents/` and `.codex/agents/` (tester, builder, reviewer, recon), `.claude/packets/`, `docs/AGENT_TEAM.md`, `docs/CODEX_NOTES.md`, `docs/INTERNALS.md` (sixteen entries recovered from this section and the changelog; three marked "Evidence not recovered"), `docs/README.md`, `WISHLIST.md`, `docs/decisions/0000-0001` (0001 is **OPEN**: the questionnaire was not asked). `CLAUDE.md` rewritten around a bounded read with every hard invariant's wording kept; `CHANGELOG.md` split into inventory + `Recent changes` + `docs/CHANGELOG_ARCHIVE_2026-08.md`; the review prompts moved to `docs/reviews/` unchanged; §11 D8 amended above. **Not done:** `plan.md` was not split — it is cited by § number everywhere and the split is the operator's decision; the ask-first list in `docs/AGENT_TEAM.md` is derived from §11 and awaits the operator's confirmation. No product code, formula, fixture or test changed; the gate on the unchanged code is **1,090 passed, 7 deselected, exit 0**, ruff clean, selftest 12/12. |
+| D-37 | **§23 H7 built in one push, 2026-09-04 (operator-directed: "go ahead and implement fixes for all of these", on the candidates of `docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md`).** Overrides the one-phase-per-session rule and the wishlist's promote-first rule the same way D-33 did; the promotion is §23.21, written in the same commit. Landed: persistence over stored generations and a persistent objective; the basket floor, binding-constraint score and one-trip packing; loop composition; the single-bid flag and two operator filters; pair-level refusal counts; a per-hub destination-share proxy; extra source stations; route losses from killmails. **Not done, and not authorized by this directive:** F10 and F11 (`TRIGGERED_LATER` in `WISHLIST.md`), and any WARM sweep of adjacent regions (§11 D3). | Every item is additive and fixture-first: 52 new tests across nine modules, and the pre-change `positioning.py`, `hauling.py` and `liquidity.py` were restored and the new tests watched to fail before the change was restored (the proof is in the commit message). No walk, fee, reachability, staleness or verdict rule changed; `book_summary` is untouched; the default objective is unchanged. Gate: **1,142 passed, 7 deselected, exit 0**, ruff clean, selftest 12/12. |
 
 ### §0 named checks — status after this build
 
@@ -2959,3 +2960,50 @@ these questions:
 evidence rather than on taste. **Park** if a live third-party site does the
 same job better — parking is a real, expected outcome, and it is cheaper than
 maintaining a worse copy of EVE Flipper.
+
+### §23.21 H7 — persistence, loops, the basket floor, filters, route losses (operator-authorized 2026-09-04)
+
+**Why this exists.** The 2026-09-04 analysis
+(`docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md`) reproduced the
+engine on two real five-hub generations 46.5 h apart and measured what the
+tab's own caveats had only asserted: **44.5%** of ranked plans survived to the
+next generation, the top-25's net re-priced to **36%**, quantity ≤ 5 plans
+survived at **33%** against **51%** for bulk, the greedy basket earned
+**42–66%** of the best single plan on the same capital while spreading twenty
+items over four hubs, and nothing composed the loops the data plainly held
+(Jita ↔ Dodixie 23.9 M in 57 min). The operator's authorization, recorded as
+§17 D-37, was *"go ahead and implement fixes for all of these"* — the
+wishlist candidates F2–F9 of that document, promoted in one push.
+
+**What landed (all additive; no walk, fee, reachability or staleness rule
+changed; `book_summary` untouched):**
+
+| item | module | contract |
+|---|---|---|
+| **Persistence** (F2) | `persistence.py`, `DepthLake.generations()` | For each ranked plan, its **own quantity** is re-walked on the last `persistence_generations` complete prior generations of both books; `survival_rate`, per-generation `net_ratios`, the `window` of sweep stamps and a **persistence-weighted ISK per active minute** attach to the row. Fewer than `persistence_min_generations` → `known=False`, the rate is UNKNOWN, and the new objective `persistent_isk_per_active_minute` counts the plan `PERSISTENCE_UNKNOWN` (unrankable, not rejected). The default objective is unchanged; the unweighted figure is always shown beside the weighted one |
+| **Basket floor and score** (F3) | `positioning.py`, `haulreport.haul_basket` | `greedy_basket(score="auto")` packs by ISK/m³ **and** by ISK/capital and keeps the higher net, naming which on `Basket.score`; `single_destination=True` packs **one trip** per destination and returns the best, counting cross-destination overlap; and **a basket never under-earns the best single plan the same caps admit** — when the heuristic does, that plan is shown as the basket with the note "the greedy under-earned…". `calc_version` → `haul-2` |
+| **Loops** (F4) | `loops.py`, `haulreport.haul_loops` | Every circuit of 2..3 distinct stations with a plan on each leg (best plan per ordered pair by net): minutes add (pickup charged once, later legs from where the last ended), capital is the **peak** outlay after each leg's proceeds, over-session circuits are counted not shown. Report, CLI render and the `loops` drawer pane |
+| **Single-bid flag, filters** (F5) | `hauling.py` | `dest_orders_consumed` and `single_bid_exit` on every plan (" · 1 bid" on the row); `HaulProfile.min_quantity` and `hide_badges`, default off, applied after ranking with every withheld plan counted on `HaulScan.withheld_by_filter` (`MIN_QUANTITY`, `BADGE_<X>`). CLI `--min-qty`, `--hide-below`; page controls "min qty" and "hide BELOW" |
+| **Pair-level counts** (F6) | `HaulScan.pair_rejection_counts` | Whole pairs that never priced a type (`OVER_TIME`, `OVER_JUMPS`, `NO_ROUTE`, `STALE_BOOK`, security), on the page stamp and the report, so a 30-minute session that drops every Jita ↔ Amarr pair says so |
+| **Destination-share proxy** (F7) | `liquidity.destination_share_for` | The flat prior is replaced, per hub and per type, by the reachable bid depth at the destination station over the region's whole resting bid volume — labelled `book_share_proxy` on the row, **still ASSUMED**, still replaced by recorded fills; a stale book, a missing row or a zero falls back to the prior and says `prior` |
+| **Extra sources** (F8) | `[hauling] extra_source_station_ids` | Stations to buy from beyond the hubs; separate from the destination list on purpose. The WARM sweep of adjacent regions is **not** done here — it is a §11 D3 cadence amendment and stays a plan-level decision |
+| **Route losses** (F9) | `routerisk.py`, `system_losses` table | Hull and hauler losses per route system over `route_risk_days` of **ingested** killmail days, reduced on the same ingest as `destruction`; hauler hulls resolved by market-group ancestry under `Ships` (`hauler_group_names`). A window with no ingested day is UNKNOWN, never zero. **A column, never a multiplier** |
+
+**Deliberately not done.** F10 (park `cross-region`) waits for H0. F11 (charge
+capital cost and hull risk into net) waits for checklist C: folding an
+unmeasured probability into a ranked number is the failure §23.14 exists to
+prevent. Neither is authorized by D-37.
+
+**Measured on the 2026-08-28 lake copy after the change** (same synthetic
+profile as the analysis): the one-trip auto-scored basket under-earned the
+best single plan and was floored to it; loops composed from the same plans;
+persistence measured against the one prior generation on disk. The full
+numbers are in `CURRENT_CHECKPOINT.md`'s 2026-09-04 H7 entry.
+
+**Owed before any of this is trusted** (added to the consolidated checklist):
+hourly generations from a running daemon so `persistence_min_generations` is
+reachable; one shadow week in which the persistence column is compared with
+the operator's own stale-miss diary; one loop flown end to end with its minutes
+and peak capital recorded; `killmails` backfilled so the route-loss column has
+a window. Gate stamp at handoff: `uv run pytest -q` → **1,142 passed, 7
+deselected, exit 0**, ruff clean, `selftest` 12/12.

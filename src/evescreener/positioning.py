@@ -132,6 +132,11 @@ class Basket:
     #: Plans dropped because they would have spent a book a sibling already
     #: spent. Counted rather than silently filtered.
     withheld_for_overlap: int = 0
+    #: Which greedy key packed it (§23.21): `isk_per_m3` when the hold binds,
+    #: `isk_per_capital` when the wallet does.
+    score: str = "isk_per_m3"
+    #: The one destination this basket is a trip to, when packed as one trip.
+    destination: int | None = None
 
     @property
     def cargo_utilisation_pct(self) -> float | None:
@@ -149,6 +154,8 @@ class Basket:
             "skipped": self.skipped,
             "notes": self.notes,
             "withheld_for_overlap": self.withheld_for_overlap,
+            "score": self.score,
+            "destination": self.destination,
         }
 
 
@@ -194,6 +201,12 @@ def non_overlapping(plans: Sequence, *, objective: str | None = None):
     return kept, withheld
 
 
+ISK_PER_M3 = "isk_per_m3"
+ISK_PER_CAPITAL = "isk_per_capital"
+AUTO = "auto"
+SCORES = (ISK_PER_M3, ISK_PER_CAPITAL, AUTO)
+
+
 def greedy_basket(
     plans: Sequence,
     *,
@@ -203,8 +216,10 @@ def greedy_basket(
     exposure_per_destination_isk: float | None = None,
     max_items: int = 20,
     objective: str | None = None,
+    score: str = ISK_PER_M3,
+    single_destination: bool = False,
 ) -> Basket:
-    """Fill the hold greedily by conservative profit per m³.
+    """Fill the hold greedily, by the constraint that actually binds.
 
     Every cap is re-checked **before each chunk**, not once at the end: a cap
     tested against the total is a cap that has already been exceeded on the way
@@ -215,34 +230,212 @@ def greedy_basket(
     Overlapping plans are withheld here, by `non_overlapping`, rather than by
     the caller: one book can only be spent once, and that is a property of
     packing, not of any one report.
+
+    **Two rules added by §23.21, from a measurement.** On two real generations
+    the greedy-by-ISK/m³ filled 250 M ISK with 1.8 m³ of formulas across four
+    hubs and earned 42–66% of the best single plan. So: `score="auto"` packs
+    by profit per ISK when the wallet binds and per m³ when the hold does (it
+    runs both and keeps the higher net, and says which); `single_destination`
+    packs one trip, to the destination whose basket nets most; and whatever
+    the heuristic does, **a basket never under-earns the best single plan the
+    same caps would admit** — if it would, that plan is shown instead, with a
+    note saying the heuristic lost.
     """
-    basket = Basket(cargo_m3=float(cargo_m3), method=HEURISTIC)
-    basket.notes.append(
-        "HEURISTIC: greedy over marginal chunks by profit per m³, not an optimum. "
-        "Shown beside the best single-item plan, never instead of it."
+    if score not in SCORES:
+        raise ValueError(f"unknown basket score {score!r}; known: {SCORES}")
+    caps = dict(
+        capital_isk=float(capital_isk),
+        cargo_m3=float(cargo_m3),
+        exposure_per_trade_isk=exposure_per_trade_isk,
+        exposure_per_destination_isk=exposure_per_destination_isk,
+        max_items=max_items,
     )
-    plans, basket.withheld_for_overlap = non_overlapping(plans, objective=objective)
-    if basket.withheld_for_overlap:
-        basket.notes.append(
-            f"{basket.withheld_for_overlap} plan(s) withheld for depth overlap: they share a "
-            "source or a destination book with a plan already in the basket, and one book can "
-            "only be spent once. The scan still ranks them as alternatives."
+    if single_destination:
+        destinations = sorted({plan.destination.station_id for plan in plans}, key=str)
+        candidates = [
+            _basket(
+                [plan for plan in plans if plan.destination.station_id == destination],
+                objective=objective,
+                score=score,
+                destination=destination,
+                **caps,
+            )
+            for destination in destinations
+        ] or [_basket([], objective=objective, score=score, destination=None, **caps)]
+        candidates.sort(key=lambda basket: -basket.net_isk)
+        chosen = candidates[0]
+        # Plans to OTHER destinations that spend a book this trip spends are
+        # alternatives, not additions — the same rule `non_overlapping` applies
+        # inside one basket, stated across baskets so it stays visible.
+        packed = {item.type_id for item in chosen.items}
+        sources = {
+            (plan.type_id, plan.source.station_id)
+            for plan in plans
+            if plan.destination.station_id == chosen.destination and plan.type_id in packed
+        }
+        overlapping = sum(
+            1
+            for plan in plans
+            if plan.destination.station_id != chosen.destination
+            and (plan.type_id, plan.source.station_id) in sources
         )
+        if overlapping:
+            chosen.withheld_for_overlap += overlapping
+            chosen.notes.append(
+                f"{overlapping} plan(s) to other destinations withheld for depth overlap: "
+                "they spend a source book this trip already spends. The scan still ranks "
+                "them as alternatives."
+            )
+        if len(candidates) > 1:
+            others = ", ".join(
+                f"{basket.destination}: {basket.net_isk:,.0f}" for basket in candidates[1:]
+            )
+            chosen.notes.append(
+                f"one trip: packed for destination {chosen.destination}; the other "
+                f"destination basket(s) netted less ({others})"
+            )
+        elif chosen.destination is not None:
+            chosen.notes.append(f"one trip: packed for destination {chosen.destination}")
+        return chosen
+    return _basket(plans, objective=objective, score=score, destination=None, **caps)
+
+
+def _basket(plans, *, objective, score, destination, **caps) -> Basket:
+    """One packing, floored at the best single plan the caps admit."""
+    cargo_m3 = caps["cargo_m3"]
+    basket = Basket(cargo_m3=cargo_m3, method=HEURISTIC, destination=destination)
+    plans, withheld = non_overlapping(plans, objective=objective)
     available: list[list[Chunk]] = []
+    skipped: list[str] = []
     for index, plan in enumerate(plans):
         chunks = marginal_chunks(plan, index)
         if not chunks:
             continue
         if chunks[0].volume_m3 is None:
-            basket.skipped.append(
+            skipped.append(
                 f"{plan.type_name or plan.type_id}: packaged volume UNKNOWN, so it cannot be packed"
             )
             continue
         available.append(chunks)
 
+    if score == AUTO:
+        by_volume = _pack([list(chunks) for chunks in available], score=ISK_PER_M3, **caps)
+        by_capital = _pack([list(chunks) for chunks in available], score=ISK_PER_CAPITAL, **caps)
+        packed, chosen_score = (
+            (by_capital, ISK_PER_CAPITAL)
+            if by_capital[1] > by_volume[1] + 1e-9
+            else (by_volume, ISK_PER_M3)
+        )
+    else:
+        packed, chosen_score = _pack(available, score=score, **caps), score
+    taken, net, capital, volume = packed
+    basket.score = chosen_score
+    basket.notes.append(
+        f"HEURISTIC: greedy over marginal chunks by {chosen_score.replace('_', ' ')}, not an "
+        "optimum. Shown beside the best single-item plan, never instead of it."
+        + (
+            " Scored by the binding constraint: both keys were packed and the higher net kept."
+            if score == AUTO
+            else ""
+        )
+    )
+    basket.withheld_for_overlap = withheld
+    if withheld:
+        basket.notes.append(
+            f"{withheld} plan(s) withheld for depth overlap: they share a "
+            "source or a destination book with a plan already in the basket, and one book can "
+            "only be spent once. The scan still ranks them as alternatives."
+        )
+    basket.skipped.extend(skipped)
+    basket.capital_isk, basket.net_isk, basket.volume_m3 = capital, net, volume
+    for chunks in taken.values():
+        first = chunks[0]
+        basket.items.append(
+            BasketItem(
+                type_id=first.type_id,
+                type_name=first.type_name,
+                quantity=sum(chunk.quantity for chunk in chunks),
+                capital_isk=sum(chunk.capital_isk for chunk in chunks),
+                net_isk=sum(chunk.net_isk for chunk in chunks),
+                volume_m3=sum(chunk.volume_m3 or 0.0 for chunk in chunks),
+                destination=first.destination,
+            )
+        )
+    basket.items.sort(key=lambda item: -item.net_isk)
+
+    # **The floor.** The best single plan the same caps admit, taken whole.
+    floor = _best_single(plans, **caps)
+    if floor is not None and floor.net_profit > basket.net_isk + 1e-9:
+        basket.notes.append(
+            f"the greedy under-earned the best single plan ({basket.net_isk:,.0f} vs "
+            f"{floor.net_profit:,.0f} ISK for {floor.type_name or floor.type_id}); "
+            "showing that plan instead"
+        )
+        basket.items = [
+            BasketItem(
+                type_id=floor.type_id,
+                type_name=floor.type_name,
+                quantity=floor.quantity,
+                capital_isk=floor.source_cost,
+                net_isk=floor.net_profit,
+                volume_m3=floor.cargo_m3 or 0.0,
+                destination=floor.destination.station_id,
+            )
+        ]
+        basket.capital_isk = floor.source_cost
+        basket.net_isk = floor.net_profit
+        basket.volume_m3 = floor.cargo_m3 or 0.0
+    if not basket.items:
+        basket.notes.append(
+            "Nothing fits: every priced chunk is over a cap, or none has a "
+            "measurable volume. That is an answer."
+        )
+    return basket
+
+
+def _best_single(
+    plans,
+    *,
+    capital_isk,
+    cargo_m3,
+    exposure_per_trade_isk,
+    exposure_per_destination_isk,
+    **_ignored,
+):
+    """The single plan with the highest net that every cap admits whole."""
+    best = None
+    for plan in plans:
+        if plan.cargo_m3 is None:
+            continue
+        if plan.source_cost > capital_isk + 1e-9 or plan.cargo_m3 > cargo_m3 + 1e-9:
+            continue
+        if exposure_per_trade_isk is not None and plan.source_cost > exposure_per_trade_isk + 1e-9:
+            continue
+        if (
+            exposure_per_destination_isk is not None
+            and plan.source_cost > exposure_per_destination_isk + 1e-9
+        ):
+            continue
+        if best is None or plan.net_profit > best.net_profit:
+            best = plan
+    return best
+
+
+def _pack(
+    available: list[list[Chunk]],
+    *,
+    score: str,
+    capital_isk: float,
+    cargo_m3: float,
+    exposure_per_trade_isk,
+    exposure_per_destination_isk,
+    max_items: int,
+) -> tuple[dict[int, list[Chunk]], float, float, float]:
+    """The greedy itself. Returns `(taken, net, capital, volume)`."""
     taken: dict[int, list[Chunk]] = {}
     per_destination: dict[int, float] = {}
     per_plan_capital: dict[int, float] = {}
+    net = capital = volume = 0.0
     while len(taken) < max_items:
         best: tuple[float, int] | None = None
         for position, chunks in enumerate(available):
@@ -251,9 +444,9 @@ def greedy_basket(
             chunk = chunks[0]
             if chunk.volume_m3 is None:
                 continue
-            if basket.volume_m3 + chunk.volume_m3 > cargo_m3 + 1e-9:
+            if volume + chunk.volume_m3 > cargo_m3 + 1e-9:
                 continue
-            if basket.capital_isk + chunk.capital_isk > capital_isk + 1e-9:
+            if capital + chunk.capital_isk > capital_isk + 1e-9:
                 continue
             spent = per_plan_capital.get(chunk.plan_index, 0.0) + chunk.capital_isk
             if exposure_per_trade_isk is not None and spent > exposure_per_trade_isk + 1e-9:
@@ -269,19 +462,23 @@ def greedy_basket(
                 and destination_spent > exposure_per_destination_isk + 1e-9
             ):
                 continue
-            score = chunk.profit_per_m3
-            if score is None or score <= 0:
+            value = (
+                chunk.profit_per_m3
+                if score == ISK_PER_M3
+                else (chunk.net_isk / chunk.capital_isk if chunk.capital_isk > 0 else None)
+            )
+            if value is None or value <= 0:
                 continue
-            if best is None or score > best[0]:
-                best = (score, position)
+            if best is None or value > best[0]:
+                best = (value, position)
         if best is None:
             break
-        _score, position = best
+        _value, position = best
         chunk = available[position].pop(0)
         taken.setdefault(chunk.plan_index, []).append(chunk)
-        basket.capital_isk += chunk.capital_isk
-        basket.net_isk += chunk.net_isk
-        basket.volume_m3 += chunk.volume_m3 or 0.0
+        capital += chunk.capital_isk
+        net += chunk.net_isk
+        volume += chunk.volume_m3 or 0.0
         per_plan_capital[chunk.plan_index] = (
             per_plan_capital.get(chunk.plan_index, 0.0) + chunk.capital_isk
         )
@@ -289,27 +486,7 @@ def greedy_basket(
             per_destination[chunk.destination] = (
                 per_destination.get(chunk.destination, 0.0) + chunk.capital_isk
             )
-
-    for chunks in taken.values():
-        first = chunks[0]
-        basket.items.append(
-            BasketItem(
-                type_id=first.type_id,
-                type_name=first.type_name,
-                quantity=sum(chunk.quantity for chunk in chunks),
-                capital_isk=sum(chunk.capital_isk for chunk in chunks),
-                net_isk=sum(chunk.net_isk for chunk in chunks),
-                volume_m3=sum(chunk.volume_m3 or 0.0 for chunk in chunks),
-                destination=first.destination,
-            )
-        )
-    basket.items.sort(key=lambda item: -item.net_isk)
-    if not basket.items:
-        basket.notes.append(
-            "Nothing fits: every priced chunk is over a cap, or none has a "
-            "measurable volume. That is an answer."
-        )
-    return basket
+    return taken, net, capital, volume
 
 
 def render_basket(basket: Basket) -> str:

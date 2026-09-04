@@ -250,8 +250,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     haul_scan.add_argument(
         "--objective",
-        choices=("isk_per_active_minute", "net_profit", "net_roi", "isk_per_m3"),
-        help="what 'best' means for this run (default: config)",
+        choices=(  # authority: hauling.OBJECTIVES
+            "isk_per_active_minute",
+            "net_profit",
+            "net_roi",
+            "isk_per_m3",
+            "persistent_isk_per_active_minute",
+        ),
+        help="what 'best' means for this run (default: config). persistent_* weights "
+        "ISK/min by survival across stored prior generations and is UNKNOWN until "
+        "enough sweeps exist",
+    )
+    haul_scan.add_argument(
+        "--min-qty",
+        type=float,
+        help="withhold plans smaller than this many units (counted, never rejected)",
+    )
+    haul_scan.add_argument(
+        "--hide-below",
+        action="store_true",
+        help="withhold BELOW-badged items (under 100 units/day); counted, never rejected",
     )
     haul_scan.add_argument("--top", type=int, default=15, help="rows to print (default: 15)")
     haul_scan.add_argument(
@@ -1316,6 +1334,10 @@ def _cmd_haul(config: Config, args) -> int:
             value = getattr(args, flag, None)
             if value is not None:
                 overrides[key] = value
+        if getattr(args, "min_qty", None) is not None:
+            overrides["min_quantity"] = float(args.min_qty)
+        if getattr(args, "hide_below", False):
+            overrides["hide_badges"] = ("BELOW",)
         overrides = {key: value for key, value in overrides.items() if value is not None}
 
         try:
@@ -1323,6 +1345,10 @@ def _cmd_haul(config: Config, args) -> int:
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+
+        from .persistence import persistence_attachment
+        from .routerisk import route_risk_attachment
+        from .store.lake import DepthLake
 
         sources, destinations, depths, graph, names, badges, packaged = scan_inputs(config, db)
         liquidity = liquidity_attachment(config, db, depths, profile)
@@ -1338,6 +1364,13 @@ def _cmd_haul(config: Config, args) -> int:
             badges=badges,
             packaged_volume=packaged,
             liquidity=liquidity,
+            persistence=persistence_attachment(
+                config,
+                depths,
+                lake=DepthLake(config.paths),
+                stations=[*sources, *destinations],
+            ),
+            route_risk=route_risk_attachment(config, db),
         )
         if args.freight:
             # A third-party quote is asked for deliberately, never on every

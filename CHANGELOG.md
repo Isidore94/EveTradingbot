@@ -35,9 +35,11 @@ where the code and this list disagree, the code is the fact — fix the list.
   telemetry, SDE tables (types, market groups, systems with `security_status`,
   `sde_stargates`, `sde_npc_stations`), universe, watchlist, anchors, feed
   health, freight quotes, destruction, `history_missing`, `haul_profiles`,
-  `haul_ledger`, `meta`. Migrated by additive `ALTER TABLE`, never rebuilt —
-  it holds the paper ledger and the watchlist. The trap: **`state.db` is not
-  regenerable.**
+  `route_cache`, `meta`. *(Corrected 2026-09-04: this line listed a
+  `haul_ledger` table; none exists — the paper-haul ledger is the JSONL stream
+  `data/streams/paper_hauls.jsonl`, `paths.paper_hauls`.)* Migrated by additive
+  `ALTER TABLE`, never rebuilt — it holds the paper ledger and the watchlist.
+  The trap: **`state.db` is not regenerable.**
 - **`store/lake.py`** — Parquet lake, atomic writes, diff-append.
 - **`sde.py`** — types, marketGroups, mapSolarSystems, stargates and NPC
   stations from CCP's per-build jsonl bundle. `load_sde`'s same-build no-op

@@ -21,6 +21,7 @@ this block is stale.**
 | Artifact state | Runs from source in the main checkout (`python -m evescreener …`, `launch_gui.py`); no build step. No desk or daemon process was found running on 2026-09-04 |
 | Restart owed | **No** — the retrofit changed control files only. The lake needs `sweep-books --secondary` before the HAULING tab has depth to price (2026-08-26 report), which is an operator run |
 | Control-set check | `python ../JumpStarter/tools/jumpstart.py check .` → red on **one** line: `plan.md` 2,961 lines vs 1,200 bound. Splitting it is the operator's decision (`docs/README.md`) |
+| Latest analysis | `docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md` — docs only, no product code changed, baseline **not re-measured** (last measured earlier on 2026-09-04, above). Lake on disk: depth/books newest **2026-08-28 21:18 UTC**, bars Forge-only to **2026-08-19**, `haul_profiles` 0 rows, no daemon running |
 
 Rules for this block: numbers, not adjectives; the **process** exit code, not
 a piped tail's; if a number was not measured this handoff, say so and say when
@@ -42,6 +43,37 @@ the active-item text below. Newest additions, 2026-09-04:
 
 A gate is closed by striking its row through and writing what was observed —
 never by deleting the row.
+
+---
+
+### 2026-09-04 (later) — Deep analysis of the trading and hauling instruments; docs only
+
+**Branch `docs/hauling-scanner-plan`, uncommitted at the time of writing.** The
+operator asked for an analysis of the bot's ability to trade the market and find
+hauling/arbitrage opportunities, and for ways to optimise for that. Delivered as
+`docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md`; the candidates it produces
+are in `WISHLIST.md` as `CANDIDATE` / `TRIGGERED_LATER` and nothing was implemented.
+
+**Measured on copies of the lake (no ESI call, nothing written under `./data/`):** the
+hauling engine run against the 2026-08-26 and 2026-08-28 five-hub generations with a
+synthetic 60,000 m³ / 250 M ISK / 120-minute Jita profile prices ~142,000 breakpoints
+over 20 pairs in **11.4 s** and ranks **831 / 961** positive plans; **44.5%** of the
+08-26 plans are still plans 46.5 h later, the 08-26 top-25's net re-prices to **36%**
+on the 08-28 books, quantity ≤ 5 plans survive at 33% vs 51%, and the greedy basket
+earns 42–66% of the best single plan on the same capital. Detail and procedure in the
+document.
+
+**State facts recorded:** depth and books newest 2026-08-28 (every scan today is
+`STALE_BOOK`); bars are Forge-only and end 2026-08-19; no destination bars
+(`ingest-history --scope hauling` never run); `haul_profiles` empty, so the stored
+depth is capital-bounded only; no `paper_hauls.jsonl`; no daemon process.
+
+**Doc defect fixed:** `CHANGELOG.md` inventory listed a `haul_ledger` table that does
+not exist; the ledger is `data/streams/paper_hauls.jsonl`.
+
+**Gates:** none closed, none added. The checklist B scan wall-clock (11.4 s, on a copy,
+one synthetic profile) is recorded here for the operator to confirm on the real lake
+with a real profile; the row stays open. Restart owed: **no**.
 
 ---
 

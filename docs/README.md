@@ -87,6 +87,7 @@ load one as context.
 | [`reviews/2026-08-20-OPUS_NEXT_TRACK_PROMPT.md`](reviews/2026-08-20-OPUS_NEXT_TRACK_PROMPT.md) | The Opus continuation prompt at `73a058a`; historical — the §23 track it anticipates was later built under D-33 |
 | [`reviews/2026-08-25-FABLE_REVIEW_PROMPT_S23.md`](reviews/2026-08-25-FABLE_REVIEW_PROMPT_S23.md) | Fable's review prompt for §23 H1–H4; produced the twelve defects of §17 D-35 |
 | [`reviews/2026-08-26-FABLE_REVIEW_PROMPT_S23R.md`](reviews/2026-08-26-FABLE_REVIEW_PROMPT_S23R.md) | Fable's review prompt for the §23 remediation; produced §17 D-35a |
+| [`reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md`](reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md) | Deep analysis of the trading and hauling instruments at `90a3906`: lake state, two reproduced scans on lake copies (2026-08-26 and 2026-08-28 generations), the first plan-persistence measurement, the basket and loop findings, and eleven candidates recorded in `WISHLIST.md` |
 
 The seven review prompts lived at the repo root until 2026-09-04 and were moved here
 unchanged (`git mv`); their content is exactly as pasted into the reviewing sessions.

@@ -10,3 +10,16 @@ uv.lock.bak
 
 # Operator-local runtime output (census/daemon console captures)
 logs/
+
+# --- JumpStarter: agent control files ---------------------------------------
+# Track the agent definitions; keep the rest of .claude/ machine-local.
+# The order matters: the un-ignore lines must come after the ignore line.
+/.claude/*
+!/.claude/agents/
+# Codex role definitions are project control files. Other .codex configuration remains
+# project-owned rather than being treated as machine-local by JumpStarter.
+!/.codex/agents/
+# Build packets are tracked: a packet is the record of what was authorized, and
+# reviews cite it.
+!/.claude/packets/
+# --- end JumpStarter ---------------------------------------------------------

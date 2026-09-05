@@ -18,8 +18,8 @@ this block is stale.**
 | Also in flight | `docs/hauling-scanner-plan` carries `6fd8117` (the analysis) ahead of `main`; nothing else |
 | Active item | plan.md **§23.21 H7** (persistence, loops, basket floor, filters, pair counts, share proxy, extra sources, route losses): **code done, nothing `LIVE_VALIDATED`** (§17 D-37). Next: the reviewer runs the branch against a lake copy, then the operator works the checklist below — not more code |
 | Last verified baseline | `uv run pytest -q` → **1,142 passed, 7 deselected in 45.57 s, process exit 0** (2026-09-04, on `claude/hauling-h7-persistence-loops` at its head; re-measured before the handoff commit, docs-only changes after) · `uv run ruff check . && uv run ruff format --check .` **clean** · `python -m evescreener selftest` **12/12** |
-| Artifact state | Runs from source in the main checkout (`python -m evescreener …`, `launch_gui.py`); no build step. No desk or daemon process was found running on 2026-09-04 |
-| Restart owed | **No** — no desk or daemon is running. The lake still needs `sweep-books --secondary` (hourly, from a running `daemon`) before the HAULING tab has depth to price and before `persistence_min_generations` is reachable; both are operator runs |
+| Artifact state | Runs from source in the main checkout (`python -m evescreener …`, `launch_gui.py`); no build step. **The daemon is RUNNING** since 2026-09-04T23:58Z (operator's word: "you run the daemon"), detached (`uv` pid 8244, hidden window, `logs/daemon.out` / `logs/daemon.err`), **from the main checkout on `claude/hauling-h7-persistence-loops`** — do not switch that checkout's branch while it runs. First five-hub sweep complete at 00:01:30Z: 911 requests, all 200, 10,280 tokens left |
+| Restart owed | **Yes, once, after `haul profile add`** — `depth_bound()` was read at daemon start with zero ship profiles, so every generation it writes is capital-bounded only until it is restarted with a profile on file. Not before the operator says so |
 | Control-set check | `python ../JumpStarter/tools/jumpstart.py check .` → red on **one** line: `plan.md` 2,961 lines vs 1,200 bound. Splitting it is the operator's decision (`docs/README.md`) |
 | Latest analysis | `docs/reviews/2026-09-04-HAULING_ARBITRAGE_ANALYSIS.md` — docs only, no product code changed, baseline **not re-measured** (last measured earlier on 2026-09-04, above). Lake on disk: depth/books newest **2026-08-28 21:18 UTC**, bars Forge-only to **2026-08-19**, `haul_profiles` 0 rows, no daemon running |
 
@@ -41,12 +41,49 @@ the active-item text below. Newest additions, 2026-09-04:
 | 3 | The operator decides whether `plan.md` is split (completed tracks archived under `docs/` keeping their § numbers) or left whole with the bounded read as the mitigation | the 2026-09-04 entry below |
 | 4 | The first packet run through `tester → builder → reviewer` records in this file whether the handoff formats crossed between Claude Code and Codex | `docs/AGENT_TEAM.md` |
 | 5 | **H7 review by reproduction** on a lake copy before `claude/hauling-h7-persistence-loops` merges: re-derive the basket floor and the loop arithmetic on the 2026-08-28 generation, revert `positioning.py` to prove `test_positioning_floor` fails | the 2026-09-04 H7 entry below |
-| 6 | **Hourly generations exist** (a running `daemon`), then one shadow week comparing the `persist` column with the operator's own stale-miss diary; the two must agree or the diary wins | plan.md §23.21 |
+| 6 | ~~Hourly generations exist (a running `daemon`)~~ **daemon started 2026-09-04T23:58Z, first generation on disk 00:01Z** — then one shadow week comparing the `persist` column with the operator's own stale-miss diary; the two must agree or the diary wins | plan.md §23.21 |
+| 9 | **Depth retention.** Measured 2026-09-05: one five-hub generation is **606,643 rows / 20.99 MB** on disk (Forge 315,886 rows / 10.38 MB). Hourly plus the 15:00–17:00 five-minute HOT window is roughly **0.75 GB a day** and nothing prunes it. The operator sets a retention window (plan.md §23.19 asked for this number); until then watch `data/depth/` | the 2026-09-05 entry below |
 | 7 | **One loop flown end to end** as the tab composed it, with the minutes and the peak capital recorded against the row | plan.md §23.21 |
 | 8 | `killmails` backfilled so the route-loss window has ingested days; one route's count compared with zKillboard for the same systems and days | plan.md §23.21 |
 
 A gate is closed by striking its row through and writing what was observed —
 never by deleting the row.
+
+---
+
+### 2026-09-05 — the daemon is running; first fresh five-hub generation; the H7 tab priced on it
+
+**Operator's word:** "you run the daemon". Started 2026-09-04T23:58:06Z as a
+detached hidden process (`uv run python -m evescreener daemon`, `uv` pid 8244,
+two Python children) from the main checkout on `claude/hauling-h7-persistence-loops`,
+stdout/stderr to `logs/daemon.out` / `logs/daemon.err` (gitignored). This is the
+one exception to "no agent runs an ESI-fetching subcommand": the operator asked
+for it by name, and the daemon's own scheduler owns `Expires`.
+
+**First sweep, measured from `sweep_ledger` and the lake.** 911 order-page
+requests between 23:58:08Z and 00:01:30Z, **all HTTP 200, zero 4xx, no 304**
+(no ETags existed for a week-old lake), tokens remaining bottomed at **10,280 of
+12,000**. Depth partitions for all five regions were on disk by 00:01:41Z: **Forge
+315,886 rows / 10.38 MB, Domain 127,856 / 4.51 MB, Sinq Laison 78,319 / 2.86 MB,
+Metropolis 46,658 / 1.79 MB, Heimatar 37,924 / 1.45 MB — 606,643 rows / 20.99 MB
+per five-hub generation.** `daemon.err` is empty. Ship profiles on file at start:
+**0**, so the depth bound is capital-only (see the block: one restart owed after
+`haul profile add`).
+
+**The tab on the fresh lake** (a copy of `data/` under the scratchpad, `haul scan
+--from Jita --cargo 60000 --capital 250000000 --minutes 120 --min-qty 10 --no-write`,
+generations 1–4 min old): 143,009 candidates priced, 184,895 rejected
+(MARGINAL_NET_NEGATIVE 89,239; DEST_DEPTH_SHORT 33,508; OVER_EXPOSURE 28,340 at
+the 25% default cap), **674 plans withheld by the operator's `--min-qty 10`**, 12
+shown; top row Compressed Veldspar Dodixie → Jita, 5,044,133 units, 10.45 M net
+(22.47%) at 294 k ISK/min, flagged `1 bid`; best loop Jita → Dodixie → Jita 13.52 M
+in 44 min. Every `persist` cell reads `2 gen?` — two prior generations against a
+minimum of three — and every `losses` cell UNKNOWN (no killmail day ingested).
+Both are the honest state, and the next hourly sweep makes persistence
+measurable.
+
+**Gate 6 half-closed** (generations now exist; the shadow week is still owed).
+**Gate 9 added**: retention. Nothing else changed; no code, no test.
 
 ---
 
